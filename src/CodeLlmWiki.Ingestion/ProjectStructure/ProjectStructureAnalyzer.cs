@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using System.Text.Json;
+using System.Diagnostics;
 using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
 using Microsoft.Build.Construction;
@@ -108,6 +109,27 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     triples.Add(new SemanticTriple(new EntityNode(solutionId), CorePredicates.Contains, new EntityNode(projectId)));
                 }
             }
+        }
+
+        var solutionMemberPaths = BuildSolutionMemberPathSet(fullRepositoryPath, solutionProjectMap);
+        var gitTrackedFiles = DiscoverGitTrackedHeadFiles(fullRepositoryPath, diagnostics);
+
+        foreach (var relativeFilePath in gitTrackedFiles.OrderBy(x => x, StringComparer.Ordinal))
+        {
+            var fileId = _stableIdGenerator.Create(new EntityKey("file", relativeFilePath));
+            AddEntityTriples(
+                triples,
+                fileId,
+                "file",
+                Path.GetFileName(relativeFilePath),
+                relativeFilePath);
+
+            triples.Add(new SemanticTriple(new EntityNode(fileId), CorePredicates.FileKind, new LiteralNode(ClassifyFile(relativeFilePath))));
+            triples.Add(new SemanticTriple(
+                new EntityNode(fileId),
+                CorePredicates.IsSolutionMember,
+                new LiteralNode(IsSolutionMember(relativeFilePath, solutionMemberPaths).ToString().ToLowerInvariant())));
+            triples.Add(new SemanticTriple(new EntityNode(repositoryId), CorePredicates.Contains, new EntityNode(fileId)));
         }
 
         return Task.FromResult(new ProjectStructureAnalysisResult(repositoryId, triples, diagnostics));
@@ -330,7 +352,142 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         return relative;
     }
 
+    private static HashSet<string> BuildSolutionMemberPathSet(
+        string repositoryRoot,
+        Dictionary<string, HashSet<string>> solutionProjectMap)
+    {
+        var members = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var pair in solutionProjectMap)
+        {
+            var relativeSolutionPath = ToRelativePath(repositoryRoot, pair.Key);
+            if (!relativeSolutionPath.StartsWith("../", StringComparison.Ordinal))
+            {
+                members.Add(relativeSolutionPath);
+            }
+
+            foreach (var projectPath in pair.Value)
+            {
+                var relativeProjectPath = ToRelativePath(repositoryRoot, projectPath);
+                if (relativeProjectPath.StartsWith("../", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                members.Add(relativeProjectPath);
+
+                var directory = Path.GetDirectoryName(relativeProjectPath)?.Replace('\\', '/');
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    members.Add($"{directory.TrimEnd('/')}/");
+                }
+            }
+        }
+
+        return members;
+    }
+
+    private static HashSet<string> DiscoverGitTrackedHeadFiles(string repositoryRoot, List<IngestionDiagnostic> diagnostics)
+    {
+        var filesFromHead = RunGitWithNulDelimitedOutput(repositoryRoot, "ls-tree", "-r", "--name-only", "-z", "HEAD");
+        if (filesFromHead.ExitCode == 0 && filesFromHead.Entries.Count > 0)
+        {
+            return filesFromHead.Entries;
+        }
+
+        diagnostics.Add(new IngestionDiagnostic(
+            "file:head:not-available",
+            "HEAD file listing unavailable, falling back to git index listing."));
+
+        var filesFromIndex = RunGitWithNulDelimitedOutput(repositoryRoot, "ls-files", "-z");
+        if (filesFromIndex.ExitCode == 0)
+        {
+            return filesFromIndex.Entries;
+        }
+
+        diagnostics.Add(new IngestionDiagnostic(
+            "file:git:failed",
+            $"Failed to list git-tracked files: {filesFromIndex.Error}"));
+
+        return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static GitCommandResult RunGitWithNulDelimitedOutput(string repositoryRoot, params string[] args)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = repositoryRoot,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+
+        foreach (var arg in args)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        using var process = Process.Start(startInfo)!;
+        using var outputStream = new MemoryStream();
+        process.StandardOutput.BaseStream.CopyTo(outputStream);
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        var entries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var bytes = outputStream.ToArray();
+        var start = 0;
+        for (var i = 0; i < bytes.Length; i++)
+        {
+            if (bytes[i] != 0)
+            {
+                continue;
+            }
+
+            if (i > start)
+            {
+                var value = System.Text.Encoding.UTF8.GetString(bytes, start, i - start).Replace('\\', '/');
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    entries.Add(value);
+                }
+            }
+
+            start = i + 1;
+        }
+
+        return new GitCommandResult(process.ExitCode, entries, error);
+    }
+
+    private static string ClassifyFile(string relativePath)
+    {
+        var extension = Path.GetExtension(relativePath).ToLowerInvariant();
+        return extension switch
+        {
+            ".cs" => "dotnet-source",
+            ".sln" or ".slnx" => "solution",
+            ".csproj" => "project",
+            ".props" or ".targets" => "msbuild",
+            ".md" => "documentation",
+            ".json" or ".yaml" or ".yml" => "configuration",
+            _ => "other",
+        };
+    }
+
+    private static bool IsSolutionMember(string relativeFilePath, HashSet<string> solutionMemberPaths)
+    {
+        if (solutionMemberPaths.Contains(relativeFilePath))
+        {
+            return true;
+        }
+
+        return solutionMemberPaths.Any(entry =>
+            entry.EndsWith("/", StringComparison.Ordinal) &&
+            relativeFilePath.StartsWith(entry, StringComparison.OrdinalIgnoreCase));
+    }
+
     private sealed record ProjectDiscoveryResult(string Name, string Method, IReadOnlyList<PackageReferenceInfo> DeclaredPackages);
 
     private sealed record PackageReferenceInfo(string PackageId, string? DeclaredVersion);
+
+    private sealed record GitCommandResult(int ExitCode, HashSet<string> Entries, string Error);
 }
