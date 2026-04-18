@@ -215,12 +215,24 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 declarations.Namespaces,
                 declarations.Types,
                 declarations.Methods.Declarations));
+        var methodBodyDependencyUsageByPackageId = new MethodBodyDependencyUsageProjector().Project(
+            new MethodBodyDependencyUsageProjectionRequest(
+                _triples,
+                projects,
+                packages,
+                files,
+                declarations.Namespaces,
+                declarations.Types,
+                declarations.Methods.Declarations));
         packages = packages
             .Select(package => package with
             {
                 DeclarationDependencyUsage = declarationDependencyUsageByPackageId.TryGetValue(package.Id, out var usage)
                     ? usage
                     : PackageDeclarationDependencyUsageCatalog.Empty,
+                MethodBodyDependencyUsage = methodBodyDependencyUsageByPackageId.TryGetValue(package.Id, out var methodBodyUsage)
+                    ? methodBodyUsage
+                    : PackageMethodBodyDependencyUsageCatalog.Empty,
             })
             .ToArray();
 
