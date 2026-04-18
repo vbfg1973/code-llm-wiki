@@ -41,7 +41,7 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
                 var query = new ProjectStructureQueryService(request.RunResult.Triples);
                 var model = query.GetModel(request.RunResult.RepositoryId);
                 var renderer = new ProjectStructureWikiRenderer();
-                var pages = renderer.Render(model)
+                var pages = renderer.Render(model, request.MaxMergeEntriesPerFile)
                     .OrderBy(x => x.RelativePath, StringComparer.Ordinal)
                     .ToArray();
 

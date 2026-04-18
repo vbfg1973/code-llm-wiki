@@ -4,5 +4,5 @@ namespace CodeLlmWiki.Wiki.ProjectStructure;
 
 public interface IProjectStructureWikiRenderer
 {
-    IReadOnlyList<WikiPage> Render(ProjectStructureWikiModel model);
+    IReadOnlyList<WikiPage> Render(ProjectStructureWikiModel model, int? maxMergeEntriesPerFile = null);
 }

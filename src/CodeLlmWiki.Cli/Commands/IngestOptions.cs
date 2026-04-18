@@ -19,4 +19,7 @@ public sealed class IngestOptions
 
     [Option('a', "allow-partial-success", Required = false, HelpText = "Overrides partial-success exit policy.")]
     public string? AllowPartialSuccess { get; init; }
+
+    [Option('m', "max-merge-entries-per-file", Required = false, HelpText = "Caps merge-to-mainline entries per file in wiki output.")]
+    public int? MaxMergeEntriesPerFile { get; init; }
 }

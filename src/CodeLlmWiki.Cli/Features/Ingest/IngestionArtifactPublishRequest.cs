@@ -7,4 +7,5 @@ public sealed record IngestionArtifactPublishRequest(
     string OutputRootPath,
     DateTimeOffset StartedAtUtc,
     DateTimeOffset CompletedAtUtc,
-    IngestionRunResult RunResult);
+    IngestionRunResult RunResult,
+    int? MaxMergeEntriesPerFile = null);

@@ -86,6 +86,35 @@ public sealed class CliApplicationTests
         Assert.Equal("./from-option", publisher.LastRequest!.OutputRootPath);
     }
 
+    [Fact]
+    public async Task RunAsync_PassesMaxMergeEntriesPerFileFromConfigAndOption()
+    {
+        var configPath = WriteTempFile(
+            """
+            {
+              "ontologyPath": "./ontology/ontology.v1.yaml",
+              "max_merge_entries_per_file": 7
+            }
+            """);
+
+        var runner = new CapturingRunner();
+        var publisher = new CapturingPublisher();
+        var app = new CliApplication(runner, publisher);
+
+        var exitCode = await app.RunAsync(
+            [
+                "ingest",
+                "--path", ".",
+                "--config", configPath,
+                "--max-merge-entries-per-file", "3",
+            ],
+            CancellationToken.None);
+
+        Assert.Equal(0, exitCode);
+        Assert.NotNull(publisher.LastRequest);
+        Assert.Equal(3, publisher.LastRequest!.MaxMergeEntriesPerFile);
+    }
+
     private static string WriteTempFile(string content)
     {
         var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.json");
