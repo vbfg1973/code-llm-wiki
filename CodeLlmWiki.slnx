@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CodeLlmWiki.Cli/CodeLlmWiki.Cli.csproj" />
+    <Project Path="src/CodeLlmWiki.Contracts/CodeLlmWiki.Contracts.csproj" />
+    <Project Path="src/CodeLlmWiki.Ingestion/CodeLlmWiki.Ingestion.csproj" />
+    <Project Path="src/CodeLlmWiki.Ontology/CodeLlmWiki.Ontology.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CodeLlmWiki.Cli.Tests/CodeLlmWiki.Cli.Tests.csproj" />
+    <Project Path="tests/CodeLlmWiki.Ingestion.Tests/CodeLlmWiki.Ingestion.Tests.csproj" />
+  </Folder>
+</Solution>
