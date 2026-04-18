@@ -72,6 +72,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         var projectById = model.Projects.ToDictionary(x => x.Id, x => x);
         var namespaceById = model.Declarations.Namespaces.ToDictionary(x => x.Id, x => x);
         var typeById = model.Declarations.Types.ToDictionary(x => x.Id, x => x);
+        var memberById = model.Declarations.Members.ToDictionary(x => x.Id, x => x);
         var fileById = model.Files.ToDictionary(x => x.Id, x => x);
 
         var pages = new List<WikiPage>
@@ -83,7 +84,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         pages.AddRange(orderedProjects.Select(project => RenderProjectPage(model.Repository.Id.Value, project, packageById, resolver)));
         pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, resolver)));
         pages.AddRange(orderedNamespaces.Select(namespaceDeclaration => RenderNamespacePage(model.Repository.Id.Value, namespaceDeclaration, namespaceById, typeById, resolver)));
-        pages.AddRange(orderedTypes.Select(typeDeclaration => RenderTypePage(model.Repository.Id.Value, typeDeclaration, namespaceById, typeById, fileById, resolver)));
+        pages.AddRange(orderedTypes.Select(typeDeclaration => RenderTypePage(model.Repository.Id.Value, typeDeclaration, namespaceById, typeById, memberById, fileById, resolver)));
         pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, resolver, maxMergeEntriesPerFile)));
 
         pages.Add(RenderIndexPage(model, resolver, indexPath));
@@ -361,6 +362,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         TypeDeclarationNode typeDeclaration,
         IReadOnlyDictionary<EntityId, NamespaceDeclarationNode> namespaceById,
         IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
+        IReadOnlyDictionary<EntityId, MemberDeclarationNode> memberById,
         IReadOnlyDictionary<EntityId, FileNode> fileById,
         WikiPathResolver resolver)
     {
@@ -416,6 +418,13 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 sb.AppendLine($"- {directInterface.DisplayText}");
             }
         }
+
+        sb.AppendLine();
+        sb.AppendLine("## Members");
+        AppendMemberSection(sb, "Properties", typeDeclaration, memberById, MemberDeclarationKind.Property);
+        AppendMemberSection(sb, "Fields", typeDeclaration, memberById, MemberDeclarationKind.Field);
+        AppendMemberSection(sb, "Record Parameters", typeDeclaration, memberById, MemberDeclarationKind.RecordParameter);
+        AppendMemberSection(sb, "Enum Members", typeDeclaration, memberById, MemberDeclarationKind.EnumMember);
 
         if (typeDeclaration.GenericParameters.Count > 0 || typeDeclaration.GenericConstraints.Count > 0)
         {
@@ -479,6 +488,48 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             RelativePath: resolver.GetPath(typeDeclaration.Id),
             Title: typeDeclaration.Name,
             Markdown: WithFrontMatter(frontMatter, sb.ToString().TrimEnd()));
+    }
+
+    private static void AppendMemberSection(
+        StringBuilder sb,
+        string sectionName,
+        TypeDeclarationNode typeDeclaration,
+        IReadOnlyDictionary<EntityId, MemberDeclarationNode> memberById,
+        MemberDeclarationKind expectedKind)
+    {
+        var members = typeDeclaration.MemberIds
+            .Where(memberById.ContainsKey)
+            .Select(id => memberById[id])
+            .Where(member => member.Kind == expectedKind)
+            .OrderBy(member => member.Name, StringComparer.Ordinal)
+            .ThenBy(member => member.Id.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        sb.AppendLine($"### {sectionName}");
+        if (members.Length == 0)
+        {
+            sb.AppendLine("- none");
+            return;
+        }
+
+        foreach (var member in members)
+        {
+            var declaredType = member.DeclaredType?.DisplayText;
+            if (expectedKind == MemberDeclarationKind.EnumMember)
+            {
+                var constant = string.IsNullOrWhiteSpace(member.ConstantValue) ? "-" : member.ConstantValue;
+                sb.AppendLine($"- {member.Name} = {constant}");
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(declaredType))
+            {
+                sb.AppendLine($"- {member.Name}");
+                continue;
+            }
+
+            sb.AppendLine($"- {member.Name}: {declaredType}");
+        }
     }
 
     private static WikiPage RenderFilePage(

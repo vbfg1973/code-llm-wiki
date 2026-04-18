@@ -325,6 +325,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
         var typeIdByQualifiedName = new Dictionary<string, EntityId>(StringComparer.Ordinal);
         var declaredTypeNamesBySimpleName = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var pendingMemberTypeLinks = new List<PendingMemberTypeLink>();
 
         foreach (var group in typeGroups)
         {
@@ -413,6 +414,83 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     CorePredicates.DeclaresType,
                     new EntityNode(typeId)));
             }
+
+            var memberGroups = group
+                .SelectMany(x => x.Members)
+                .GroupBy(x => $"{x.Kind}:{x.Name}", StringComparer.Ordinal)
+                .OrderBy(x => x.Key, StringComparer.Ordinal)
+                .ToArray();
+
+            foreach (var memberGroup in memberGroups)
+            {
+                var representativeMember = memberGroup
+                    .OrderBy(x => x.RelativeFilePath, StringComparer.Ordinal)
+                    .First();
+
+                var memberNaturalKey = $"{representative.QualifiedName}:{representativeMember.Kind}:{representativeMember.Name}";
+                var memberId = _stableIdGenerator.Create(new EntityKey("member-declaration", memberNaturalKey));
+
+                AddEntityTriples(
+                    triples,
+                    memberId,
+                    "member-declaration",
+                    representativeMember.Name,
+                    $"{representative.QualifiedName}.{representativeMember.Name}");
+
+                triples.Add(new SemanticTriple(
+                    new EntityNode(memberId),
+                    CorePredicates.MemberKind,
+                    new LiteralNode(representativeMember.Kind)));
+
+                triples.Add(new SemanticTriple(
+                    new EntityNode(memberId),
+                    CorePredicates.Accessibility,
+                    new LiteralNode(representativeMember.Accessibility)));
+
+                triples.Add(new SemanticTriple(
+                    new EntityNode(typeId),
+                    CorePredicates.ContainsMember,
+                    new EntityNode(memberId)));
+
+                if (!string.IsNullOrWhiteSpace(representativeMember.DeclaredTypeName))
+                {
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(memberId),
+                        CorePredicates.HasDeclaredTypeText,
+                        new LiteralNode(representativeMember.DeclaredTypeName)));
+
+                    pendingMemberTypeLinks.Add(new PendingMemberTypeLink(
+                        memberId,
+                        representative.NamespaceName,
+                        representativeMember.DeclaredTypeName!,
+                        representative.ImportedNamespaces,
+                        representative.ImportedAliases));
+                }
+
+                if (!string.IsNullOrWhiteSpace(representativeMember.ConstantValue))
+                {
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(memberId),
+                        CorePredicates.ConstantValue,
+                        new LiteralNode(representativeMember.ConstantValue!)));
+                }
+
+                foreach (var relativeFilePath in memberGroup
+                             .Select(x => x.RelativeFilePath)
+                             .Distinct(StringComparer.Ordinal)
+                             .OrderBy(x => x, StringComparer.Ordinal))
+                {
+                    if (!fileIdByRelativePath.TryGetValue(relativeFilePath, out var memberFileId))
+                    {
+                        continue;
+                    }
+
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(memberFileId),
+                        CorePredicates.DeclaresMember,
+                        new EntityNode(memberId)));
+                }
+            }
         }
 
         foreach (var group in typeGroups)
@@ -474,6 +552,26 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     CorePredicates.Implements,
                     new EntityNode(interfaceTypeId)));
             }
+        }
+
+        foreach (var pendingMemberTypeLink in pendingMemberTypeLinks)
+        {
+            var resolvedMemberTypeName = ResolveInternalTypeName(
+                pendingMemberTypeLink.NamespaceName,
+                pendingMemberTypeLink.DeclaredTypeName,
+                pendingMemberTypeLink.ImportedNamespaces,
+                pendingMemberTypeLink.ImportedAliases,
+                typeIdByQualifiedName,
+                declaredTypeNamesBySimpleName);
+            if (resolvedMemberTypeName is null || !typeIdByQualifiedName.TryGetValue(resolvedMemberTypeName, out var resolvedMemberTypeId))
+            {
+                continue;
+            }
+
+            triples.Add(new SemanticTriple(
+                new EntityNode(pendingMemberTypeLink.MemberId),
+                CorePredicates.HasDeclaredType,
+                new EntityNode(resolvedMemberTypeId)));
         }
     }
 
@@ -538,6 +636,13 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
         return null;
     }
+
+    private sealed record PendingMemberTypeLink(
+        EntityId MemberId,
+        string NamespaceName,
+        string DeclaredTypeName,
+        IReadOnlyList<string> ImportedNamespaces,
+        IReadOnlyDictionary<string, string> ImportedAliases);
 
     private static void AddEntityTriples(
         List<SemanticTriple> triples,

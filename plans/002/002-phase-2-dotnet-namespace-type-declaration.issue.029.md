@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 002](./002-phase-2-dotnet-namespace-type-declaration.prd.md)
 
 - Issue: [#29](https://github.com/vbfg1973/code-llm-wiki/issues/29)
-- [ ] Status: open
-- [ ] Completion date: 
+- [x] Status: complete
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,10 +18,10 @@ Add declaration-level member topology for properties, fields, enum members, and 
 
 ## Acceptance criteria
 
-- [ ] Member entities for in-scope declaration members are ingested and linked to declaring types.
-- [ ] Declared member-type relationships are captured for query and rendering.
-- [ ] Enum members and constant values are represented on type pages.
-- [ ] Type pages include deterministic member sections without introducing standalone member pages.
+- [x] Member entities for in-scope declaration members are ingested and linked to declaring types.
+- [x] Declared member-type relationships are captured for query and rendering.
+- [x] Enum members and constant values are represented on type pages.
+- [x] Type pages include deterministic member sections without introducing standalone member pages.
 
 ## Blocked by
 

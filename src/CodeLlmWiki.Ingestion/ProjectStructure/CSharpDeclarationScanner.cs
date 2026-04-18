@@ -145,6 +145,7 @@ internal static class CSharpDeclarationScanner
                     ParseGenericParameters(classDeclaration.TypeParameterList),
                     ParseGenericConstraints(classDeclaration.ConstraintClauses),
                     ParseDirectRelationships(classDeclaration),
+                    ParseDeclaredMembers(classDeclaration.Members, relativePath),
                     relativePath,
                     classDeclaration.Members,
                     importContext,
@@ -163,6 +164,7 @@ internal static class CSharpDeclarationScanner
                     ParseGenericParameters(interfaceDeclaration.TypeParameterList),
                     ParseGenericConstraints(interfaceDeclaration.ConstraintClauses),
                     ParseDirectRelationships(interfaceDeclaration),
+                    ParseDeclaredMembers(interfaceDeclaration.Members, relativePath),
                     relativePath,
                     interfaceDeclaration.Members,
                     importContext,
@@ -181,6 +183,7 @@ internal static class CSharpDeclarationScanner
                     ParseGenericParameters(structDeclaration.TypeParameterList),
                     ParseGenericConstraints(structDeclaration.ConstraintClauses),
                     ParseDirectRelationships(structDeclaration),
+                    ParseDeclaredMembers(structDeclaration.Members, relativePath),
                     relativePath,
                     structDeclaration.Members,
                     importContext,
@@ -199,6 +202,11 @@ internal static class CSharpDeclarationScanner
                     ParseGenericParameters(recordDeclaration.TypeParameterList),
                     ParseGenericConstraints(recordDeclaration.ConstraintClauses),
                     ParseDirectRelationships(recordDeclaration),
+                    ParseDeclaredMembers(recordDeclaration.Members, relativePath)
+                        .Concat(ParseRecordPrimaryMembers(recordDeclaration, relativePath))
+                        .OrderBy(x => x.Kind, StringComparer.Ordinal)
+                        .ThenBy(x => x.Name, StringComparer.Ordinal)
+                        .ToArray(),
                     relativePath,
                     recordDeclaration.Members,
                     importContext,
@@ -217,6 +225,7 @@ internal static class CSharpDeclarationScanner
                     [],
                     [],
                     ([], []),
+                    ParseEnumMembers(enumDeclaration, relativePath),
                     relativePath,
                     members: default,
                     importContext,
@@ -235,6 +244,7 @@ internal static class CSharpDeclarationScanner
                     ParseGenericParameters(delegateDeclaration.TypeParameterList),
                     ParseGenericConstraints(delegateDeclaration.ConstraintClauses),
                     ([], []),
+                    [],
                     relativePath,
                     members: default,
                     importContext,
@@ -255,6 +265,7 @@ internal static class CSharpDeclarationScanner
         IReadOnlyList<string> genericParameters,
         IReadOnlyList<string> genericConstraints,
         (IReadOnlyList<string> Bases, IReadOnlyList<string> Interfaces) relationships,
+        IReadOnlyList<MemberDiscoveryNode> discoveredMembers,
         string relativePath,
         SyntaxList<MemberDeclarationSyntax> members,
         TypeImportContext importContext,
@@ -278,6 +289,7 @@ internal static class CSharpDeclarationScanner
             relationships.Interfaces,
             importContext.Namespaces,
             importContext.Aliases,
+            discoveredMembers,
             relativePath));
 
         if (namespaceName == GlobalNamespaceName)
@@ -387,6 +399,120 @@ internal static class CSharpDeclarationScanner
         return "internal";
     }
 
+    private static IReadOnlyList<MemberDiscoveryNode> ParseDeclaredMembers(
+        SyntaxList<MemberDeclarationSyntax> members,
+        string relativePath)
+    {
+        var discoveredMembers = new List<MemberDiscoveryNode>();
+
+        foreach (var member in members)
+        {
+            switch (member)
+            {
+                case FieldDeclarationSyntax fieldDeclaration:
+                {
+                    var declaredType = NormalizeTypeReference(fieldDeclaration.Declaration.Type.ToString());
+                    var accessibility = ParseAccessibility(fieldDeclaration.Modifiers);
+
+                    foreach (var variable in fieldDeclaration.Declaration.Variables)
+                    {
+                        discoveredMembers.Add(new MemberDiscoveryNode(
+                            "field",
+                            variable.Identifier.ValueText,
+                            accessibility,
+                            declaredType,
+                            variable.Initializer?.Value.ToString(),
+                            relativePath));
+                    }
+
+                    break;
+                }
+                case PropertyDeclarationSyntax propertyDeclaration:
+                    discoveredMembers.Add(new MemberDiscoveryNode(
+                        "property",
+                        propertyDeclaration.Identifier.ValueText,
+                        ParseAccessibility(propertyDeclaration.Modifiers),
+                        NormalizeTypeReference(propertyDeclaration.Type.ToString()),
+                        null,
+                        relativePath));
+                    break;
+            }
+        }
+
+        return discoveredMembers
+            .OrderBy(x => x.Kind, StringComparer.Ordinal)
+            .ThenBy(x => x.Name, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<MemberDiscoveryNode> ParseEnumMembers(EnumDeclarationSyntax enumDeclaration, string relativePath)
+    {
+        var members = new List<MemberDiscoveryNode>();
+        long? lastIntegralValue = null;
+
+        foreach (var member in enumDeclaration.Members)
+        {
+            string? constantValue;
+
+            if (member.EqualsValue is not null)
+            {
+                var initializerText = member.EqualsValue.Value.ToString().Trim();
+                if (TryParseIntegralConstant(initializerText, out var parsedValue))
+                {
+                    constantValue = parsedValue.ToString();
+                    lastIntegralValue = parsedValue;
+                }
+                else
+                {
+                    constantValue = initializerText;
+                    lastIntegralValue = null;
+                }
+            }
+            else if (lastIntegralValue is null)
+            {
+                constantValue = "0";
+                lastIntegralValue = 0;
+            }
+            else
+            {
+                var nextValue = lastIntegralValue.Value + 1;
+                constantValue = nextValue.ToString();
+                lastIntegralValue = nextValue;
+            }
+
+            members.Add(new MemberDiscoveryNode(
+                "enum-member",
+                member.Identifier.ValueText,
+                "public",
+                null,
+                constantValue,
+                relativePath));
+        }
+
+        return members
+            .OrderBy(x => x.Name, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<MemberDiscoveryNode> ParseRecordPrimaryMembers(RecordDeclarationSyntax recordDeclaration, string relativePath)
+    {
+        if (recordDeclaration.ParameterList is null)
+        {
+            return [];
+        }
+
+        return recordDeclaration.ParameterList.Parameters
+            .Select(parameter => new MemberDiscoveryNode(
+                "record-parameter",
+                parameter.Identifier.ValueText,
+                "public",
+                parameter.Type is null ? null : NormalizeTypeReference(parameter.Type.ToString()),
+                null,
+                relativePath))
+            .OrderBy(x => x.Name, StringComparer.Ordinal)
+            .ToArray();
+    }
+
     private static bool IsPartial(SyntaxTokenList modifiers)
     {
         return modifiers.Any(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.PartialKeyword));
@@ -447,6 +573,36 @@ internal static class CSharpDeclarationScanner
         }
 
         return value.Trim();
+    }
+
+    private static bool TryParseIntegralConstant(string value, out long parsed)
+    {
+        var normalized = value.Replace("_", string.Empty, StringComparison.Ordinal).Trim();
+
+        if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            return long.TryParse(normalized[2..], System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out parsed);
+        }
+
+        if (normalized.StartsWith("0b", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                parsed = Convert.ToInt64(normalized[2..], 2);
+                return true;
+            }
+            catch
+            {
+                parsed = default;
+                return false;
+            }
+        }
+
+        return long.TryParse(
+            normalized,
+            System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out parsed);
     }
 
     private static bool LooksLikeInterfaceName(string typeName)

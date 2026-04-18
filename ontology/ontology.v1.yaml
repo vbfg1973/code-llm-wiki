@@ -43,6 +43,7 @@ predicates:
   - id: "core:hasDeclaringType"
   - id: "core:hasDeclaredType"
   - id: "core:hasDeclaredTypeText"
+  - id: "core:constantValue"
   - id: "core:resolutionStatus"
   - id: "core:isPartialType"
   - id: "core:arity"

@@ -361,6 +361,18 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     meta.GenericConstraints.Add(value);
                 }
             }
+            else if (triple.Predicate == CorePredicates.MemberKind)
+            {
+                meta.MemberKind = value;
+            }
+            else if (triple.Predicate == CorePredicates.HasDeclaredTypeText)
+            {
+                meta.DeclaredTypeText = value;
+            }
+            else if (triple.Predicate == CorePredicates.ConstantValue)
+            {
+                meta.ConstantValue = value;
+            }
         }
 
         return byId;
@@ -548,6 +560,9 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         var inheritsEdges = BuildEntityEdges(triples, CorePredicates.Inherits);
         var implementsEdges = BuildEntityEdges(triples, CorePredicates.Implements);
         var declaringTypeEdges = BuildEntityEdges(triples, CorePredicates.HasDeclaringType);
+        var containsMemberEdges = BuildEntityEdges(triples, CorePredicates.ContainsMember);
+        var memberDeclaredTypeEdges = BuildEntityEdges(triples, CorePredicates.HasDeclaredType);
+        var fileDeclaresMember = BuildEntityEdges(triples, CorePredicates.DeclaresMember);
 
         var namespaceIds = metadataById
             .Where(x => x.Value.IsType("namespace"))
@@ -627,6 +642,32 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
                     .ToArray());
 
+        var memberIdsByType = containsMemberEdges
+            .GroupBy(x => x.Subject)
+            .ToDictionary(
+                x => x.Key,
+                x => x.Select(v => v.Object)
+                    .Distinct()
+                    .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Name : id.Value, StringComparer.Ordinal)
+                    .ToArray());
+
+        var declaringTypeByMember = containsMemberEdges
+            .GroupBy(x => x.Object)
+            .ToDictionary(x => x.Key, x => x.First().Subject);
+
+        var declarationFilesByMember = fileDeclaresMember
+            .GroupBy(x => x.Object)
+            .ToDictionary(
+                x => x.Key,
+                x => x.Select(v => v.Subject)
+                    .Distinct()
+                    .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
+                    .ToArray());
+
+        var declaredTypeByMember = memberDeclaredTypeEdges
+            .GroupBy(x => x.Subject)
+            .ToDictionary(x => x.Key, x => x.First().Object);
+
         var directBasesByType = inheritsEdges
             .GroupBy(x => x.Subject)
             .ToDictionary(
@@ -699,6 +740,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 directBaseIds ??= [];
                 directInterfacesByType.TryGetValue(typeId, out var directInterfaceIds);
                 directInterfaceIds ??= [];
+                memberIdsByType.TryGetValue(typeId, out var memberIds);
+                memberIds ??= [];
 
                 return new TypeDeclarationNode(
                     typeId,
@@ -724,7 +767,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                             metadataById.TryGetValue(id, out var targetMeta) ? targetMeta.Name : id.Value,
                             DeclarationResolutionStatus.Resolved))
                         .ToArray(),
-                    [],
+                    memberIds,
                     declarationFileIds);
             })
             .OrderBy(
@@ -736,7 +779,62 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 StringComparer.Ordinal)
             .ToArray();
 
-        return new DeclarationCatalog(namespaces, types, []);
+        var memberIds = containsMemberEdges
+            .Select(x => x.Object)
+            .Concat(metadataById.Where(x => x.Value.IsType("member-declaration")).Select(x => x.Key))
+            .Distinct()
+            .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        var members = memberIds
+            .Select(memberId =>
+            {
+                var meta = metadataById.TryGetValue(memberId, out var memberMeta)
+                    ? memberMeta
+                    : new EntityMetadata(memberId);
+
+                declaringTypeByMember.TryGetValue(memberId, out var declaringTypeId);
+                declarationFilesByMember.TryGetValue(memberId, out var declarationFileIds);
+                declarationFileIds ??= [];
+
+                declaredTypeByMember.TryGetValue(memberId, out var declaredTypeId);
+
+                var declaredType = declaredTypeId == default
+                    ? (!string.IsNullOrWhiteSpace(meta.DeclaredTypeText)
+                        ? new TypeReferenceNode(
+                            null,
+                            meta.DeclaredTypeText,
+                            DeclarationResolutionStatus.SourceTextFallback)
+                        : null)
+                    : new TypeReferenceNode(
+                        declaredTypeId,
+                        metadataById.TryGetValue(declaredTypeId, out var declaredTypeMeta)
+                            ? declaredTypeMeta.Name
+                            : declaredTypeId.Value,
+                        DeclarationResolutionStatus.Resolved);
+
+                return new MemberDeclarationNode(
+                    memberId,
+                    ParseMemberKind(meta.MemberKind),
+                    meta.Name,
+                    meta.Name,
+                    declaringTypeId == default ? default : declaringTypeId,
+                    ParseAccessibility(meta.Accessibility),
+                    declaredType,
+                    string.IsNullOrWhiteSpace(meta.ConstantValue) ? null : meta.ConstantValue,
+                    declarationFileIds);
+            })
+            .Where(x => x.DeclaringTypeId != default)
+            .OrderBy(
+                x => DeclarationOrderingRules.GetDeterministicSortKey(
+                    x.Kind.ToString(),
+                    x.Name,
+                    x.DeclaredType?.DisplayText ?? string.Empty,
+                    x.Id.Value),
+                StringComparer.Ordinal)
+            .ToArray();
+
+        return new DeclarationCatalog(namespaces, types, members);
     }
 
     private static DeclarationAccessibility ParseAccessibility(string accessibility)
@@ -764,6 +862,18 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             "enum" => TypeDeclarationKind.Enum,
             "delegate" => TypeDeclarationKind.Delegate,
             _ => TypeDeclarationKind.Unknown,
+        };
+    }
+
+    private static MemberDeclarationKind ParseMemberKind(string kind)
+    {
+        return kind.ToLowerInvariant() switch
+        {
+            "field" => MemberDeclarationKind.Field,
+            "property" => MemberDeclarationKind.Property,
+            "enum-member" => MemberDeclarationKind.EnumMember,
+            "record-parameter" => MemberDeclarationKind.RecordParameter,
+            _ => MemberDeclarationKind.Unknown,
         };
     }
 
@@ -818,6 +928,9 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             IsPartialType = false;
             GenericParameters = new HashSet<string>(StringComparer.Ordinal);
             GenericConstraints = new HashSet<string>(StringComparer.Ordinal);
+            MemberKind = string.Empty;
+            DeclaredTypeText = string.Empty;
+            ConstantValue = string.Empty;
         }
 
         public EntityId Id { get; }
@@ -875,6 +988,12 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         public HashSet<string> GenericParameters { get; }
 
         public HashSet<string> GenericConstraints { get; }
+
+        public string MemberKind { get; set; }
+
+        public string DeclaredTypeText { get; set; }
+
+        public string ConstantValue { get; set; }
 
         public bool IsType(string entityType) => EntityType.Equals(entityType, StringComparison.OrdinalIgnoreCase);
     }
