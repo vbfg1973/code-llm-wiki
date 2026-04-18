@@ -33,7 +33,9 @@ Use this file to rehydrate project context quickly for any new agent/session.
   - Completed implementation issues (closed): `#55`, `#56`, `#57`
 - `PRD 005`: drafted, pending plan/issues
   - Local PRD: `/plans/005/005-phase-5-dependency-usage-mapping-and-package-provenance.prd.md`
+  - Local plan: `/plans/005/005-phase-5-dependency-usage-mapping-and-package-provenance.plan.md`
   - GitHub issue: `#61`
+  - Implementation issues (open): `#62`, `#63`, `#64`, `#65`, `#66`
 
 Canonical feature backlog:
 - `/plans/BACKLOG.md`

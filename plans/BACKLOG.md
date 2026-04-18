@@ -70,7 +70,9 @@ Purpose: Track durable product capabilities from the original specification (not
   - Detail: class/type dependency map with source provenance (namespace/project/package; internal vs external).
   - Planned in:
     - [PRD 005](/home/vbfg/dev/dotnet-llm-wiki/plans/005/005-phase-5-dependency-usage-mapping-and-package-provenance.prd.md)
-    - GitHub issue: `#61`
+    - Plan: [PRD 005 plan](/home/vbfg/dev/dotnet-llm-wiki/plans/005/005-phase-5-dependency-usage-mapping-and-package-provenance.plan.md)
+    - Parent GitHub issue: `#61`
+    - Implementation issues (open): `#62`, `#63`, `#64`, `#65`, `#66`
 
 - [ ] `BL-012` Complexity and maintainability metrics
   - Detail: cognitive complexity, cyclomatic complexity, Halstead metrics, LOC, maintainability index, coupling between objects.
