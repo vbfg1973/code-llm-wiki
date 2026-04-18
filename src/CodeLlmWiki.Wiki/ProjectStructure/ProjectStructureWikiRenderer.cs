@@ -44,6 +44,23 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             resolver.RegisterNamespace(namespaceDeclaration);
         }
 
+        var orderedTypes = model.Declarations.Types
+            .OrderBy(
+                x => DeclarationOrderingRules.GetDeterministicSortKey(
+                    x.NamespaceId is null
+                        ? "<global>"
+                        : model.Declarations.Namespaces.FirstOrDefault(n => n.Id == x.NamespaceId)?.Name ?? string.Empty,
+                    x.Name,
+                    x.Path,
+                    x.Id.Value),
+                StringComparer.Ordinal)
+            .ToArray();
+
+        foreach (var typeDeclaration in orderedTypes)
+        {
+            resolver.RegisterType(typeDeclaration);
+        }
+
         var orderedFiles = model.Files.OrderBy(x => x.Path, StringComparer.Ordinal).ToArray();
         foreach (var file in orderedFiles)
         {
@@ -65,6 +82,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         pages.AddRange(orderedProjects.Select(project => RenderProjectPage(model.Repository.Id.Value, project, packageById, resolver)));
         pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, resolver)));
         pages.AddRange(orderedNamespaces.Select(namespaceDeclaration => RenderNamespacePage(model.Repository.Id.Value, namespaceDeclaration, namespaceById, typeById, resolver)));
+        pages.AddRange(orderedTypes.Select(typeDeclaration => RenderTypePage(model.Repository.Id.Value, typeDeclaration, namespaceById, typeById, resolver)));
         pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, resolver, maxMergeEntriesPerFile)));
 
         pages.Add(RenderIndexPage(model, resolver, indexPath));
@@ -86,6 +104,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine($"- Projects: {model.Projects.Count}");
         sb.AppendLine($"- Packages: {model.Packages.Count}");
         sb.AppendLine($"- Namespaces: {model.Declarations.Namespaces.Count}");
+        sb.AppendLine($"- Types: {model.Declarations.Types.Count}");
         sb.AppendLine($"- Files: {model.Files.Count}");
         sb.AppendLine($"- Submodules: {model.Submodules.Count}");
         sb.AppendLine($"- Index: {ToWikiLink("index/repository-index", "Repository Index")}");
@@ -105,6 +124,16 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                      .ThenBy(x => x.Name, StringComparer.Ordinal))
         {
             sb.AppendLine($"- {resolver.ToWikiLink(namespaceDeclaration.Id, namespaceDeclaration.Name)}");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Types");
+
+        foreach (var typeDeclaration in model.Declarations.Types
+                     .OrderBy(x => x.Path, StringComparer.Ordinal)
+                     .ThenBy(x => x.Name, StringComparer.Ordinal))
+        {
+            sb.AppendLine($"- {resolver.ToWikiLink(typeDeclaration.Id, typeDeclaration.Name)}");
         }
 
         sb.AppendLine();
@@ -326,6 +355,98 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             Markdown: WithFrontMatter(frontMatter, sb.ToString().TrimEnd()));
     }
 
+    private static WikiPage RenderTypePage(
+        string repositoryId,
+        TypeDeclarationNode typeDeclaration,
+        IReadOnlyDictionary<EntityId, NamespaceDeclarationNode> namespaceById,
+        IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
+        WikiPathResolver resolver)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"# Type: {typeDeclaration.Name}");
+        sb.AppendLine();
+        sb.AppendLine($"- Kind: {typeDeclaration.Kind.ToString().ToLowerInvariant()}");
+        sb.AppendLine($"- Accessibility: {typeDeclaration.Accessibility.ToString().ToLowerInvariant()}");
+        sb.AppendLine($"- Canonical Path: `{typeDeclaration.Path}`");
+        sb.AppendLine($"- Arity: {typeDeclaration.Arity}");
+
+        if (typeDeclaration.NamespaceId is { } namespaceId && namespaceById.TryGetValue(namespaceId, out var namespaceDeclaration))
+        {
+            sb.AppendLine($"- Namespace: {resolver.ToWikiLink(namespaceDeclaration.Id, namespaceDeclaration.Name)}");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Nesting Context");
+        if (typeDeclaration.DeclaringTypeId is { } declaringTypeId && typeById.TryGetValue(declaringTypeId, out var declaringType))
+        {
+            sb.AppendLine($"- Declaring Type: {resolver.ToWikiLink(declaringType.Id, declaringType.Name)}");
+        }
+        else
+        {
+            sb.AppendLine("- Declaring Type: none");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Direct Base Types");
+        foreach (var directBaseType in typeDeclaration.DirectBaseTypes)
+        {
+            if (directBaseType.TypeId is { } directBaseTypeId && typeById.TryGetValue(directBaseTypeId, out var baseType))
+            {
+                sb.AppendLine($"- {resolver.ToWikiLink(baseType.Id, baseType.Name)}");
+            }
+            else
+            {
+                sb.AppendLine($"- {directBaseType.DisplayText}");
+            }
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Direct Interfaces");
+        foreach (var directInterface in typeDeclaration.DirectInterfaceTypes)
+        {
+            if (directInterface.TypeId is { } directInterfaceId && typeById.TryGetValue(directInterfaceId, out var interfaceType))
+            {
+                sb.AppendLine($"- {resolver.ToWikiLink(interfaceType.Id, interfaceType.Name)}");
+            }
+            else
+            {
+                sb.AppendLine($"- {directInterface.DisplayText}");
+            }
+        }
+
+        var frontMatter = new List<KeyValuePair<string, string>>
+        {
+            KeyValue("entity_id", typeDeclaration.Id.Value),
+            KeyValue("entity_type", "type"),
+            KeyValue("repository_id", repositoryId),
+            KeyValue("type_name", typeDeclaration.Name),
+            KeyValue("type_kind", typeDeclaration.Kind.ToString().ToLowerInvariant()),
+            KeyValue("type_path", typeDeclaration.Path),
+            KeyValue("accessibility", typeDeclaration.Accessibility.ToString().ToLowerInvariant()),
+        };
+
+        if (typeDeclaration.IsNestedType)
+        {
+            frontMatter.Add(KeyValue("is_nested_type", "true"));
+        }
+
+        if (typeDeclaration.NamespaceId is { } typeNamespaceId && namespaceById.TryGetValue(typeNamespaceId, out var typeNamespace))
+        {
+            frontMatter.Add(KeyValue("namespace_name", typeNamespace.Name));
+        }
+
+        if (typeDeclaration.DeclaringTypeId is { } parentTypeId && typeById.TryGetValue(parentTypeId, out var parentType))
+        {
+            frontMatter.Add(KeyValue("declaring_type_id", parentTypeId.Value));
+            frontMatter.Add(KeyValue("declaring_type_name", parentType.Name));
+        }
+
+        return new WikiPage(
+            RelativePath: resolver.GetPath(typeDeclaration.Id),
+            Title: typeDeclaration.Name,
+            Markdown: WithFrontMatter(frontMatter, sb.ToString().TrimEnd()));
+    }
+
     private static WikiPage RenderFilePage(
         RepositoryNode repository,
         FileNode file,
@@ -435,6 +556,15 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             sb,
             "Namespaces",
             model.Declarations.Namespaces
+                .OrderBy(x => x.Path, StringComparer.Ordinal)
+                .ThenBy(x => x.Name, StringComparer.Ordinal)
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .ToArray());
+
+        AppendTable(
+            sb,
+            "Types",
+            model.Declarations.Types
                 .OrderBy(x => x.Path, StringComparer.Ordinal)
                 .ThenBy(x => x.Name, StringComparer.Ordinal)
                 .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))

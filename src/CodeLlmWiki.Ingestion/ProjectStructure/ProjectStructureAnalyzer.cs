@@ -318,43 +318,176 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             }
         }
 
-        foreach (var type in discovery.Types.OrderBy(x => x.NamespaceName, StringComparer.Ordinal).ThenBy(x => x.TypeName, StringComparer.Ordinal).ThenBy(x => x.RelativeFilePath, StringComparer.Ordinal))
+        var typeGroups = discovery.Types
+            .GroupBy(x => x.QualifiedName, StringComparer.Ordinal)
+            .OrderBy(x => x.Key, StringComparer.Ordinal)
+            .ToArray();
+
+        var typeIdByQualifiedName = new Dictionary<string, EntityId>(StringComparer.Ordinal);
+        var declaredTypeNamesBySimpleName = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
+        foreach (var group in typeGroups)
         {
-            if (!namespaceIdByName.TryGetValue(type.NamespaceName, out var namespaceId))
+            var representative = group
+                .OrderBy(x => x.RelativeFilePath, StringComparer.Ordinal)
+                .First();
+
+            if (!namespaceIdByName.TryGetValue(representative.NamespaceName, out var namespaceId))
             {
                 continue;
             }
 
-            var naturalKey = $"{type.NamespaceName}:{type.TypeName}:{type.RelativeFilePath}";
-            var typeId = _stableIdGenerator.Create(new EntityKey("type-declaration", naturalKey));
+            var typeId = _stableIdGenerator.Create(new EntityKey("type-declaration", representative.QualifiedName));
+            typeIdByQualifiedName[representative.QualifiedName] = typeId;
+
+            if (!declaredTypeNamesBySimpleName.TryGetValue(representative.TypeName, out var names))
+            {
+                names = new HashSet<string>(StringComparer.Ordinal);
+                declaredTypeNamesBySimpleName[representative.TypeName] = names;
+            }
+
+            names.Add(representative.QualifiedName);
 
             AddEntityTriples(
                 triples,
                 typeId,
                 "type-declaration",
-                type.TypeName,
-                $"{type.NamespaceName}.{type.TypeName}");
+                representative.TypeName,
+                representative.QualifiedName);
 
             triples.Add(new SemanticTriple(
                 new EntityNode(typeId),
                 CorePredicates.TypeKind,
-                new LiteralNode(type.Kind)));
+                new LiteralNode(representative.Kind)));
+            triples.Add(new SemanticTriple(
+                new EntityNode(typeId),
+                CorePredicates.Accessibility,
+                new LiteralNode(representative.Accessibility)));
+            triples.Add(new SemanticTriple(
+                new EntityNode(typeId),
+                CorePredicates.Arity,
+                new LiteralNode(representative.Arity.ToString())));
 
             triples.Add(new SemanticTriple(
                 new EntityNode(namespaceId),
                 CorePredicates.ContainsType,
                 new EntityNode(typeId)));
 
-            if (!fileIdByRelativePath.TryGetValue(type.RelativeFilePath, out var fileId))
+            foreach (var relativeFilePath in group.Select(x => x.RelativeFilePath).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal))
+            {
+                if (!fileIdByRelativePath.TryGetValue(relativeFilePath, out var fileId))
+                {
+                    continue;
+                }
+
+                triples.Add(new SemanticTriple(
+                    new EntityNode(fileId),
+                    CorePredicates.DeclaresType,
+                    new EntityNode(typeId)));
+            }
+        }
+
+        foreach (var group in typeGroups)
+        {
+            if (!typeIdByQualifiedName.TryGetValue(group.Key, out var sourceTypeId))
             {
                 continue;
             }
 
-            triples.Add(new SemanticTriple(
-                new EntityNode(fileId),
-                CorePredicates.DeclaresType,
-                new EntityNode(typeId)));
+            var representative = group
+                .OrderBy(x => x.RelativeFilePath, StringComparer.Ordinal)
+                .First();
+
+            if (!string.IsNullOrWhiteSpace(representative.DeclaringTypeQualifiedName) &&
+                typeIdByQualifiedName.TryGetValue(representative.DeclaringTypeQualifiedName, out var declaringTypeId))
+            {
+                triples.Add(new SemanticTriple(
+                    new EntityNode(sourceTypeId),
+                    CorePredicates.HasDeclaringType,
+                    new EntityNode(declaringTypeId)));
+            }
+
+            foreach (var baseType in representative.DirectBaseTypeNames.OrderBy(x => x, StringComparer.Ordinal))
+            {
+                var resolvedBaseQualifiedName = ResolveInternalTypeName(
+                    representative.NamespaceName,
+                    baseType,
+                    typeIdByQualifiedName,
+                    declaredTypeNamesBySimpleName);
+                if (resolvedBaseQualifiedName is null || !typeIdByQualifiedName.TryGetValue(resolvedBaseQualifiedName, out var baseTypeId))
+                {
+                    continue;
+                }
+
+                triples.Add(new SemanticTriple(
+                    new EntityNode(sourceTypeId),
+                    CorePredicates.Inherits,
+                    new EntityNode(baseTypeId)));
+            }
+
+            foreach (var interfaceType in representative.DirectInterfaceTypeNames.OrderBy(x => x, StringComparer.Ordinal))
+            {
+                var resolvedInterfaceQualifiedName = ResolveInternalTypeName(
+                    representative.NamespaceName,
+                    interfaceType,
+                    typeIdByQualifiedName,
+                    declaredTypeNamesBySimpleName);
+                if (resolvedInterfaceQualifiedName is null || !typeIdByQualifiedName.TryGetValue(resolvedInterfaceQualifiedName, out var interfaceTypeId))
+                {
+                    continue;
+                }
+
+                triples.Add(new SemanticTriple(
+                    new EntityNode(sourceTypeId),
+                    CorePredicates.Implements,
+                    new EntityNode(interfaceTypeId)));
+            }
         }
+    }
+
+    private static string? ResolveInternalTypeName(
+        string currentNamespace,
+        string referenceName,
+        IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
+        IReadOnlyDictionary<string, HashSet<string>> declaredTypeNamesBySimpleName)
+    {
+        if (string.IsNullOrWhiteSpace(referenceName))
+        {
+            return null;
+        }
+
+        var normalized = referenceName.Trim();
+        if (normalized.StartsWith("global::", StringComparison.Ordinal))
+        {
+            normalized = normalized[8..];
+        }
+
+        var genericIndex = normalized.IndexOf('<');
+        if (genericIndex >= 0)
+        {
+            normalized = normalized[..genericIndex];
+        }
+
+        if (typeIdByQualifiedName.ContainsKey(normalized))
+        {
+            return normalized;
+        }
+
+        var namespaced = currentNamespace == "<global>"
+            ? normalized
+            : $"{currentNamespace}.{normalized}";
+
+        if (typeIdByQualifiedName.ContainsKey(namespaced))
+        {
+            return namespaced;
+        }
+
+        if (declaredTypeNamesBySimpleName.TryGetValue(normalized, out var candidates) && candidates.Count == 1)
+        {
+            return candidates.First();
+        }
+
+        return null;
     }
 
     private static void AddEntityTriples(
