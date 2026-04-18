@@ -61,9 +61,10 @@ public sealed class PackageDependencyVerticalSliceTests
         var renderer = new ProjectStructureWikiRenderer();
         var pages = renderer.Render(model);
 
-        Assert.Equal(6, pages.Count);
+        Assert.Equal(7, pages.Count);
         Assert.Equal(2, pages.Count(x => x.RelativePath.StartsWith("packages/", StringComparison.Ordinal)));
-        Assert.Contains(pages, page => page.RelativePath.StartsWith("projects/", StringComparison.Ordinal) && page.Markdown.Contains("packages/", StringComparison.Ordinal));
+        Assert.Contains(pages, page => page.RelativePath.StartsWith("projects/", StringComparison.Ordinal) && page.Markdown.Contains("[[packages/", StringComparison.Ordinal));
+        Assert.Contains(pages, page => page.RelativePath == "index/repository-index.md");
     }
 
     [Fact]

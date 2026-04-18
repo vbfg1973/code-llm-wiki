@@ -143,3 +143,70 @@ Harden delivery with behavioral tests and enforcement gates: unit coverage for s
 - [ ] CLI exit behavior is verified for success, partial-success, and override modes.
 - [ ] CI fails when generated artifacts are stale or ontology/front matter validation fails.
 
+---
+
+## Phase 8: Human-Readable Obsidian Page Contracts
+
+**User stories**: 19, 20, 21, 22, 23, 34
+
+### What to build
+
+Replace ID-based wiki filenames with human-readable names and mirrored file layout for navigability in Obsidian. Switch internal references to Obsidian wikilinks and introduce a canonical repository index page that maps stable IDs to page paths.
+
+### Acceptance criteria
+
+- [ ] File pages are emitted under mirrored repository-relative paths (for example `files/src/App/Program.cs.md`).
+- [ ] Solution/project/package filenames are idiomatic human-readable names with deterministic non-ID disambiguation only on collision.
+- [ ] Internal cross-page links use Obsidian wikilink syntax.
+- [ ] A canonical index page exists at `index/repository-index.md` with per-entity tables and `entity_id -> page_link` mappings.
+
+---
+
+## Phase 9: Scalar Front Matter Schema v1
+
+**User stories**: 20, 21, 22, 27, 34
+
+### What to build
+
+Implement and validate a strict scalar-only front matter schema optimized for Obsidian Dataview and graph usage while preventing metadata bloat.
+
+### Acceptance criteria
+
+- [ ] Common front matter exists on all pages: `entity_id`, `entity_type`, `repository_id`.
+- [ ] Entity-specific scalar fields are emitted exactly as approved (repository, solution, project, package, file).
+- [ ] Front matter keys are snake_case and timestamps are normalized UTC ISO-8601 with `Z`.
+- [ ] Validation tests fail when required front matter fields are missing or malformed.
+
+---
+
+## Phase 10: Package Membership and Version Context
+
+**User stories**: 9, 10, 19, 22, 34, 35
+
+### What to build
+
+Extend package outputs from aggregate versions to project membership context so package pages show which projects reference them and which declared/resolved versions are in use per project.
+
+### Acceptance criteria
+
+- [ ] Package pages include a deterministic per-project table: project, project path, declared version, resolved version.
+- [ ] Project outputs remain human-readable while retaining path and framework context.
+- [ ] Package linking remains deduplicated via canonical package identity and key normalization.
+- [ ] Golden tests cover package membership table output determinism.
+
+---
+
+## Phase 11: File History Presentation Controls
+
+**User stories**: 27, 28, 30, 31, 32, 33
+
+### What to build
+
+Align file-page history presentation to human readability: most-recent-first merge history, unbounded by default, with optional operator-configured entry caps for budgeted runs.
+
+### Acceptance criteria
+
+- [ ] File page titles use repository-relative file paths.
+- [ ] Merge-to-mainline entries render most recent first and default to unbounded output.
+- [ ] CLI/config support optional `max_merge_entries_per_file` without changing default behavior.
+- [ ] Golden and behavioral tests verify ordering, cap behavior, and unchanged default output.

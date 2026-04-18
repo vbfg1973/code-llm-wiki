@@ -138,3 +138,23 @@ Wiki generation will consume a formal query interface contract rather than graph
 3. This PRD is intentionally focused on one complete vertical slice before deeper analyzer expansion.
 4. Decision and change history must remain current through ADR updates and ontology/version governance.
 5. Expected baseline performance target for phase 1: repositories up to approximately 500k LOC / 20k tracked files, <=10 minutes runtime, <=2 GB memory.
+
+## Addendum 2026-04-18: Output Style and Obsidian Optimization
+
+Approved refinements to implementation/output style:
+
+1. Use human-readable page filenames; do not expose entity IDs in filenames.
+2. Mirror repository layout for file pages to maximize navigability.
+3. Keep stable IDs in front matter and in a canonical repository index page.
+4. Use Obsidian wikilinks for internal cross-page linking.
+5. Keep front matter scalar-only and minimal; avoid global aggregates in front matter.
+6. Front matter schema (v1) is:
+   - common on all pages: `entity_id`, `entity_type`, `repository_id`
+   - repository: `repository_name`, `repository_path`, `head_branch`, `mainline_branch`
+   - solution: `solution_name`, `solution_path`
+   - project: `project_name`, `project_path`, `target_frameworks`, `discovery_method`
+   - package: `package_id`, `package_key`
+   - file: `file_name`, `file_path`
+7. Enforce snake_case front matter keys and UTC ISO-8601 `Z` timestamps.
+8. Package pages must include project-membership/version context per project.
+9. File merge history is default unbounded, ordered most-recent-first, with optional configurable caps.
