@@ -78,6 +78,11 @@ public sealed class CliApplication
 
         if (!publication.Succeeded)
         {
+            if (!string.IsNullOrWhiteSpace(publication.FailureReason))
+            {
+                Console.Error.WriteLine($"Artifact publication failed: {publication.FailureReason}");
+            }
+
             return 1;
         }
 

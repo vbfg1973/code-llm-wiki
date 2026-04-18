@@ -1,4 +1,5 @@
 using System.Text;
+using System.Security.Cryptography;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Query.ProjectStructure;
 
@@ -6,6 +7,8 @@ namespace CodeLlmWiki.Wiki.ProjectStructure;
 
 internal sealed class WikiPathResolver
 {
+    private const int MaxPathSegmentLength = 120;
+
     private readonly Dictionary<EntityId, string> _pathByEntityId = new();
     private readonly HashSet<string> _usedPaths = new(StringComparer.OrdinalIgnoreCase);
 
@@ -180,9 +183,31 @@ internal sealed class WikiPathResolver
             }
         }
 
-        return builder
+        var sanitized = builder
             .ToString()
             .Trim('-');
+
+        return ClampPathSegment(sanitized);
+    }
+
+    private static string ClampPathSegment(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length <= MaxPathSegmentLength)
+        {
+            return value;
+        }
+
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
+            .ToLowerInvariant()[..12];
+        var suffix = $"--{hash}";
+        var prefixLength = Math.Max(1, MaxPathSegmentLength - suffix.Length);
+        var prefix = value[..prefixLength].TrimEnd('-');
+        if (prefix.Length == 0)
+        {
+            prefix = value[..prefixLength];
+        }
+
+        return $"{prefix}{suffix}";
     }
 
     private static string ToWikiTarget(string relativePath)

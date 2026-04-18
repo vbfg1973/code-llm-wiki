@@ -116,6 +116,47 @@ public sealed class IngestionArtifactPublisherTests
         Assert.True(File.Exists(Path.Combine(result.RunDirectory, "graph", "graph.graphml")));
     }
 
+    [Fact]
+    public async Task PublishAsync_DoesNotFail_WhenMethodSlugWouldExceedFileNameLimits()
+    {
+        var fixture = await PublisherFixture.CreateAsync(includeLongMethodSignature: true);
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+
+        var runResult = new IngestionRunResult(
+            Status: IngestionRunStatus.SucceededWithDiagnostics,
+            ExitCode: 0,
+            Diagnostics: analysis.Diagnostics,
+            RepositoryId: analysis.RepositoryId,
+            Triples: analysis.Triples);
+
+        var outputRoot = Path.Combine(Path.GetTempPath(), $"codellmwiki-artifacts-long-method-{Guid.NewGuid():N}");
+        var publisher = new IngestionArtifactPublisher();
+
+        var result = await publisher.PublishAsync(
+            new IngestionArtifactPublishRequest(
+                RepositoryPath: fixture.RepositoryPath,
+                OutputRootPath: outputRoot,
+                StartedAtUtc: new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                CompletedAtUtc: new DateTimeOffset(2026, 1, 1, 0, 0, 5, TimeSpan.Zero),
+                RunResult: runResult),
+            CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.FailureReason);
+        Assert.True(result.LatestPromoted);
+        Assert.True(Directory.Exists(Path.Combine(result.RunDirectory, "wiki", "methods")));
+        Assert.True(Directory.Exists(Path.Combine(result.RunDirectory, "wiki", "types")));
+        Assert.True(Directory.Exists(Path.Combine(result.RunDirectory, "wiki", "namespaces")));
+        Assert.True(Directory.Exists(Path.Combine(outputRoot, "latest")));
+
+        var longestMethodFileNameLength = Directory
+            .EnumerateFiles(Path.Combine(result.RunDirectory, "wiki", "methods"), "*.md", SearchOption.AllDirectories)
+            .Select(path => Path.GetFileName(path).Length)
+            .DefaultIfEmpty(0)
+            .Max();
+        Assert.True(longestMethodFileNameLength <= 123, $"Unexpectedly long method wiki filename length: {longestMethodFileNameLength}");
+    }
+
     private static int CountOccurrences(string value, string token)
     {
         var count = 0;
@@ -159,7 +200,7 @@ public sealed class IngestionArtifactPublisherTests
 
         public string RepositoryPath { get; }
 
-        public static async Task<PublisherFixture> CreateAsync()
+        public static async Task<PublisherFixture> CreateAsync(bool includeLongMethodSignature = false)
         {
             var root = Path.Combine(Path.GetTempPath(), $"codellmwiki-publisher-{Guid.NewGuid():N}", "fixture-repo");
             Directory.CreateDirectory(root);
@@ -198,7 +239,41 @@ public sealed class IngestionArtifactPublisherTests
                 }
                 """);
 
-            await File.WriteAllTextAsync(Path.Combine(appDir, "Program.cs"), "Console.WriteLine(\"artifact\");\n");
+            var programSource = includeLongMethodSignature
+                ? """
+                  using System.Collections.Generic;
+
+                  namespace Sample.App;
+
+                  public sealed class PathLengthProbe
+                  {
+                      public void VeryLongMethod(
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> first,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> second,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> third,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> fourth,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> fifth,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> sixth,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> seventh,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> eighth,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> ninth,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> tenth,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> eleventh,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> twelfth,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> thirteenth,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> fourteenth,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> fifteenth,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> sixteenth,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> seventeenth,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> eighteenth,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> nineteenth,
+                          IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>> twentieth)
+                      {
+                      }
+                  }
+                  """
+                : "Console.WriteLine(\"artifact\");\n";
+            await File.WriteAllTextAsync(Path.Combine(appDir, "Program.cs"), programSource);
             await File.WriteAllTextAsync(Path.Combine(root, "README.md"), "# fixture\n");
 
             RunGit(root, "init", "-b", "main");
