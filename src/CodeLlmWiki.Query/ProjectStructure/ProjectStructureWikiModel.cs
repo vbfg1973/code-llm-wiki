@@ -6,4 +6,7 @@ public sealed record ProjectStructureWikiModel(
     IReadOnlyList<ProjectNode> Projects,
     IReadOnlyList<PackageNode> Packages,
     IReadOnlyList<FileNode> Files,
-    IReadOnlyList<SubmoduleNode> Submodules);
+    IReadOnlyList<SubmoduleNode> Submodules)
+{
+    public DeclarationCatalog Declarations { get; init; } = DeclarationCatalog.Empty;
+}

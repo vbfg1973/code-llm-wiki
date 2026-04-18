@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 002](./002-phase-2-dotnet-namespace-type-declaration.prd.md)
 
 - Issue: [#25](https://github.com/vbfg1973/code-llm-wiki/issues/25)
-- [ ] Status: open
-- [ ] Completion date: 
+- [x] Status: complete
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,10 +18,10 @@ Expand durable graph/query contracts and ontology vocabulary for namespace/type/
 
 ## Acceptance criteria
 
-- [ ] Ontology includes approved namespace/type/member declaration predicates with validation passing.
-- [ ] Core query/view contracts are extended for namespace/type/member entities while preserving existing phase-1 behavior.
-- [ ] Deterministic identity and ordering rules for new entities are documented and testable.
-- [ ] Baseline integration path (analyzer -> graph -> query -> wiki) compiles and runs with new contracts enabled.
+- [x] Ontology includes approved namespace/type/member declaration predicates with validation passing.
+- [x] Core query/view contracts are extended for namespace/type/member entities while preserving existing phase-1 behavior.
+- [x] Deterministic identity and ordering rules for new entities are documented and testable.
+- [x] Baseline integration path (analyzer -> graph -> query -> wiki) compiles and runs with new contracts enabled.
 
 ## Blocked by
 

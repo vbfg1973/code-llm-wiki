@@ -30,4 +30,24 @@ public static class CorePredicates
     public static readonly PredicateId SourceBranchFileCommitCount = new("core:sourceBranchFileCommitCount");
     public static readonly PredicateId HasSubmodule = new("core:hasSubmodule");
     public static readonly PredicateId SubmoduleUrl = new("core:submoduleUrl");
+    public static readonly PredicateId ContainsNamespace = new("core:containsNamespace");
+    public static readonly PredicateId ContainsType = new("core:containsType");
+    public static readonly PredicateId ContainsMember = new("core:containsMember");
+    public static readonly PredicateId DeclaresNamespace = new("core:declaresNamespace");
+    public static readonly PredicateId DeclaresType = new("core:declaresType");
+    public static readonly PredicateId DeclaresMember = new("core:declaresMember");
+    public static readonly PredicateId DeclarationKind = new("core:declarationKind");
+    public static readonly PredicateId TypeKind = new("core:typeKind");
+    public static readonly PredicateId MemberKind = new("core:memberKind");
+    public static readonly PredicateId Accessibility = new("core:accessibility");
+    public static readonly PredicateId HasNamespace = new("core:hasNamespace");
+    public static readonly PredicateId HasDeclaringType = new("core:hasDeclaringType");
+    public static readonly PredicateId HasDeclaredType = new("core:hasDeclaredType");
+    public static readonly PredicateId HasDeclaredTypeText = new("core:hasDeclaredTypeText");
+    public static readonly PredicateId ResolutionStatus = new("core:resolutionStatus");
+    public static readonly PredicateId Arity = new("core:arity");
+    public static readonly PredicateId GenericParameter = new("core:genericParameter");
+    public static readonly PredicateId GenericConstraint = new("core:genericConstraint");
+    public static readonly PredicateId Inherits = new("core:inherits");
+    public static readonly PredicateId Implements = new("core:implements");
 }
