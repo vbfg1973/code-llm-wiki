@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 003](./003-phase-3-dotnet-method-extraction-and-relations.prd.md)
 
 - Issue: [#43](https://github.com/vbfg1973/code-llm-wiki/issues/43)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: completed
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,10 +18,10 @@ Deliver the first complete method vertical slice: ingest method/constructor decl
 
 ## Acceptance criteria
 
-- [ ] Named type-level methods and constructors are ingested as first-class method entities with canonical deterministic identity.
-- [ ] Method entities include declarations without bodies (interface/abstract/extern) and declaration file/location provenance.
-- [ ] Method pages render deterministic signature-oriented summaries and are linked from owning type pages.
-- [ ] Method front matter remains minimal scalar and body output remains ID-light/human-readable.
+- [x] Named type-level methods and constructors are ingested as first-class method entities with canonical deterministic identity.
+- [x] Method entities include declarations without bodies (interface/abstract/extern) and declaration file/location provenance.
+- [x] Method pages render deterministic signature-oriented summaries and are linked from owning type pages.
+- [x] Method front matter remains minimal scalar and body output remains ID-light/human-readable.
 
 ## Blocked by
 

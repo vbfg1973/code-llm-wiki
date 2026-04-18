@@ -47,6 +47,16 @@ internal sealed class WikiPathResolver
         return path;
     }
 
+    public string RegisterMethod(MethodDeclarationNode methodDeclaration, TypeDeclarationNode declaringType)
+    {
+        var typePath = NormalizePath(declaringType.Path.Replace('.', '/'));
+        var methodStem = BuildMethodStem(methodDeclaration);
+        var candidate = $"methods/{typePath}/{methodStem}.md";
+        var path = ReserveWithCounter(candidate);
+        _pathByEntityId[methodDeclaration.Id] = path;
+        return path;
+    }
+
     public string RegisterFile(FileNode file)
     {
         var normalizedPath = NormalizePath(file.Path);
@@ -180,5 +190,29 @@ internal sealed class WikiPathResolver
         return relativePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
             ? relativePath[..^3]
             : relativePath;
+    }
+
+    private static string BuildMethodStem(MethodDeclarationNode methodDeclaration)
+    {
+        var prefix = methodDeclaration.Kind == MethodDeclarationKind.Constructor
+            ? "ctor"
+            : methodDeclaration.Name;
+
+        var parameterTokens = methodDeclaration.Parameters
+            .OrderBy(x => x.Ordinal)
+            .Select(x => x.Type?.DisplayText ?? "unknown")
+            .Select(SanitizePathSegment)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToArray();
+
+        var suffix = parameterTokens.Length == 0
+            ? "no-params"
+            : string.Join("--", parameterTokens);
+
+        var genericSuffix = methodDeclaration.Arity > 0
+            ? $"--g{methodDeclaration.Arity}"
+            : string.Empty;
+
+        return SanitizePathSegment($"{prefix}--{suffix}{genericSuffix}");
     }
 }

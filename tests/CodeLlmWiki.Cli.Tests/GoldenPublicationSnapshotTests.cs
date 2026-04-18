@@ -237,7 +237,7 @@ public sealed class GoldenPublicationSnapshotTests
 
         ValidateRequiredFields(frontMatter, "common", "entity_id", "entity_type", "repository_id");
         Assert.True(
-            frontMatter["entity_type"] is "repository" or "solution" or "project" or "package" or "namespace" or "type" or "file" or "index",
+            frontMatter["entity_type"] is "repository" or "solution" or "project" or "package" or "namespace" or "type" or "method" or "file" or "index",
             $"Invalid entity_type '{frontMatter["entity_type"]}' in {relativePath}");
 
         if (relativePath.StartsWith("repositories/", StringComparison.Ordinal))
@@ -311,6 +311,25 @@ public sealed class GoldenPublicationSnapshotTests
             Assert.True(
                 presentPrimaryKeyCount is 0 or 4,
                 $"Primary project/assembly keys must be emitted as a complete set in {relativePath}");
+        }
+        else if (relativePath.StartsWith("methods/", StringComparison.Ordinal))
+        {
+            ValidateRequiredFields(frontMatter, "method", "method_name", "method_kind", "method_signature", "accessibility", "declaring_type_id");
+            ValidateAllowedFields(
+                frontMatter,
+                "entity_id",
+                "entity_type",
+                "repository_id",
+                "method_name",
+                "method_kind",
+                "method_signature",
+                "accessibility",
+                "declaring_type_id",
+                "declaring_type_name");
+
+            var hasDeclaringTypeId = frontMatter.ContainsKey("declaring_type_id");
+            var hasDeclaringTypeName = frontMatter.ContainsKey("declaring_type_name");
+            Assert.True(hasDeclaringTypeId == hasDeclaringTypeName, $"Method declaring-type keys must be emitted as a complete pair in {relativePath}");
         }
         else if (relativePath.StartsWith("index/", StringComparison.Ordinal))
         {

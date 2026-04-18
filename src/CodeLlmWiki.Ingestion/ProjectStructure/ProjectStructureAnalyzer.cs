@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
+using CodeLlmWiki.Query.ProjectStructure;
 using Microsoft.Build.Construction;
 using Microsoft.Build.Evaluation;
 
@@ -94,6 +95,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             .ToArray();
 
         var projectIdByPath = new Dictionary<string, EntityId>(StringComparer.OrdinalIgnoreCase);
+        var projectAssemblyNameByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var projectPath in orderedProjects)
         {
@@ -102,6 +104,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             projectIdByPath[projectPath] = projectId;
 
             var discovery = DiscoverProjectMetadata(projectPath, diagnostics);
+            projectAssemblyNameByPath[projectPath] = discovery.Name;
             AddEntityTriples(triples, projectId, "project", discovery.Name, relativeProjectPath);
             triples.Add(new SemanticTriple(new EntityNode(projectId), CorePredicates.DiscoveryMethod, new LiteralNode(discovery.Method)));
             triples.Add(new SemanticTriple(new EntityNode(repositoryId), CorePredicates.Contains, new EntityNode(projectId)));
@@ -232,6 +235,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             fullRepositoryPath,
             dotNetSourceFiles,
             fileIdByRelativePath,
+            projectAssemblyNameByPath,
             triples,
             diagnostics,
             cancellationToken);
@@ -244,6 +248,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         string repositoryRoot,
         IReadOnlyList<string> sourceFiles,
         IReadOnlyDictionary<string, EntityId> fileIdByRelativePath,
+        IReadOnlyDictionary<string, string> projectAssemblyNameByPath,
         List<SemanticTriple> triples,
         List<IngestionDiagnostic> diagnostics,
         CancellationToken cancellationToken)
@@ -338,8 +343,11 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         var typeIdByQualifiedName = new Dictionary<string, EntityId>(StringComparer.Ordinal);
         var declaredTypeNamesBySimpleName = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var pendingMemberTypeLinks = new List<PendingMemberTypeLink>();
+        var pendingMethodReturnTypeLinks = new List<PendingMethodReturnTypeLink>();
+        var pendingMethodParameterTypeLinks = new List<PendingMethodParameterTypeLink>();
         var externalStubIdByReference = new Dictionary<string, EntityId>(StringComparer.Ordinal);
         var unresolvedReferenceIdByText = new Dictionary<string, EntityId>(StringComparer.Ordinal);
+        var projectAssemblyContexts = BuildProjectAssemblyContexts(repositoryRoot, projectAssemblyNameByPath);
 
         foreach (var group in typeGroups)
         {
@@ -531,6 +539,156 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                         new LiteralNode(FormatDeclarationSourceLocation(location))));
                 }
             }
+
+            var assemblyName = ResolveAssemblyNameForSourceFile(representative.RelativeFilePath, projectAssemblyContexts);
+            var typeSignature = representative.Arity > 0
+                ? $"{representative.TypeName}`{representative.Arity}"
+                : representative.TypeName;
+            var typeNaturalKey = DeclarationIdentityRules.CreateTypeNaturalKey(
+                assemblyName,
+                representative.NamespaceName,
+                typeSignature);
+
+            var methodGroups = group
+                .SelectMany(x => x.Methods)
+                .GroupBy(CreateMethodGroupKey, StringComparer.Ordinal)
+                .OrderBy(x => x.Key, StringComparer.Ordinal)
+                .ToArray();
+
+            foreach (var methodGroup in methodGroups)
+            {
+                var representativeMethod = methodGroup
+                    .OrderBy(x => x.RelativeFilePath, StringComparer.Ordinal)
+                    .ThenBy(x => x.SourceLine)
+                    .ThenBy(x => x.SourceColumn)
+                    .First();
+
+                var orderedParameterTypeSignatures = representativeMethod.Parameters
+                    .OrderBy(x => x.Ordinal)
+                    .Select(x => NormalizeMethodIdentityTypeSignature(x.DeclaredTypeName ?? string.Empty))
+                    .ToArray();
+
+                var methodNaturalKey = DeclarationIdentityRules.CreateMethodNaturalKey(
+                    assemblyName,
+                    typeNaturalKey,
+                    representativeMethod.CanonicalName,
+                    orderedParameterTypeSignatures,
+                    representativeMethod.Arity);
+
+                var methodId = _stableIdGenerator.Create(new EntityKey("method-declaration", methodNaturalKey));
+                var methodPath = BuildMethodPath(representative.QualifiedName, representativeMethod);
+
+                AddEntityTriples(
+                    triples,
+                    methodId,
+                    "method-declaration",
+                    representativeMethod.Name,
+                    methodPath);
+
+                triples.Add(new SemanticTriple(
+                    new EntityNode(methodId),
+                    CorePredicates.MethodKind,
+                    new LiteralNode(representativeMethod.Kind)));
+                triples.Add(new SemanticTriple(
+                    new EntityNode(methodId),
+                    CorePredicates.Accessibility,
+                    new LiteralNode(representativeMethod.Accessibility)));
+                triples.Add(new SemanticTriple(
+                    new EntityNode(methodId),
+                    CorePredicates.Arity,
+                    new LiteralNode(representativeMethod.Arity.ToString())));
+                triples.Add(new SemanticTriple(
+                    new EntityNode(typeId),
+                    CorePredicates.ContainsMethod,
+                    new EntityNode(methodId)));
+
+                if (!string.IsNullOrWhiteSpace(representativeMethod.ReturnTypeName))
+                {
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(methodId),
+                        CorePredicates.HasReturnTypeText,
+                        new LiteralNode(representativeMethod.ReturnTypeName!)));
+
+                    pendingMethodReturnTypeLinks.Add(new PendingMethodReturnTypeLink(
+                        methodId,
+                        representative.NamespaceName,
+                        representativeMethod.ReturnTypeName!,
+                        representative.ImportedNamespaces,
+                        representative.ImportedAliases));
+                }
+
+                foreach (var relativeFilePath in methodGroup
+                             .Select(x => x.RelativeFilePath)
+                             .Distinct(StringComparer.Ordinal)
+                             .OrderBy(x => x, StringComparer.Ordinal))
+                {
+                    if (!fileIdByRelativePath.TryGetValue(relativeFilePath, out var methodFileId))
+                    {
+                        continue;
+                    }
+
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(methodFileId),
+                        CorePredicates.DeclaresMethod,
+                        new EntityNode(methodId)));
+                }
+
+                foreach (var location in methodGroup
+                             .Select(x => new DeclarationSourceLocation(x.RelativeFilePath, x.SourceLine, x.SourceColumn))
+                             .Distinct()
+                             .OrderBy(x => x.RelativeFilePath, StringComparer.Ordinal)
+                             .ThenBy(x => x.Line)
+                             .ThenBy(x => x.Column))
+                {
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(methodId),
+                        CorePredicates.DeclarationSourceLocation,
+                        new LiteralNode(FormatDeclarationSourceLocation(location))));
+                }
+
+                foreach (var parameter in representativeMethod.Parameters.OrderBy(x => x.Ordinal))
+                {
+                    var parameterNaturalKey = $"{methodNaturalKey}:{parameter.Ordinal}:{parameter.Name}";
+                    var parameterId = _stableIdGenerator.Create(new EntityKey("method-parameter", parameterNaturalKey));
+
+                    AddEntityTriples(
+                        triples,
+                        parameterId,
+                        "method-parameter",
+                        parameter.Name,
+                        $"{methodPath}::parameter:{parameter.Ordinal}:{parameter.Name}");
+
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(parameterId),
+                        CorePredicates.ParameterOrdinal,
+                        new LiteralNode(parameter.Ordinal.ToString())));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(parameterId),
+                        CorePredicates.ParameterName,
+                        new LiteralNode(parameter.Name)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(methodId),
+                        CorePredicates.HasMethodParameter,
+                        new EntityNode(parameterId)));
+
+                    if (string.IsNullOrWhiteSpace(parameter.DeclaredTypeName))
+                    {
+                        continue;
+                    }
+
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(parameterId),
+                        CorePredicates.HasDeclaredTypeText,
+                        new LiteralNode(parameter.DeclaredTypeName)));
+
+                    pendingMethodParameterTypeLinks.Add(new PendingMethodParameterTypeLink(
+                        parameterId,
+                        representative.NamespaceName,
+                        parameter.DeclaredTypeName,
+                        representative.ImportedNamespaces,
+                        representative.ImportedAliases));
+                }
+            }
         }
 
         foreach (var group in typeGroups)
@@ -645,6 +803,70 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 new EntityNode(pendingMemberTypeLink.MemberId),
                 CorePredicates.HasDeclaredType,
                 new EntityNode(resolvedMemberTypeId)));
+        }
+
+        foreach (var pendingReturnTypeLink in pendingMethodReturnTypeLinks)
+        {
+            var resolvedReturnTypeName = ResolveInternalTypeName(
+                pendingReturnTypeLink.NamespaceName,
+                pendingReturnTypeLink.ReturnTypeName,
+                pendingReturnTypeLink.ImportedNamespaces,
+                pendingReturnTypeLink.ImportedAliases,
+                typeIdByQualifiedName,
+                declaredTypeNamesBySimpleName);
+
+            if (resolvedReturnTypeName is null || !typeIdByQualifiedName.TryGetValue(resolvedReturnTypeName, out var resolvedReturnTypeId))
+            {
+                var normalizedReturnType = NormalizeTypeReferenceName(pendingReturnTypeLink.ReturnTypeName);
+                if (IsExternalStubCandidate(normalizedReturnType))
+                {
+                    resolvedReturnTypeId = GetOrCreateExternalStubId(normalizedReturnType, externalStubIdByReference, triples);
+                }
+                else
+                {
+                    diagnostics.Add(new IngestionDiagnostic(
+                        "type:resolution:fallback",
+                        $"Unresolved return type '{pendingReturnTypeLink.ReturnTypeName}' for method '{pendingReturnTypeLink.MethodId.Value}'."));
+                    continue;
+                }
+            }
+
+            triples.Add(new SemanticTriple(
+                new EntityNode(pendingReturnTypeLink.MethodId),
+                CorePredicates.HasReturnType,
+                new EntityNode(resolvedReturnTypeId)));
+        }
+
+        foreach (var pendingParameterTypeLink in pendingMethodParameterTypeLinks)
+        {
+            var resolvedParameterTypeName = ResolveInternalTypeName(
+                pendingParameterTypeLink.NamespaceName,
+                pendingParameterTypeLink.DeclaredTypeName,
+                pendingParameterTypeLink.ImportedNamespaces,
+                pendingParameterTypeLink.ImportedAliases,
+                typeIdByQualifiedName,
+                declaredTypeNamesBySimpleName);
+
+            if (resolvedParameterTypeName is null || !typeIdByQualifiedName.TryGetValue(resolvedParameterTypeName, out var resolvedParameterTypeId))
+            {
+                var normalizedParameterType = NormalizeTypeReferenceName(pendingParameterTypeLink.DeclaredTypeName);
+                if (IsExternalStubCandidate(normalizedParameterType))
+                {
+                    resolvedParameterTypeId = GetOrCreateExternalStubId(normalizedParameterType, externalStubIdByReference, triples);
+                }
+                else
+                {
+                    diagnostics.Add(new IngestionDiagnostic(
+                        "type:resolution:fallback",
+                        $"Unresolved parameter type '{pendingParameterTypeLink.DeclaredTypeName}' for parameter '{pendingParameterTypeLink.ParameterId.Value}'."));
+                    continue;
+                }
+            }
+
+            triples.Add(new SemanticTriple(
+                new EntityNode(pendingParameterTypeLink.ParameterId),
+                CorePredicates.HasDeclaredType,
+                new EntityNode(resolvedParameterTypeId)));
         }
     }
 
@@ -778,12 +1000,103 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         return normalized.Trim();
     }
 
+    private static string CreateMethodGroupKey(MethodDiscoveryNode method)
+    {
+        var parameterTypes = method.Parameters
+            .OrderBy(x => x.Ordinal)
+            .Select(x => NormalizeMethodIdentityTypeSignature(x.DeclaredTypeName ?? string.Empty))
+            .ToArray();
+
+        return $"{method.Kind}:{method.CanonicalName}:{method.Arity}:{string.Join("|", parameterTypes)}";
+    }
+
+    private static string BuildMethodPath(string qualifiedTypeName, MethodDiscoveryNode method)
+    {
+        var parameterTypes = method.Parameters
+            .OrderBy(x => x.Ordinal)
+            .Select(x => NormalizeMethodIdentityTypeSignature(x.DeclaredTypeName ?? string.Empty))
+            .ToArray();
+
+        var canonicalNameWithArity = method.Arity > 0
+            ? $"{method.CanonicalName}`{method.Arity}"
+            : method.CanonicalName;
+
+        var signature = parameterTypes.Length == 0
+            ? $"{canonicalNameWithArity}()"
+            : $"{canonicalNameWithArity}({string.Join(", ", parameterTypes)})";
+
+        return $"{qualifiedTypeName}.{signature}";
+    }
+
+    private static IReadOnlyList<ProjectAssemblyContext> BuildProjectAssemblyContexts(
+        string repositoryRoot,
+        IReadOnlyDictionary<string, string> projectAssemblyNameByPath)
+    {
+        return projectAssemblyNameByPath
+            .Select(x =>
+            {
+                var projectDirectory = Path.GetDirectoryName(x.Key) ?? string.Empty;
+                var relativeDirectory = ToRelativePath(repositoryRoot, projectDirectory);
+                return new ProjectAssemblyContext(relativeDirectory, x.Value);
+            })
+            .Where(x => !string.IsNullOrWhiteSpace(x.RelativeDirectory))
+            .OrderByDescending(x => x.RelativeDirectory.Length)
+            .ThenBy(x => x.RelativeDirectory, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string ResolveAssemblyNameForSourceFile(
+        string relativeSourceFilePath,
+        IReadOnlyList<ProjectAssemblyContext> projectAssemblyContexts)
+    {
+        foreach (var projectContext in projectAssemblyContexts)
+        {
+            var projectDirectory = projectContext.RelativeDirectory;
+            if (relativeSourceFilePath.Equals(projectDirectory, StringComparison.Ordinal) ||
+                relativeSourceFilePath.StartsWith(projectDirectory + "/", StringComparison.Ordinal))
+            {
+                return string.IsNullOrWhiteSpace(projectContext.AssemblyName)
+                    ? "unknown-assembly"
+                    : projectContext.AssemblyName;
+            }
+        }
+
+        return "unknown-assembly";
+    }
+
+    private static string NormalizeMethodIdentityTypeSignature(string typeSignature)
+    {
+        var normalized = typeSignature.Trim();
+        if (normalized.StartsWith("global::", StringComparison.Ordinal))
+        {
+            normalized = normalized[8..];
+        }
+
+        return new string(normalized.Where(c => !char.IsWhiteSpace(c)).ToArray());
+    }
+
     private sealed record PendingMemberTypeLink(
         EntityId MemberId,
         string NamespaceName,
         string DeclaredTypeName,
         IReadOnlyList<string> ImportedNamespaces,
         IReadOnlyDictionary<string, string> ImportedAliases);
+
+    private sealed record PendingMethodReturnTypeLink(
+        EntityId MethodId,
+        string NamespaceName,
+        string ReturnTypeName,
+        IReadOnlyList<string> ImportedNamespaces,
+        IReadOnlyDictionary<string, string> ImportedAliases);
+
+    private sealed record PendingMethodParameterTypeLink(
+        EntityId ParameterId,
+        string NamespaceName,
+        string DeclaredTypeName,
+        IReadOnlyList<string> ImportedNamespaces,
+        IReadOnlyDictionary<string, string> ImportedAliases);
+
+    private sealed record ProjectAssemblyContext(string RelativeDirectory, string AssemblyName);
 
     private static void AddEntityTriples(
         List<SemanticTriple> triples,

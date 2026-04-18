@@ -16,6 +16,7 @@ internal sealed record TypeDiscoveryNode(
     IReadOnlyList<string> ImportedNamespaces,
     IReadOnlyDictionary<string, string> ImportedAliases,
     IReadOnlyList<MemberDiscoveryNode> Members,
+    IReadOnlyList<MethodDiscoveryNode> Methods,
     string RelativeFilePath,
     int SourceLine,
     int SourceColumn);
