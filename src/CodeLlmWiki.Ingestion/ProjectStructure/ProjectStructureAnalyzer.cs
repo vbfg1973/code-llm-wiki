@@ -1017,9 +1017,13 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             .Select(x => NormalizeMethodIdentityTypeSignature(x.DeclaredTypeName ?? string.Empty))
             .ToArray();
 
+        var canonicalNameWithArity = method.Arity > 0
+            ? $"{method.CanonicalName}`{method.Arity}"
+            : method.CanonicalName;
+
         var signature = parameterTypes.Length == 0
-            ? $"{method.CanonicalName}()"
-            : $"{method.CanonicalName}({string.Join(", ", parameterTypes)})";
+            ? $"{canonicalNameWithArity}()"
+            : $"{canonicalNameWithArity}({string.Join(", ", parameterTypes)})";
 
         return $"{qualifiedTypeName}.{signature}";
     }

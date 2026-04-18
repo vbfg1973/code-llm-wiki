@@ -37,6 +37,13 @@ public sealed class MethodDeclarationVerticalSliceTests
         var processOverloads = workerMethods.Where(x => x.Name == "Process").ToArray();
         Assert.Equal(2, processOverloads.Length);
         Assert.Equal(2, processOverloads.Select(x => x.Id).Distinct().Count());
+        var genericNoArgMethods = workerMethods
+            .Where(x => x.Name == "GenericNoArgs")
+            .OrderBy(x => x.Arity)
+            .ToArray();
+        Assert.Equal([1, 2], genericNoArgMethods.Select(x => x.Arity).ToArray());
+        Assert.Contains("GenericNoArgs`1()", genericNoArgMethods[0].Signature, StringComparison.Ordinal);
+        Assert.Contains("GenericNoArgs`2()", genericNoArgMethods[1].Signature, StringComparison.Ordinal);
         Assert.Contains(interfaceMethods, x => x.Kind == MethodDeclarationKind.Method && x.Name == "Work");
         Assert.Contains(baseMethods, x => x.Kind == MethodDeclarationKind.Method && x.Name == "Compute");
 
@@ -63,6 +70,8 @@ public sealed class MethodDeclarationVerticalSliceTests
         var workerPage = pages.Single(x => x.RelativePath == "types/Acme/Methods/Worker.md");
         Assert.Contains("## Methods", workerPage.Markdown, StringComparison.Ordinal);
         Assert.Contains("[[methods/Acme/Methods/Worker/", workerPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("GenericNoArgs<T1>()", workerPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("GenericNoArgs<T1, T2>()", workerPage.Markdown, StringComparison.Ordinal);
 
         var methodPage = pages.Single(x =>
             x.RelativePath.StartsWith("methods/Acme/Methods/Worker/", StringComparison.Ordinal)
@@ -139,6 +148,10 @@ public sealed class MethodDeclarationVerticalSliceTests
                     public void Process(System.Collections.Generic.List<int> values) { }
 
                     public void Process(System.Collections.Generic.List<string> values) { }
+
+                    public void GenericNoArgs<T>() { }
+
+                    public void GenericNoArgs<T1, T2>() { }
                 }
                 """);
 

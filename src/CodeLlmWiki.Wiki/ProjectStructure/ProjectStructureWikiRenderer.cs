@@ -730,6 +730,10 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             .OrderBy(x => x.Ordinal)
             .ToArray();
 
+        var genericSuffix = method.Arity > 0
+            ? $"<{string.Join(", ", Enumerable.Range(1, method.Arity).Select(index => $"T{index}"))}>"
+            : string.Empty;
+
         if (method.Kind == MethodDeclarationKind.Constructor)
         {
             if (orderedParameters.Length == 0)
@@ -742,10 +746,10 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
 
         if (orderedParameters.Length == 0)
         {
-            return $"{method.Name}()";
+            return $"{method.Name}{genericSuffix}()";
         }
 
-        return $"{method.Name}({string.Join(", ", orderedParameters.Select(x => x.Type?.DisplayText ?? "unknown"))})";
+        return $"{method.Name}{genericSuffix}({string.Join(", ", orderedParameters.Select(x => x.Type?.DisplayText ?? "unknown"))})";
     }
 
     private static string FormatTypeReference(TypeReferenceNode reference)
