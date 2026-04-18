@@ -70,6 +70,8 @@ public static class CorePredicates
     public static readonly PredicateId WritesField = new("core:writesField");
     public static readonly PredicateId IsExtensionMethod = new("core:isExtensionMethod");
     public static readonly PredicateId ExtendsType = new("core:extendsType");
+    public static readonly PredicateId DependsOnTypeDeclaration = new("core:dependsOnTypeDeclaration");
+    public static readonly PredicateId DependsOnTypeInMethodBody = new("core:dependsOnTypeInMethodBody");
     public static readonly PredicateId ExternalAssemblyName = new("core:externalAssemblyName");
     public static readonly PredicateId ResolutionReason = new("core:resolutionReason");
 }

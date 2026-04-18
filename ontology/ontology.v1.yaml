@@ -69,5 +69,7 @@ predicates:
   - id: "core:writesField"
   - id: "core:isExtensionMethod"
   - id: "core:extendsType"
+  - id: "core:dependsOnTypeDeclaration"
+  - id: "core:dependsOnTypeInMethodBody"
   - id: "core:externalAssemblyName"
   - id: "core:resolutionReason"

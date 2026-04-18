@@ -8,4 +8,7 @@ public sealed record PackageNode(
     string CanonicalKey,
     IReadOnlyList<string> DeclaredVersions,
     IReadOnlyList<string> ResolvedVersions,
-    IReadOnlyList<PackageProjectMembershipNode> ProjectMemberships);
+    IReadOnlyList<PackageProjectMembershipNode> ProjectMemberships)
+{
+    public PackageDeclarationDependencyUsageCatalog DeclarationDependencyUsage { get; init; } = PackageDeclarationDependencyUsageCatalog.Empty;
+}

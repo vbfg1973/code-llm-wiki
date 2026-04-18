@@ -4,7 +4,7 @@
 
 ## Execution checklist
 
-- [ ] Phase 1: Declaration Dependency Usage Vertical Slice — completion date:
+- [x] Phase 1: Declaration Dependency Usage Vertical Slice — completion date: 2026-04-19
 - [ ] Phase 2: Method-Body Dependency Usage Vertical Slice — completion date:
 - [ ] Phase 3: Project-Scoped Package Attribution + Unknown/Unresolved Semantics Slice — completion date:
 - [ ] Phase 4: Rollup, Determinism, and Contract Hardening Slice — completion date:

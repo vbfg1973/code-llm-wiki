@@ -191,7 +191,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
 
         pages.AddRange(orderedSolutions.Select(solution => RenderSolutionPage(model.Repository.Id.Value, solution, projectById, resolver)));
         pages.AddRange(orderedProjects.Select(project => RenderProjectPage(model.Repository.Id.Value, project, packageById, resolver)));
-        pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, resolver)));
+        pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, methodById, resolver)));
         pages.AddRange(orderedNamespaces.Select(namespaceDeclaration => RenderNamespacePage(model.Repository.Id.Value, namespaceDeclaration, namespaceById, typeById, resolver)));
         pages.AddRange(orderedTypes.Select(typeDeclaration =>
             RenderTypePage(
@@ -384,6 +384,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
     private static WikiPage RenderPackagePage(
         string repositoryId,
         PackageNode package,
+        IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
         WikiPathResolver resolver)
     {
         var sb = new StringBuilder();
@@ -414,6 +415,35 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             var resolvedVersion = string.IsNullOrWhiteSpace(membership.ResolvedVersion) ? "-" : membership.ResolvedVersion;
             sb.AppendLine(
                 $"| {resolver.ToWikiLink(membership.ProjectId, membership.ProjectName)} | `{membership.ProjectPath}` | `{declaredVersion}` | `{resolvedVersion}` |");
+        }
+
+        if (package.DeclarationDependencyUsage.UsageCount > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Declaration Dependency Usage");
+
+            foreach (var namespaceUsage in package.DeclarationDependencyUsage.Namespaces)
+            {
+                var namespaceDisplay = namespaceUsage.NamespaceId is { } namespaceId
+                    ? resolver.ToWikiLink(namespaceId, namespaceUsage.NamespaceName)
+                    : namespaceUsage.NamespaceName;
+                sb.AppendLine($"- {namespaceDisplay} ({namespaceUsage.UsageCount})");
+
+                foreach (var typeUsage in namespaceUsage.Types)
+                {
+                    var typeDisplay = resolver.ToWikiLink(typeUsage.TypeId, typeUsage.TypeName);
+                    sb.AppendLine($"  - {typeDisplay} ({typeUsage.UsageCount})");
+
+                    foreach (var methodUsage in typeUsage.Methods)
+                    {
+                        var methodAlias = methodById.TryGetValue(methodUsage.MethodId, out var method)
+                            ? FormatMethodLinkAlias(method)
+                            : methodUsage.MethodSignature;
+                        var methodDisplay = resolver.ToWikiLink(methodUsage.MethodId, methodAlias);
+                        sb.AppendLine($"    - {methodDisplay} ({methodUsage.UsageCount})");
+                    }
+                }
+            }
         }
 
         return new WikiPage(

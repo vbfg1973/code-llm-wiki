@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 005](./005-phase-5-dependency-usage-mapping-and-package-provenance.prd.md)
 
 - Issue: [#62](https://github.com/vbfg1973/code-llm-wiki/issues/62)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: completed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,10 +18,10 @@ Implement the first end-to-end dependency vertical slice for declaration provena
 
 ## Acceptance criteria
 
-- [ ] Declaration provenance dependency predicate(s) are emitted from ingestion for declaration dependency evidence.
-- [ ] Query projections expose declaration dependency usage grouped as `package -> namespace -> type -> method` with deterministic counts/order.
-- [ ] Package wiki output includes declaration dependency usage sections with navigable links and deterministic ordering.
-- [ ] Tests verify declaration extraction behavior through public boundaries and deterministic rendering/output.
+- [x] Declaration provenance dependency predicate(s) are emitted from ingestion for declaration dependency evidence.
+- [x] Query projections expose declaration dependency usage grouped as `package -> namespace -> type -> method` with deterministic counts/order.
+- [x] Package wiki output includes declaration dependency usage sections with navigable links and deterministic ordering.
+- [x] Tests verify declaration extraction behavior through public boundaries and deterministic rendering/output.
 
 ## Blocked by
 
