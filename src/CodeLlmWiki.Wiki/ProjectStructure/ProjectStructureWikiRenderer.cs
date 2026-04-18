@@ -1,4 +1,5 @@
 using System.Text;
+using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Query.ProjectStructure;
 
 namespace CodeLlmWiki.Wiki.ProjectStructure;
@@ -7,6 +8,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
 {
     public IReadOnlyList<WikiPage> Render(ProjectStructureWikiModel model)
     {
+        var packageById = model.Packages.ToDictionary(x => x.Id, x => x);
+
         var pages = new List<WikiPage>
         {
             RenderRepositoryPage(model),
@@ -18,7 +21,11 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
 
         pages.AddRange(model.Projects
             .OrderBy(x => x.Path, StringComparer.Ordinal)
-            .Select(RenderProjectPage));
+            .Select(project => RenderProjectPage(project, packageById)));
+
+        pages.AddRange(model.Packages
+            .OrderBy(x => x.Name, StringComparer.Ordinal)
+            .Select(RenderPackagePage));
 
         return pages;
     }
@@ -31,6 +38,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine($"- Path: `{model.Repository.Path}`");
         sb.AppendLine($"- Solutions: {model.Solutions.Count}");
         sb.AppendLine($"- Projects: {model.Projects.Count}");
+        sb.AppendLine($"- Packages: {model.Packages.Count}");
         sb.AppendLine();
         sb.AppendLine("## Solutions");
 
@@ -71,17 +79,54 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             Markdown: sb.ToString().TrimEnd());
     }
 
-    private static WikiPage RenderProjectPage(ProjectNode project)
+    private static WikiPage RenderProjectPage(ProjectNode project, IReadOnlyDictionary<EntityId, PackageNode> packageById)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# Project: {project.Name}");
         sb.AppendLine();
         sb.AppendLine($"- Path: `{project.Path}`");
         sb.AppendLine($"- Discovery: `{project.DiscoveryMethod}`");
+        sb.AppendLine();
+        sb.AppendLine("## Packages");
+
+        foreach (var packageId in project.PackageIds)
+        {
+            if (!packageById.TryGetValue(packageId, out var package))
+            {
+                continue;
+            }
+
+            sb.AppendLine($"- [{package.Name}](../packages/{ToSlug(package.Id.Value)}.md)");
+        }
 
         return new WikiPage(
             RelativePath: $"projects/{ToSlug(project.Id.Value)}.md",
             Title: project.Name,
+            Markdown: sb.ToString().TrimEnd());
+    }
+
+    private static WikiPage RenderPackagePage(PackageNode package)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"# Package: {package.Name}");
+        sb.AppendLine();
+        sb.AppendLine("## Declared Versions");
+
+        foreach (var declared in package.DeclaredVersions.OrderBy(x => x, StringComparer.Ordinal))
+        {
+            sb.AppendLine($"- `{declared}`");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Resolved Versions");
+        foreach (var resolved in package.ResolvedVersions.OrderBy(x => x, StringComparer.Ordinal))
+        {
+            sb.AppendLine($"- `{resolved}`");
+        }
+
+        return new WikiPage(
+            RelativePath: $"packages/{ToSlug(package.Id.Value)}.md",
+            Title: package.Name,
             Markdown: sb.ToString().TrimEnd());
     }
 

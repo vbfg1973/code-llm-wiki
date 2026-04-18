@@ -16,6 +16,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
     {
         var metadataById = BuildEntityMetadata(_triples);
         var contains = BuildContainsEdges(_triples);
+        var packageReferences = BuildPackageReferences(_triples);
+        var versionsByPackage = BuildPackageVersions(_triples);
 
         if (!metadataById.TryGetValue(repositoryId, out var repoMeta) || !repoMeta.IsType("repository"))
         {
@@ -59,12 +61,43 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             .Select(projectId =>
             {
                 var meta = metadataById[projectId];
-                return new ProjectNode(projectId, meta.Name, meta.Path, meta.DiscoveryMethod);
+                var packageIds = packageReferences
+                    .Where(x => x.ProjectId == projectId)
+                    .Select(x => x.PackageId)
+                    .Distinct()
+                    .OrderBy(x => metadataById.TryGetValue(x, out var packageMeta) ? packageMeta.Name : x.Value, StringComparer.Ordinal)
+                    .ToArray();
+
+                return new ProjectNode(projectId, meta.Name, meta.Path, meta.DiscoveryMethod, packageIds);
+            })
+            .ToArray();
+
+        var packageIds = projects
+            .SelectMany(x => x.PackageIds)
+            .Distinct()
+            .OrderBy(x => metadataById.TryGetValue(x, out var packageMeta) ? packageMeta.Name : x.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        var packages = packageIds
+            .Select(packageId =>
+            {
+                var meta = metadataById.TryGetValue(packageId, out var packageMeta)
+                    ? packageMeta
+                    : new EntityMetadata(packageId);
+
+                versionsByPackage.TryGetValue(packageId, out var versions);
+                versions ??= new PackageVersionMetadata([], []);
+
+                return new PackageNode(
+                    packageId,
+                    meta.Name,
+                    versions.DeclaredVersions.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
+                    versions.ResolvedVersions.OrderBy(x => x, StringComparer.Ordinal).ToArray());
             })
             .ToArray();
 
         var repository = new RepositoryNode(repositoryId, repoMeta.Name, repoMeta.Path);
-        return new ProjectStructureWikiModel(repository, solutions, projects);
+        return new ProjectStructureWikiModel(repository, solutions, projects, packages);
     }
 
     private static Dictionary<EntityId, EntityMetadata> BuildEntityMetadata(IReadOnlyList<SemanticTriple> triples)
@@ -122,6 +155,60 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             .ToArray();
     }
 
+    private static IReadOnlyList<PackageReferenceEdge> BuildPackageReferences(IReadOnlyList<SemanticTriple> triples)
+    {
+        return triples
+            .Where(x => x.Predicate == CorePredicates.ReferencesPackage)
+            .Where(x => x.Subject is EntityNode && x.Object is EntityNode)
+            .Select(x => new PackageReferenceEdge(((EntityNode)x.Subject).Id, ((EntityNode)x.Object).Id))
+            .Distinct()
+            .ToArray();
+    }
+
+    private static Dictionary<EntityId, PackageVersionMetadata> BuildPackageVersions(IReadOnlyList<SemanticTriple> triples)
+    {
+        var byPackageId = new Dictionary<EntityId, PackageVersionMetadata>();
+
+        foreach (var triple in triples)
+        {
+            if (triple.Subject is not EntityNode subject || triple.Object is not LiteralNode literal)
+            {
+                continue;
+            }
+
+            if (triple.Predicate != CorePredicates.HasDeclaredVersion &&
+                triple.Predicate != CorePredicates.HasResolvedVersion)
+            {
+                continue;
+            }
+
+            if (!byPackageId.TryGetValue(subject.Id, out var versions))
+            {
+                versions = new PackageVersionMetadata(
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                byPackageId[subject.Id] = versions;
+            }
+
+            var value = literal.Value?.ToString();
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            if (triple.Predicate == CorePredicates.HasDeclaredVersion)
+            {
+                versions.DeclaredVersions.Add(value);
+            }
+            else
+            {
+                versions.ResolvedVersions.Add(value);
+            }
+        }
+
+        return byPackageId;
+    }
+
     private sealed class EntityMetadata
     {
         public EntityMetadata(EntityId id)
@@ -147,4 +234,9 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
     }
 
     private sealed record ContainsEdge(EntityId Subject, EntityId Object);
+    private sealed record PackageReferenceEdge(EntityId ProjectId, EntityId PackageId);
+
+    private sealed record PackageVersionMetadata(
+        HashSet<string> DeclaredVersions,
+        HashSet<string> ResolvedVersions);
 }
