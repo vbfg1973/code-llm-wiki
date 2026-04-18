@@ -10,7 +10,7 @@
 - [x] Phase 4: Partial, Nested, and Generic Identity Hardening — completion date: 2026-04-18
 - [x] Phase 5: Member Declaration Topology Vertical Slice — completion date: 2026-04-18
 - [x] Phase 6: Type Resolution Fallback and External Stub References — completion date: 2026-04-18
-- [ ] Phase 7: File Backlink and Traceability Vertical Slice — completion date: 
+- [x] Phase 7: File Backlink and Traceability Vertical Slice — completion date: 2026-04-18
 - [ ] Phase 8: Publication Determinism, Front Matter Validation, and CI Gates — completion date: 
 
 ---
@@ -152,10 +152,10 @@ Complete bidirectional declaration traceability by enriching file pages with gro
 
 ### Acceptance criteria
 
-- [ ] Type declarations link back to all declaration files/locations deterministically.
-- [ ] File pages include grouped declaration backlinks by kind (namespace/type/member).
-- [ ] Backlink ordering is deterministic by file path/source location/symbol identity tie-break.
-- [ ] Primary scalar project/assembly context is chosen deterministically by first declaration.
+- [x] Type declarations link back to all declaration files/locations deterministically.
+- [x] File pages include grouped declaration backlinks by kind (namespace/type/member).
+- [x] Backlink ordering is deterministic by file path/source location/symbol identity tie-break.
+- [x] Primary scalar project/assembly context is chosen deterministically by first declaration.
 
 ---
 
