@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using System.Text.Json;
 using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
 using Microsoft.Build.Construction;
@@ -74,6 +75,25 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             AddEntityTriples(triples, projectId, "project", discovery.Name, relativeProjectPath);
             triples.Add(new SemanticTriple(new EntityNode(projectId), CorePredicates.DiscoveryMethod, new LiteralNode(discovery.Method)));
             triples.Add(new SemanticTriple(new EntityNode(repositoryId), CorePredicates.Contains, new EntityNode(projectId)));
+
+            var resolvedByPackage = DiscoverResolvedPackages(projectPath, diagnostics);
+
+            foreach (var package in discovery.DeclaredPackages.OrderBy(x => x.PackageId, StringComparer.OrdinalIgnoreCase))
+            {
+                var packageId = _stableIdGenerator.Create(new EntityKey("package", package.PackageId.ToLowerInvariant()));
+                AddEntityTriples(triples, packageId, "package", package.PackageId, package.PackageId);
+                triples.Add(new SemanticTriple(new EntityNode(projectId), CorePredicates.ReferencesPackage, new EntityNode(packageId)));
+
+                if (!string.IsNullOrWhiteSpace(package.DeclaredVersion))
+                {
+                    triples.Add(new SemanticTriple(new EntityNode(packageId), CorePredicates.HasDeclaredVersion, new LiteralNode(package.DeclaredVersion)));
+                }
+
+                if (resolvedByPackage.TryGetValue(package.PackageId, out var resolvedVersion) && !string.IsNullOrWhiteSpace(resolvedVersion))
+                {
+                    triples.Add(new SemanticTriple(new EntityNode(packageId), CorePredicates.HasResolvedVersion, new LiteralNode(resolvedVersion)));
+                }
+            }
         }
 
         foreach (var pair in solutionProjectMap.OrderBy(x => ToRelativePath(fullRepositoryPath, x.Key), StringComparer.Ordinal))
@@ -201,11 +221,19 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 name = Path.GetFileNameWithoutExtension(projectPath);
             }
 
-            return new ProjectDiscoveryResult(name, "msbuild");
+            var declaredPackages = project.GetItems("PackageReference")
+                .Select(item => new PackageReferenceInfo(
+                    item.EvaluatedInclude.Trim(),
+                    ReadVersion(item.GetMetadataValue("Version"))))
+                .Where(x => !string.IsNullOrWhiteSpace(x.PackageId))
+                .ToArray();
+
+            return new ProjectDiscoveryResult(name, "msbuild", declaredPackages);
         }
         catch (Exception ex)
         {
             var fallbackName = Path.GetFileNameWithoutExtension(projectPath);
+            var fallbackPackages = Array.Empty<PackageReferenceInfo>();
             try
             {
                 var document = XDocument.Load(projectPath);
@@ -214,6 +242,22 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 {
                     fallbackName = assemblyName;
                 }
+
+                fallbackPackages = document
+                    .Descendants("PackageReference")
+                    .Select(node =>
+                    {
+                        var include = node.Attribute("Include")?.Value
+                            ?? node.Attribute("Update")?.Value
+                            ?? string.Empty;
+
+                        var version = node.Attribute("Version")?.Value
+                            ?? node.Elements("Version").FirstOrDefault()?.Value;
+
+                        return new PackageReferenceInfo(include.Trim(), ReadVersion(version));
+                    })
+                    .Where(x => !string.IsNullOrWhiteSpace(x.PackageId))
+                    .ToArray();
             }
             catch
             {
@@ -221,8 +265,63 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             }
 
             diagnostics.Add(new IngestionDiagnostic("project:discovery:fallback", $"Project '{projectPath}' fell back from MSBuild discovery: {ex.Message}"));
-            return new ProjectDiscoveryResult(fallbackName, "fallback");
+            return new ProjectDiscoveryResult(fallbackName, "fallback", fallbackPackages);
         }
+    }
+
+    private static Dictionary<string, string> DiscoverResolvedPackages(string projectPath, List<IngestionDiagnostic> diagnostics)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var assetsPath = Path.Combine(Path.GetDirectoryName(projectPath)!, "obj", "project.assets.json");
+
+        if (!File.Exists(assetsPath))
+        {
+            diagnostics.Add(new IngestionDiagnostic("package:resolved:not-available", $"Resolved package data not available for '{projectPath}'."));
+            return result;
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(assetsPath);
+            using var document = JsonDocument.Parse(stream);
+
+            if (!document.RootElement.TryGetProperty("libraries", out var libraries) || libraries.ValueKind != JsonValueKind.Object)
+            {
+                diagnostics.Add(new IngestionDiagnostic("package:resolved:not-available", $"Resolved package libraries are missing in '{assetsPath}'."));
+                return result;
+            }
+
+            foreach (var library in libraries.EnumerateObject())
+            {
+                if (!library.Value.TryGetProperty("type", out var typeElement) ||
+                    !string.Equals(typeElement.GetString(), "package", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var nameAndVersion = library.Name.Split('/', 2, StringSplitOptions.TrimEntries);
+                if (nameAndVersion.Length != 2)
+                {
+                    continue;
+                }
+
+                result[nameAndVersion[0]] = nameAndVersion[1];
+            }
+
+            diagnostics.Add(new IngestionDiagnostic("package:resolved:available", $"Resolved package data loaded for '{projectPath}'."));
+            return result;
+        }
+        catch (Exception ex)
+        {
+            diagnostics.Add(new IngestionDiagnostic("package:resolved:not-available", $"Failed to parse resolved package data for '{projectPath}': {ex.Message}"));
+            return result;
+        }
+    }
+
+    private static string? ReadVersion(string? version)
+    {
+        var value = version?.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
     private static string ToRelativePath(string root, string path)
@@ -231,5 +330,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         return relative;
     }
 
-    private sealed record ProjectDiscoveryResult(string Name, string Method);
+    private sealed record ProjectDiscoveryResult(string Name, string Method, IReadOnlyList<PackageReferenceInfo> DeclaredPackages);
+
+    private sealed record PackageReferenceInfo(string PackageId, string? DeclaredVersion);
 }
