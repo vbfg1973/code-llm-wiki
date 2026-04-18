@@ -599,7 +599,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 continue;
             }
 
-            sb.AppendLine($"- {typeDeclaration.Name} ({typeDeclaration.Kind.ToString().ToLowerInvariant()})");
+            sb.AppendLine($"- {resolver.ToWikiLink(typeDeclaration.Id, typeDeclaration.Name)} ({typeDeclaration.Kind.ToString().ToLowerInvariant()})");
         }
 
         var frontMatter = new List<KeyValuePair<string, string>>

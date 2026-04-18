@@ -4,7 +4,7 @@
 
 ## Execution checklist
 
-- [ ] Phase 1: Namespace Contained-Type Linking Slice — completion date:
+- [x] Phase 1: Namespace Contained-Type Linking Slice — completion date: 2026-04-18
 - [ ] Phase 2: File Declared-Method Linking Slice — completion date:
 - [ ] Phase 3: Publication Invariant Gate Slice — completion date:
 
@@ -75,4 +75,3 @@ Add a scoped publication-time invariant validator that inspects rendered wiki ou
 - [ ] Invalid runs are not promoted to `latest` when scoped link invariants fail.
 - [ ] Publisher/validator tests cover pass/fail paths, including failure messaging and promotion behavior.
 - [ ] Golden/snapshot tests are updated only for intentional output deltas introduced by link hardening.
-
