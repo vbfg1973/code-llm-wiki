@@ -41,7 +41,8 @@ public sealed class CliApplicationTests
             NextResult = new IngestionRunResult(
                 IngestionRunStatus.SucceededWithDiagnostics,
                 2,
-                [new IngestionDiagnostic("warn:0001", "warning")]),
+                [new IngestionDiagnostic("warn:0001", "warning")],
+                []),
         };
 
         var app = new CliApplication(runner);
@@ -67,6 +68,7 @@ public sealed class CliApplicationTests
         public IngestionRunResult NextResult { get; set; } = new(
             IngestionRunStatus.Succeeded,
             0,
+            [],
             []);
 
         public Task<IngestionRunResult> RunAsync(IngestionRunRequest request, CancellationToken cancellationToken)

@@ -3,6 +3,12 @@
   <ItemGroup>
     <ProjectReference Include="..\CodeLlmWiki.Contracts\CodeLlmWiki.Contracts.csproj" />
     <ProjectReference Include="..\CodeLlmWiki.Ontology\CodeLlmWiki.Ontology.csproj" />
+    <ProjectReference Include="..\CodeLlmWiki.Query\CodeLlmWiki.Query.csproj" />
+    <ProjectReference Include="..\CodeLlmWiki.Wiki\CodeLlmWiki.Wiki.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Build" Version="18.4.0" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -68,7 +68,7 @@ public sealed class IngestionRunnerTests
     {
         public bool WasCalled { get; private set; }
 
-        public Task<IReadOnlyList<SemanticTriple>> ExecuteAsync(IngestionExecutionContext context, CancellationToken cancellationToken)
+        public Task<IngestionPipelineResult> ExecuteAsync(IngestionExecutionContext context, CancellationToken cancellationToken)
         {
             WasCalled = true;
 
@@ -77,7 +77,7 @@ public sealed class IngestionRunnerTests
                 new PredicateId("core:contains"),
                 new LiteralNode("noop"));
 
-            return Task.FromResult<IReadOnlyList<SemanticTriple>>(new[] { triple });
+            return Task.FromResult(new IngestionPipelineResult([triple], []));
         }
     }
 }
