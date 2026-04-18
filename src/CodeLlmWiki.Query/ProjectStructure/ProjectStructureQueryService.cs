@@ -212,7 +212,10 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             repoMeta.HeadBranch,
             repoMeta.MainlineBranch);
 
-        return new ProjectStructureWikiModel(repository, solutions, projects, packages, files, submodules);
+        return new ProjectStructureWikiModel(repository, solutions, projects, packages, files, submodules)
+        {
+            Declarations = DeclarationCatalog.Empty,
+        };
     }
 
     private static Dictionary<EntityId, EntityMetadata> BuildEntityMetadata(IReadOnlyList<SemanticTriple> triples)

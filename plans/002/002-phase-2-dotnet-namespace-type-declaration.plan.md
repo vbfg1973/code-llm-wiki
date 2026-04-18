@@ -4,7 +4,7 @@
 
 ## Execution checklist
 
-- [ ] Phase 1: Contracts and Ontology Expansion — completion date: 
+- [x] Phase 1: Contracts and Ontology Expansion — completion date: 2026-04-18
 - [ ] Phase 2: Namespace Vertical Slice — completion date: 
 - [ ] Phase 3: Internal Type Symbol Vertical Slice — completion date: 
 - [ ] Phase 4: Partial, Nested, and Generic Identity Hardening — completion date: 
@@ -173,4 +173,3 @@ Harden phase-2 publication and validation behavior: enforce scalar front matter 
 - [ ] Visible wiki body content remains ID-light/human-readable while IDs remain queryable via front matter/index.
 - [ ] HEAD + git-tracked boundary behavior is preserved, including build-artifact exclusion rules.
 - [ ] Golden and behavioral test suites verify deterministic output, edge cases (partial/nested/generic), and degradation diagnostics.
-
