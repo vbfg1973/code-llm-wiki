@@ -22,4 +22,5 @@ public sealed record TypeDeclarationNode(
     IReadOnlyList<EntityId> DeclarationFileIds)
 {
     public IReadOnlyList<DeclarationLocationNode> DeclarationLocations { get; init; } = [];
+    public IReadOnlyList<EntityId> MethodIds { get; init; } = [];
 }
