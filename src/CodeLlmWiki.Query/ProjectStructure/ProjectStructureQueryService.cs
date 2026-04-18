@@ -96,8 +96,29 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             })
             .ToArray();
 
+        var fileIds = contains
+            .Where(x => x.Subject == repositoryId)
+            .Select(x => x.Object)
+            .Where(id => metadataById.TryGetValue(id, out var meta) && meta.IsType("file"))
+            .Distinct()
+            .OrderBy(id => metadataById[id].Path, StringComparer.Ordinal)
+            .ToArray();
+
+        var files = fileIds
+            .Select(fileId =>
+            {
+                var meta = metadataById[fileId];
+                return new FileNode(
+                    fileId,
+                    meta.Name,
+                    meta.Path,
+                    meta.FileKind,
+                    meta.IsSolutionMember);
+            })
+            .ToArray();
+
         var repository = new RepositoryNode(repositoryId, repoMeta.Name, repoMeta.Path);
-        return new ProjectStructureWikiModel(repository, solutions, projects, packages);
+        return new ProjectStructureWikiModel(repository, solutions, projects, packages, files);
     }
 
     private static Dictionary<EntityId, EntityMetadata> BuildEntityMetadata(IReadOnlyList<SemanticTriple> triples)
@@ -139,6 +160,14 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             else if (triple.Predicate == CorePredicates.DiscoveryMethod)
             {
                 meta.DiscoveryMethod = value;
+            }
+            else if (triple.Predicate == CorePredicates.FileKind)
+            {
+                meta.FileKind = value;
+            }
+            else if (triple.Predicate == CorePredicates.IsSolutionMember)
+            {
+                meta.IsSolutionMember = bool.TryParse(value, out var parsed) && parsed;
             }
         }
 
@@ -217,6 +246,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             Name = id.Value;
             Path = id.Value;
             DiscoveryMethod = string.Empty;
+            FileKind = string.Empty;
+            IsSolutionMember = false;
             EntityType = string.Empty;
         }
 
@@ -229,6 +260,10 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         public string Path { get; set; }
 
         public string DiscoveryMethod { get; set; }
+
+        public string FileKind { get; set; }
+
+        public bool IsSolutionMember { get; set; }
 
         public bool IsType(string entityType) => EntityType.Equals(entityType, StringComparison.OrdinalIgnoreCase);
     }

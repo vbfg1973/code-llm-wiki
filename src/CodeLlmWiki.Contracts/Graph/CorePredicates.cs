@@ -10,4 +10,6 @@ public static class CorePredicates
     public static readonly PredicateId DiscoveryMethod = new("core:discoveryMethod");
     public static readonly PredicateId HasDeclaredVersion = new("core:hasDeclaredVersion");
     public static readonly PredicateId HasResolvedVersion = new("core:hasResolvedVersion");
+    public static readonly PredicateId FileKind = new("core:fileKind");
+    public static readonly PredicateId IsSolutionMember = new("core:isSolutionMember");
 }

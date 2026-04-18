@@ -9,3 +9,5 @@ predicates:
   - id: "core:referencesPackage"
   - id: "core:hasDeclaredVersion"
   - id: "core:hasResolvedVersion"
+  - id: "core:fileKind"
+  - id: "core:isSolutionMember"
