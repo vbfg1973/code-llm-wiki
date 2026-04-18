@@ -69,3 +69,4 @@ predicates:
   - id: "core:writesField"
   - id: "core:isExtensionMethod"
   - id: "core:extendsType"
+  - id: "core:externalAssemblyName"

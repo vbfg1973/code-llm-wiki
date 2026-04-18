@@ -6,6 +6,8 @@ internal sealed record MethodDiscoveryNode(
     string CanonicalName,
     string Accessibility,
     bool IsOverride,
+    bool IsExtensionMethod,
+    string? ExtendedTypeName,
     int Arity,
     string? ReturnTypeName,
     IReadOnlyList<MethodParameterDiscoveryNode> Parameters,

@@ -515,6 +515,15 @@ internal static class CSharpDeclarationScanner
                     var canonicalName = string.IsNullOrWhiteSpace(explicitInterface)
                         ? methodName
                         : $"{explicitInterface}.{methodName}";
+                    var isExtensionMethod =
+                        methodDeclaration.Modifiers.Any(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StaticKeyword))
+                        && methodDeclaration.ParameterList.Parameters.Count > 0
+                        && methodDeclaration.ParameterList.Parameters[0].Modifiers.Any(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.ThisKeyword));
+                    var extendedTypeName = isExtensionMethod
+                        ? methodDeclaration.ParameterList.Parameters[0].Type is null
+                            ? null
+                            : NormalizeMethodTypeReference(methodDeclaration.ParameterList.Parameters[0].Type!.ToString())
+                        : null;
 
                     discoveredMethods.Add(new MethodDiscoveryNode(
                         Kind: "method",
@@ -522,6 +531,8 @@ internal static class CSharpDeclarationScanner
                         CanonicalName: canonicalName,
                         Accessibility: ParseAccessibility(methodDeclaration.Modifiers),
                         IsOverride: methodDeclaration.Modifiers.Any(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.OverrideKeyword)),
+                        IsExtensionMethod: isExtensionMethod,
+                        ExtendedTypeName: extendedTypeName,
                         Arity: methodDeclaration.TypeParameterList?.Parameters.Count ?? 0,
                         ReturnTypeName: NormalizeMethodTypeReference(methodDeclaration.ReturnType.ToString()),
                         Parameters: ParseMethodParameters(methodDeclaration.ParameterList.Parameters),
@@ -539,6 +550,8 @@ internal static class CSharpDeclarationScanner
                         CanonicalName: ".ctor",
                         Accessibility: ParseAccessibility(constructorDeclaration.Modifiers),
                         IsOverride: false,
+                        IsExtensionMethod: false,
+                        ExtendedTypeName: null,
                         Arity: 0,
                         ReturnTypeName: null,
                         Parameters: ParseMethodParameters(constructorDeclaration.ParameterList.Parameters),
