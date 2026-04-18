@@ -21,41 +21,7 @@ public sealed class GoldenPublicationSnapshotTests
     public async Task PublicationSnapshot_MatchesGolden_ForWikiGraphMlAndManifest()
     {
         var fixture = await GoldenFixture.CreateAsync();
-        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
-        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
-
-        var runResult = new IngestionRunResult(
-            Status: IngestionRunStatus.SucceededWithDiagnostics,
-            ExitCode: 0,
-            Diagnostics: analysis.Diagnostics,
-            RepositoryId: analysis.RepositoryId,
-            Triples: analysis.Triples);
-
-        var outputRoot = fixture.OutputRoot;
-        if (Directory.Exists(outputRoot))
-        {
-            Directory.Delete(outputRoot, recursive: true);
-        }
-
-        var publisher = new IngestionArtifactPublisher();
-        var publishResult = await publisher.PublishAsync(
-            new IngestionArtifactPublishRequest(
-                RepositoryPath: fixture.RepositoryPath,
-                OutputRootPath: outputRoot,
-                StartedAtUtc: new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
-                CompletedAtUtc: new DateTimeOffset(2026, 1, 1, 0, 1, 0, TimeSpan.Zero),
-                RunResult: runResult),
-            CancellationToken.None);
-
-        Assert.True(publishResult.Succeeded);
-
-        var wikiRoot = Path.Combine(publishResult.RunDirectory, "wiki");
-        ValidateFrontMatter(wikiRoot);
-
-        var snapshot = BuildSnapshot(
-            wikiRoot,
-            Path.Combine(publishResult.RunDirectory, "graph", "graph.graphml"),
-            publishResult.ManifestPath);
+        var snapshot = await BuildPublicationSnapshotAsync(fixture);
 
         var goldenPath = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
@@ -83,6 +49,18 @@ public sealed class GoldenPublicationSnapshotTests
             Assert.True(snapshot.WikiFileHashes.TryGetValue(pair.Key, out var actualHash), $"Missing wiki file hash for {pair.Key}");
             Assert.Equal(pair.Value, actualHash);
         }
+    }
+
+    [Fact]
+    public async Task PublicationSnapshot_IsDeterministic_AcrossRepeatedRuns()
+    {
+        var fixture = await GoldenFixture.CreateAsync();
+        var first = await BuildPublicationSnapshotAsync(fixture);
+        var second = await BuildPublicationSnapshotAsync(fixture);
+
+        Assert.Equal(first.GraphMlHash, second.GraphMlHash);
+        Assert.Equal(first.ManifestHash, second.ManifestHash);
+        Assert.Equal(first.WikiFileHashes, second.WikiFileHashes);
     }
 
     [Fact]
@@ -128,6 +106,88 @@ public sealed class GoldenPublicationSnapshotTests
 
         Assert.ThrowsAny<Exception>(() => ValidateFrontMatterDocument("files/src/App/Program.cs.md", markdown));
     }
+
+    [Fact]
+    public void FrontMatterValidation_Fails_OnIncompleteNamespaceParentPair()
+    {
+        var markdown =
+            """
+            ---
+            entity_id: namespace-1
+            entity_type: namespace
+            repository_id: repo-1
+            namespace_name: Sample
+            namespace_path: Sample
+            parent_namespace_id: namespace-parent
+            ---
+
+            # Namespace: Sample
+            """;
+
+        Assert.ThrowsAny<Exception>(() => ValidateFrontMatterDocument("namespaces/Sample.md", markdown));
+    }
+
+    [Fact]
+    public void FrontMatterValidation_Fails_OnIncompletePrimaryProjectContext()
+    {
+        var markdown =
+            """
+            ---
+            entity_id: type-1
+            entity_type: type
+            repository_id: repo-1
+            type_name: Thing
+            type_kind: class
+            type_path: Sample.Thing
+            accessibility: public
+            primary_project_id: project-1
+            ---
+
+            # Type: Thing
+            """;
+
+        Assert.ThrowsAny<Exception>(() => ValidateFrontMatterDocument("types/Sample/Thing.md", markdown));
+    }
+
+    private static async Task<PublicationSnapshot> BuildPublicationSnapshotAsync(GoldenFixture fixture)
+    {
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+
+        var runResult = new IngestionRunResult(
+            Status: IngestionRunStatus.SucceededWithDiagnostics,
+            ExitCode: 0,
+            Diagnostics: analysis.Diagnostics,
+            RepositoryId: analysis.RepositoryId,
+            Triples: analysis.Triples);
+
+        var outputRoot = fixture.OutputRoot;
+        if (Directory.Exists(outputRoot))
+        {
+            Directory.Delete(outputRoot, recursive: true);
+        }
+
+        var publisher = new IngestionArtifactPublisher();
+        var publishResult = await publisher.PublishAsync(
+            new IngestionArtifactPublishRequest(
+                RepositoryPath: fixture.RepositoryPath,
+                OutputRootPath: outputRoot,
+                StartedAtUtc: new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                CompletedAtUtc: new DateTimeOffset(2026, 1, 1, 0, 1, 0, TimeSpan.Zero),
+                RunResult: runResult),
+            CancellationToken.None);
+
+        Assert.True(publishResult.Succeeded);
+
+        var wikiRoot = Path.Combine(publishResult.RunDirectory, "wiki");
+        ValidateFrontMatter(wikiRoot);
+
+        return BuildSnapshot(
+            wikiRoot,
+            Path.Combine(publishResult.RunDirectory, "graph", "graph.graphml"),
+            publishResult.ManifestPath);
+    }
+
 
     private static PublicationSnapshot BuildSnapshot(string wikiRoot, string graphMlPath, string manifestPath)
     {
@@ -183,33 +243,84 @@ public sealed class GoldenPublicationSnapshotTests
         if (relativePath.StartsWith("repositories/", StringComparison.Ordinal))
         {
             ValidateRequiredFields(frontMatter, "repository", "repository_name", "repository_path", "head_branch", "mainline_branch");
+            ValidateAllowedFields(frontMatter, "entity_id", "entity_type", "repository_id", "repository_name", "repository_path", "head_branch", "mainline_branch");
         }
         else if (relativePath.StartsWith("solutions/", StringComparison.Ordinal))
         {
             ValidateRequiredFields(frontMatter, "solution", "solution_name", "solution_path");
+            ValidateAllowedFields(frontMatter, "entity_id", "entity_type", "repository_id", "solution_name", "solution_path");
         }
         else if (relativePath.StartsWith("projects/", StringComparison.Ordinal))
         {
             ValidateRequiredFields(frontMatter, "project", "project_name", "project_path", "target_frameworks", "discovery_method");
+            ValidateAllowedFields(frontMatter, "entity_id", "entity_type", "repository_id", "project_name", "project_path", "target_frameworks", "discovery_method");
         }
         else if (relativePath.StartsWith("packages/", StringComparison.Ordinal))
         {
             ValidateRequiredFields(frontMatter, "package", "package_id", "package_key");
+            ValidateAllowedFields(frontMatter, "entity_id", "entity_type", "repository_id", "package_id", "package_key");
         }
         else if (relativePath.StartsWith("files/", StringComparison.Ordinal))
         {
             ValidateRequiredFields(frontMatter, "file", "file_name", "file_path");
+            ValidateAllowedFields(frontMatter, "entity_id", "entity_type", "repository_id", "file_name", "file_path");
         }
         else if (relativePath.StartsWith("namespaces/", StringComparison.Ordinal))
         {
             ValidateRequiredFields(frontMatter, "namespace", "namespace_name", "namespace_path");
+            ValidateAllowedFields(frontMatter, "entity_id", "entity_type", "repository_id", "namespace_name", "namespace_path", "parent_namespace_id", "parent_namespace_name");
+
+            var hasParentId = frontMatter.ContainsKey("parent_namespace_id");
+            var hasParentName = frontMatter.ContainsKey("parent_namespace_name");
+            Assert.True(hasParentId == hasParentName, $"Namespace parent keys must be emitted as a complete pair in {relativePath}");
         }
         else if (relativePath.StartsWith("types/", StringComparison.Ordinal))
         {
             ValidateRequiredFields(frontMatter, "type", "type_name", "type_kind", "type_path", "accessibility");
+            ValidateAllowedFields(
+                frontMatter,
+                "entity_id",
+                "entity_type",
+                "repository_id",
+                "type_name",
+                "type_kind",
+                "type_path",
+                "accessibility",
+                "is_nested_type",
+                "is_partial_type",
+                "namespace_name",
+                "declaring_type_id",
+                "declaring_type_name",
+                "primary_project_id",
+                "primary_project_name",
+                "primary_assembly_name",
+                "primary_project_path");
+
+            var hasDeclaringTypeId = frontMatter.ContainsKey("declaring_type_id");
+            var hasDeclaringTypeName = frontMatter.ContainsKey("declaring_type_name");
+            Assert.True(hasDeclaringTypeId == hasDeclaringTypeName, $"Type declaring-type keys must be emitted as a complete pair in {relativePath}");
+
+            var primaryProjectKeys = new[]
+            {
+                "primary_project_id",
+                "primary_project_name",
+                "primary_assembly_name",
+                "primary_project_path",
+            };
+            var presentPrimaryKeyCount = primaryProjectKeys.Count(frontMatter.ContainsKey);
+            Assert.True(
+                presentPrimaryKeyCount is 0 or 4,
+                $"Primary project/assembly keys must be emitted as a complete set in {relativePath}");
+        }
+        else if (relativePath.StartsWith("index/", StringComparison.Ordinal))
+        {
+            ValidateAllowedFields(frontMatter, "entity_id", "entity_type", "repository_id");
         }
 
         ValidateTimestampLines(lines, relativePath);
+
+        var body = string.Join('\n', lines[(frontMatterEnd + 1)..]).TrimStart();
+        ValidateBodyReadability(relativePath, body, frontMatter);
     }
 
     private static Dictionary<string, string> ParseFrontMatter(string[] lines, int frontMatterEnd, string relativePath)
@@ -245,6 +356,30 @@ public sealed class GoldenPublicationSnapshotTests
             Assert.True(frontMatter.TryGetValue(key, out var value), $"Missing required {groupName} key '{key}'");
             Assert.False(string.IsNullOrWhiteSpace(value), $"Required {groupName} key '{key}' must be non-empty");
         }
+    }
+
+    private static void ValidateAllowedFields(IReadOnlyDictionary<string, string> frontMatter, params string[] allowedKeys)
+    {
+        var allowed = allowedKeys.ToHashSet(StringComparer.Ordinal);
+        foreach (var key in frontMatter.Keys)
+        {
+            Assert.True(allowed.Contains(key), $"Unexpected front matter key '{key}'");
+        }
+    }
+
+    private static void ValidateBodyReadability(
+        string relativePath,
+        string body,
+        IReadOnlyDictionary<string, string> frontMatter)
+    {
+        if (relativePath.StartsWith("index/", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        Assert.DoesNotContain("entity_id", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("repository_id", body, StringComparison.Ordinal);
+        Assert.DoesNotContain(frontMatter["entity_id"], body, StringComparison.Ordinal);
     }
 
     private static void ValidateTimestampLines(IEnumerable<string> lines, string relativePath)

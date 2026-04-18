@@ -45,6 +45,33 @@ public sealed class FileInventoryVerticalSliceTests
     }
 
     [Fact]
+    public async Task AnalyzeAsync_UsesHeadTrackedBoundary_ForBuildArtifacts()
+    {
+        var fixture = await FileInventoryFixture.CreateAsync();
+
+        var objDir = Path.Combine(fixture.RepositoryPath, "src", "App", "obj");
+        var binDir = Path.Combine(fixture.RepositoryPath, "src", "App", "bin", "Debug");
+        Directory.CreateDirectory(objDir);
+        Directory.CreateDirectory(binDir);
+
+        var trackedBuildArtifactPath = Path.Combine(objDir, "tracked.assets.json");
+        var untrackedBuildArtifactPath = Path.Combine(binDir, "untracked.dll");
+
+        await File.WriteAllTextAsync(trackedBuildArtifactPath, "{ \"tracked\": true }");
+        await File.WriteAllTextAsync(untrackedBuildArtifactPath, "binary");
+
+        RunGit(fixture.RepositoryPath, "add", "src/App/obj/tracked.assets.json");
+        RunGit(fixture.RepositoryPath, "commit", "-m", "track one build artifact at HEAD");
+
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        Assert.Contains(model.Files, x => x.Path == "src/App/obj/tracked.assets.json");
+        Assert.DoesNotContain(model.Files, x => x.Path == "src/App/bin/Debug/untracked.dll");
+    }
+
+    [Fact]
     public async Task Render_FilePagesAreMetadataOnlyWithMinimalFrontMatter()
     {
         var fixture = await FileInventoryFixture.CreateAsync();
@@ -160,28 +187,33 @@ public sealed class FileInventoryVerticalSliceTests
 
         private static void RunGit(string workingDirectory, params string[] args)
         {
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = "git",
-                WorkingDirectory = workingDirectory,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
+            FileInventoryVerticalSliceTests.RunGit(workingDirectory, args);
+        }
+    }
 
-            foreach (var arg in args)
-            {
-                startInfo.ArgumentList.Add(arg);
-            }
+    private static void RunGit(string workingDirectory, params string[] args)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
 
-            using var process = Process.Start(startInfo)!;
-            process.WaitForExit();
+        foreach (var arg in args)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
 
-            if (process.ExitCode != 0)
-            {
-                var stdOut = process.StandardOutput.ReadToEnd();
-                var stdErr = process.StandardError.ReadToEnd();
-                throw new InvalidOperationException($"git {string.Join(' ', args)} failed: {stdOut}\n{stdErr}");
-            }
+        using var process = Process.Start(startInfo)!;
+        process.WaitForExit();
+
+        if (process.ExitCode != 0)
+        {
+            var stdOut = process.StandardOutput.ReadToEnd();
+            var stdErr = process.StandardError.ReadToEnd();
+            throw new InvalidOperationException($"git {string.Join(' ', args)} failed: {stdOut}\n{stdErr}");
         }
     }
 }
