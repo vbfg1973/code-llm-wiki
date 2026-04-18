@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 002](./002-phase-2-dotnet-namespace-type-declaration.prd.md)
 
 - Issue: [#27](https://github.com/vbfg1973/code-llm-wiki/issues/27)
-- [ ] Status: open
-- [ ] Completion date: 
+- [x] Status: complete
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,10 +18,10 @@ Ingest canonical internal type symbols for all approved kinds and publish type p
 
 ## Acceptance criteria
 
-- [ ] Internal symbols for all approved type kinds are ingested and queryable.
-- [ ] Type pages render identity and direct relationship sections for base type/interfaces/nesting context.
-- [ ] Accessibility metadata is captured and available for filtering.
-- [ ] Stored graph relationships remain direct-only; transitive views are query-derived.
+- [x] Internal symbols for all approved type kinds are ingested and queryable.
+- [x] Type pages render identity and direct relationship sections for base type/interfaces/nesting context.
+- [x] Accessibility metadata is captured and available for filtering.
+- [x] Stored graph relationships remain direct-only; transitive views are query-derived.
 
 ## Blocked by
 

@@ -335,6 +335,14 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             {
                 meta.TypeKind = value;
             }
+            else if (triple.Predicate == CorePredicates.Accessibility)
+            {
+                meta.Accessibility = value;
+            }
+            else if (triple.Predicate == CorePredicates.Arity)
+            {
+                meta.Arity = int.TryParse(value, out var parsed) ? parsed : 0;
+            }
         }
 
         return byId;
@@ -519,6 +527,9 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         var typeContainment = BuildEntityEdges(triples, CorePredicates.ContainsType);
         var fileDeclaresNamespace = BuildEntityEdges(triples, CorePredicates.DeclaresNamespace);
         var fileDeclaresType = BuildEntityEdges(triples, CorePredicates.DeclaresType);
+        var inheritsEdges = BuildEntityEdges(triples, CorePredicates.Inherits);
+        var implementsEdges = BuildEntityEdges(triples, CorePredicates.Implements);
+        var declaringTypeEdges = BuildEntityEdges(triples, CorePredicates.HasDeclaringType);
 
         var namespaceIds = metadataById
             .Where(x => x.Value.IsType("namespace"))
@@ -598,6 +609,28 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
                     .ToArray());
 
+        var directBasesByType = inheritsEdges
+            .GroupBy(x => x.Subject)
+            .ToDictionary(
+                x => x.Key,
+                x => x.Select(v => v.Object)
+                    .Distinct()
+                    .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
+                    .ToArray());
+
+        var directInterfacesByType = implementsEdges
+            .GroupBy(x => x.Subject)
+            .ToDictionary(
+                x => x.Key,
+                x => x.Select(v => v.Object)
+                    .Distinct()
+                    .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
+                    .ToArray());
+
+        var declaringTypeByType = declaringTypeEdges
+            .GroupBy(x => x.Subject)
+            .ToDictionary(x => x.Key, x => x.First().Object);
+
         var namespaces = namespaceIds
             .Select(namespaceId =>
             {
@@ -643,6 +676,11 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 namespaceByTypeId.TryGetValue(typeId, out var namespaceId);
                 declarationFilesByType.TryGetValue(typeId, out var declarationFileIds);
                 declarationFileIds ??= [];
+                declaringTypeByType.TryGetValue(typeId, out var declaringTypeId);
+                directBasesByType.TryGetValue(typeId, out var directBaseIds);
+                directBaseIds ??= [];
+                directInterfacesByType.TryGetValue(typeId, out var directInterfaceIds);
+                directInterfaceIds ??= [];
 
                 return new TypeDeclarationNode(
                     typeId,
@@ -651,15 +689,23 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     meta.Name,
                     meta.Path,
                     namespaceId == default ? null : namespaceId,
-                    null,
+                    declaringTypeId == default ? null : declaringTypeId,
                     false,
-                    false,
-                    DeclarationAccessibility.Unknown,
-                    0,
+                    declaringTypeId != default,
+                    ParseAccessibility(meta.Accessibility),
+                    meta.Arity,
                     [],
                     [],
-                    [],
-                    [],
+                    directBaseIds.Select(id => new TypeReferenceNode(
+                            id,
+                            metadataById.TryGetValue(id, out var targetMeta) ? targetMeta.Name : id.Value,
+                            DeclarationResolutionStatus.Resolved))
+                        .ToArray(),
+                    directInterfaceIds.Select(id => new TypeReferenceNode(
+                            id,
+                            metadataById.TryGetValue(id, out var targetMeta) ? targetMeta.Name : id.Value,
+                            DeclarationResolutionStatus.Resolved))
+                        .ToArray(),
                     [],
                     declarationFileIds);
             })
@@ -673,6 +719,20 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             .ToArray();
 
         return new DeclarationCatalog(namespaces, types, []);
+    }
+
+    private static DeclarationAccessibility ParseAccessibility(string accessibility)
+    {
+        return accessibility.ToLowerInvariant() switch
+        {
+            "public" => DeclarationAccessibility.Public,
+            "internal" => DeclarationAccessibility.Internal,
+            "protected" => DeclarationAccessibility.Protected,
+            "protectedinternal" => DeclarationAccessibility.ProtectedInternal,
+            "private" => DeclarationAccessibility.Private,
+            "privateprotected" => DeclarationAccessibility.PrivateProtected,
+            _ => DeclarationAccessibility.Unknown,
+        };
     }
 
     private static TypeDeclarationKind ParseTypeKind(string kind)
@@ -735,6 +795,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             SourceBranchFileCommitCount = 0;
             SubmoduleUrl = string.Empty;
             TypeKind = string.Empty;
+            Accessibility = string.Empty;
+            Arity = 0;
         }
 
         public EntityId Id { get; }
@@ -782,6 +844,10 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         public string SubmoduleUrl { get; set; }
 
         public string TypeKind { get; set; }
+
+        public string Accessibility { get; set; }
+
+        public int Arity { get; set; }
 
         public bool IsType(string entityType) => EntityType.Equals(entityType, StringComparison.OrdinalIgnoreCase);
     }

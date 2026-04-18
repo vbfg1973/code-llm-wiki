@@ -32,13 +32,27 @@ internal static class CSharpDeclarationScanner
                 continue;
             }
 
-            VisitMembers(root.Members, currentNamespace: null, relativePath, declaredNamespaceFiles, discoveredTypes);
+            var rootImportContext = BuildImportContext(root.Usings);
+
+            VisitMembers(
+                root.Members,
+                currentNamespace: null,
+                currentDeclaringTypeQualifiedName: null,
+                relativePath,
+                rootImportContext,
+                declaredNamespaceFiles,
+                discoveredTypes);
         }
 
         var allNamespaceNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var namespaceName in declaredNamespaceFiles.Keys)
         {
             AddNamespaceAndParents(allNamespaceNames, namespaceName);
+        }
+
+        foreach (var type in discoveredTypes.Where(x => x.NamespaceName == GlobalNamespaceName))
+        {
+            allNamespaceNames.Add(GlobalNamespaceName);
         }
 
         var namespaceNodes = allNamespaceNames
@@ -53,7 +67,7 @@ internal static class CSharpDeclarationScanner
 
         var typeNodes = discoveredTypes
             .OrderBy(x => x.NamespaceName, StringComparer.Ordinal)
-            .ThenBy(x => x.TypeName, StringComparer.Ordinal)
+            .ThenBy(x => x.QualifiedName, StringComparer.Ordinal)
             .ThenBy(x => x.RelativeFilePath, StringComparer.Ordinal)
             .ToArray();
 
@@ -63,7 +77,9 @@ internal static class CSharpDeclarationScanner
     private static void VisitMembers(
         SyntaxList<MemberDeclarationSyntax> members,
         string? currentNamespace,
+        string? currentDeclaringTypeQualifiedName,
         string relativePath,
+        TypeImportContext importContext,
         Dictionary<string, HashSet<string>> declaredNamespaceFiles,
         List<TypeDiscoveryNode> discoveredTypes)
     {
@@ -80,63 +96,380 @@ internal static class CSharpDeclarationScanner
                 var namespaceName = CombineNamespace(currentNamespace, declaredName);
                 RegisterDeclarationFile(declaredNamespaceFiles, namespaceName, relativePath);
 
-                VisitMembers(namespaceDeclaration.Members, namespaceName, relativePath, declaredNamespaceFiles, discoveredTypes);
+                var namespaceImportContext = MergeImportContexts(importContext, BuildImportContext(namespaceDeclaration.Usings));
+
+                VisitMembers(
+                    namespaceDeclaration.Members,
+                    namespaceName,
+                    currentDeclaringTypeQualifiedName: null,
+                    relativePath,
+                    namespaceImportContext,
+                    declaredNamespaceFiles,
+                    discoveredTypes);
                 continue;
             }
 
-            switch (member)
+            AddTypeIfPresent(
+                member,
+                currentNamespace,
+                currentDeclaringTypeQualifiedName,
+                relativePath,
+                importContext,
+                declaredNamespaceFiles,
+                discoveredTypes);
+        }
+    }
+
+    private static void AddTypeIfPresent(
+        MemberDeclarationSyntax member,
+        string? currentNamespace,
+        string? currentDeclaringTypeQualifiedName,
+        string relativePath,
+        TypeImportContext importContext,
+        Dictionary<string, HashSet<string>> declaredNamespaceFiles,
+        List<TypeDiscoveryNode> discoveredTypes)
+    {
+        var namespaceName = ResolveNamespace(currentNamespace);
+
+        switch (member)
+        {
+            case ClassDeclarationSyntax classDeclaration:
+                AddType(
+                    namespaceName,
+                    currentDeclaringTypeQualifiedName,
+                    classDeclaration.Identifier.Text,
+                    classDeclaration.TypeParameterList?.Parameters.Count ?? 0,
+                    "class",
+                    ParseAccessibility(classDeclaration.Modifiers),
+                    ParseDirectRelationships(classDeclaration),
+                    relativePath,
+                    classDeclaration.Members,
+                    importContext,
+                    declaredNamespaceFiles,
+                    discoveredTypes);
+                break;
+            case InterfaceDeclarationSyntax interfaceDeclaration:
+                AddType(
+                    namespaceName,
+                    currentDeclaringTypeQualifiedName,
+                    interfaceDeclaration.Identifier.Text,
+                    interfaceDeclaration.TypeParameterList?.Parameters.Count ?? 0,
+                    "interface",
+                    ParseAccessibility(interfaceDeclaration.Modifiers),
+                    ParseDirectRelationships(interfaceDeclaration),
+                    relativePath,
+                    interfaceDeclaration.Members,
+                    importContext,
+                    declaredNamespaceFiles,
+                    discoveredTypes);
+                break;
+            case StructDeclarationSyntax structDeclaration:
+                AddType(
+                    namespaceName,
+                    currentDeclaringTypeQualifiedName,
+                    structDeclaration.Identifier.Text,
+                    structDeclaration.TypeParameterList?.Parameters.Count ?? 0,
+                    "struct",
+                    ParseAccessibility(structDeclaration.Modifiers),
+                    ParseDirectRelationships(structDeclaration),
+                    relativePath,
+                    structDeclaration.Members,
+                    importContext,
+                    declaredNamespaceFiles,
+                    discoveredTypes);
+                break;
+            case RecordDeclarationSyntax recordDeclaration:
+                AddType(
+                    namespaceName,
+                    currentDeclaringTypeQualifiedName,
+                    recordDeclaration.Identifier.Text,
+                    recordDeclaration.TypeParameterList?.Parameters.Count ?? 0,
+                    "record",
+                    ParseAccessibility(recordDeclaration.Modifiers),
+                    ParseDirectRelationships(recordDeclaration),
+                    relativePath,
+                    recordDeclaration.Members,
+                    importContext,
+                    declaredNamespaceFiles,
+                    discoveredTypes);
+                break;
+            case EnumDeclarationSyntax enumDeclaration:
+                AddType(
+                    namespaceName,
+                    currentDeclaringTypeQualifiedName,
+                    enumDeclaration.Identifier.Text,
+                    0,
+                    "enum",
+                    ParseAccessibility(enumDeclaration.Modifiers),
+                    ([], []),
+                    relativePath,
+                    members: default,
+                    importContext,
+                    declaredNamespaceFiles,
+                    discoveredTypes);
+                break;
+            case DelegateDeclarationSyntax delegateDeclaration:
+                AddType(
+                    namespaceName,
+                    currentDeclaringTypeQualifiedName,
+                    delegateDeclaration.Identifier.Text,
+                    delegateDeclaration.TypeParameterList?.Parameters.Count ?? 0,
+                    "delegate",
+                    ParseAccessibility(delegateDeclaration.Modifiers),
+                    ([], []),
+                    relativePath,
+                    members: default,
+                    importContext,
+                    declaredNamespaceFiles,
+                    discoveredTypes);
+                break;
+        }
+    }
+
+    private static void AddType(
+        string namespaceName,
+        string? currentDeclaringTypeQualifiedName,
+        string typeName,
+        int arity,
+        string kind,
+        string accessibility,
+        (IReadOnlyList<string> Bases, IReadOnlyList<string> Interfaces) relationships,
+        string relativePath,
+        SyntaxList<MemberDeclarationSyntax> members,
+        TypeImportContext importContext,
+        Dictionary<string, HashSet<string>> declaredNamespaceFiles,
+        List<TypeDiscoveryNode> discoveredTypes)
+    {
+        var qualifiedName = BuildQualifiedTypeName(namespaceName, currentDeclaringTypeQualifiedName, typeName, arity);
+
+        discoveredTypes.Add(new TypeDiscoveryNode(
+            namespaceName,
+            qualifiedName,
+            typeName,
+            kind,
+            accessibility,
+            arity,
+            currentDeclaringTypeQualifiedName,
+            relationships.Bases,
+            relationships.Interfaces,
+            importContext.Namespaces,
+            importContext.Aliases,
+            relativePath));
+
+        if (namespaceName == GlobalNamespaceName)
+        {
+            RegisterDeclarationFile(declaredNamespaceFiles, GlobalNamespaceName, relativePath);
+        }
+
+        if (members.Count == 0)
+        {
+            return;
+        }
+
+        VisitMembers(
+            members,
+            namespaceName,
+            qualifiedName,
+            relativePath,
+            importContext,
+            declaredNamespaceFiles,
+            discoveredTypes);
+    }
+
+    private static (IReadOnlyList<string> Bases, IReadOnlyList<string> Interfaces) ParseDirectRelationships(BaseTypeDeclarationSyntax declaration)
+    {
+        var baseList = declaration.BaseList?.Types
+            .Select(x => NormalizeTypeReference(x.Type.ToString()))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToArray()
+            ?? [];
+
+        if (baseList.Length == 0)
+        {
+            return ([], []);
+        }
+
+        if (declaration is ClassDeclarationSyntax or RecordDeclarationSyntax)
+        {
+            var interfaces = new List<string>();
+            string? baseType = null;
+
+            foreach (var candidate in baseList)
             {
-                case ClassDeclarationSyntax classDeclaration:
-                    discoveredTypes.Add(new TypeDiscoveryNode(
-                        ResolveNamespace(currentNamespace),
-                        classDeclaration.Identifier.Text,
-                        "class",
-                        relativePath));
-                    break;
-                case InterfaceDeclarationSyntax interfaceDeclaration:
-                    discoveredTypes.Add(new TypeDiscoveryNode(
-                        ResolveNamespace(currentNamespace),
-                        interfaceDeclaration.Identifier.Text,
-                        "interface",
-                        relativePath));
-                    break;
-                case StructDeclarationSyntax structDeclaration:
-                    discoveredTypes.Add(new TypeDiscoveryNode(
-                        ResolveNamespace(currentNamespace),
-                        structDeclaration.Identifier.Text,
-                        "struct",
-                        relativePath));
-                    break;
-                case EnumDeclarationSyntax enumDeclaration:
-                    discoveredTypes.Add(new TypeDiscoveryNode(
-                        ResolveNamespace(currentNamespace),
-                        enumDeclaration.Identifier.Text,
-                        "enum",
-                        relativePath));
-                    break;
-                case RecordDeclarationSyntax recordDeclaration:
-                    discoveredTypes.Add(new TypeDiscoveryNode(
-                        ResolveNamespace(currentNamespace),
-                        recordDeclaration.Identifier.Text,
-                        "record",
-                        relativePath));
-                    break;
-                case DelegateDeclarationSyntax delegateDeclaration:
-                    discoveredTypes.Add(new TypeDiscoveryNode(
-                        ResolveNamespace(currentNamespace),
-                        delegateDeclaration.Identifier.Text,
-                        "delegate",
-                        relativePath));
-                    break;
-                default:
+                if (baseType is null && !LooksLikeInterfaceName(candidate))
+                {
+                    baseType = candidate;
                     continue;
+                }
+
+                interfaces.Add(candidate);
             }
 
-            if (string.IsNullOrWhiteSpace(currentNamespace))
-            {
-                RegisterDeclarationFile(declaredNamespaceFiles, GlobalNamespaceName, relativePath);
-            }
+            return (
+                baseType is null ? [] : [baseType],
+                interfaces.ToArray());
         }
+
+        if (declaration is StructDeclarationSyntax)
+        {
+            return ([], baseList);
+        }
+
+        if (declaration is InterfaceDeclarationSyntax)
+        {
+            return (baseList, []);
+        }
+
+        return ([], []);
+    }
+
+    private static string ParseAccessibility(SyntaxTokenList modifiers)
+    {
+        var hasPublic = modifiers.Any(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.PublicKeyword));
+        var hasInternal = modifiers.Any(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.InternalKeyword));
+        var hasProtected = modifiers.Any(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.ProtectedKeyword));
+        var hasPrivate = modifiers.Any(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.PrivateKeyword));
+
+        if (hasPublic)
+        {
+            return "public";
+        }
+
+        if (hasProtected && hasInternal)
+        {
+            return "protectedinternal";
+        }
+
+        if (hasPrivate && hasProtected)
+        {
+            return "privateprotected";
+        }
+
+        if (hasProtected)
+        {
+            return "protected";
+        }
+
+        if (hasPrivate)
+        {
+            return "private";
+        }
+
+        if (hasInternal)
+        {
+            return "internal";
+        }
+
+        return "internal";
+    }
+
+    private static string NormalizeTypeReference(string typeReference)
+    {
+        var value = typeReference.Trim();
+        if (value.StartsWith("global::", StringComparison.Ordinal))
+        {
+            value = value[8..];
+        }
+
+        var genericIndex = value.IndexOf('<');
+        if (genericIndex >= 0)
+        {
+            value = value[..genericIndex];
+        }
+
+        return value.Trim();
+    }
+
+    private static bool LooksLikeInterfaceName(string typeName)
+    {
+        return typeName.Length >= 2
+               && typeName[0] == 'I'
+               && char.IsUpper(typeName[1]);
+    }
+
+    private static string BuildQualifiedTypeName(
+        string namespaceName,
+        string? declaringTypeQualifiedName,
+        string typeName,
+        int arity)
+    {
+        var withArity = arity > 0 ? $"{typeName}`{arity}" : typeName;
+
+        if (!string.IsNullOrWhiteSpace(declaringTypeQualifiedName))
+        {
+            return $"{declaringTypeQualifiedName}.{withArity}";
+        }
+
+        if (namespaceName == GlobalNamespaceName)
+        {
+            return withArity;
+        }
+
+        return $"{namespaceName}.{withArity}";
+    }
+
+    private static TypeImportContext BuildImportContext(SyntaxList<UsingDirectiveSyntax> usingDirectives)
+    {
+        if (usingDirectives.Count == 0)
+        {
+            return TypeImportContext.Empty;
+        }
+
+        var namespaces = new HashSet<string>(StringComparer.Ordinal);
+        var aliases = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var usingDirective in usingDirectives)
+        {
+            if (usingDirective.Name is null)
+            {
+                continue;
+            }
+
+            var target = NormalizeTypeReference(usingDirective.Name.ToString());
+            if (string.IsNullOrWhiteSpace(target))
+            {
+                continue;
+            }
+
+            if (usingDirective.Alias is not null)
+            {
+                aliases[usingDirective.Alias.Name.Identifier.ValueText] = target;
+                continue;
+            }
+
+            if (usingDirective.StaticKeyword != default)
+            {
+                continue;
+            }
+
+            namespaces.Add(target);
+        }
+
+        return new TypeImportContext(
+            namespaces.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
+            aliases);
+    }
+
+    private static TypeImportContext MergeImportContexts(TypeImportContext parent, TypeImportContext child)
+    {
+        if (child.Namespaces.Count == 0 && child.Aliases.Count == 0)
+        {
+            return parent;
+        }
+
+        var namespaces = parent.Namespaces
+            .Concat(child.Namespaces)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+
+        var aliases = new Dictionary<string, string>(parent.Aliases, StringComparer.Ordinal);
+        foreach (var pair in child.Aliases)
+        {
+            aliases[pair.Key] = pair.Value;
+        }
+
+        return new TypeImportContext(namespaces, aliases);
     }
 
     private static void RegisterDeclarationFile(
@@ -155,6 +488,12 @@ internal static class CSharpDeclarationScanner
 
     private static void AddNamespaceAndParents(HashSet<string> names, string namespaceName)
     {
+        if (namespaceName == GlobalNamespaceName)
+        {
+            names.Add(namespaceName);
+            return;
+        }
+
         var parts = namespaceName.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (parts.Length == 0)
         {
@@ -169,6 +508,11 @@ internal static class CSharpDeclarationScanner
 
     private static string? GetParentNamespace(string namespaceName)
     {
+        if (namespaceName == GlobalNamespaceName)
+        {
+            return null;
+        }
+
         var index = namespaceName.LastIndexOf('.');
         return index > 0
             ? namespaceName[..index]
@@ -177,7 +521,7 @@ internal static class CSharpDeclarationScanner
 
     private static string CombineNamespace(string? currentNamespace, string declaredName)
     {
-        if (string.IsNullOrWhiteSpace(currentNamespace))
+        if (string.IsNullOrWhiteSpace(currentNamespace) || currentNamespace == GlobalNamespaceName)
         {
             return declaredName;
         }

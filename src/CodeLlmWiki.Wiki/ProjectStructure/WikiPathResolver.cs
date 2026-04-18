@@ -38,6 +38,15 @@ internal sealed class WikiPathResolver
         return path;
     }
 
+    public string RegisterType(TypeDeclarationNode typeDeclaration)
+    {
+        var typePath = NormalizePath(typeDeclaration.Path.Replace('.', '/'));
+        var candidate = $"types/{typePath}.md";
+        var path = ReserveWithCounter(candidate);
+        _pathByEntityId[typeDeclaration.Id] = path;
+        return path;
+    }
+
     public string RegisterFile(FileNode file)
     {
         var normalizedPath = NormalizePath(file.Path);
