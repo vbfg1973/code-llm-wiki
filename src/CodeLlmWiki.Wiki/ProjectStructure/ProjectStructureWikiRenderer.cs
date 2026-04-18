@@ -74,6 +74,9 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         var typeById = model.Declarations.Types.ToDictionary(x => x.Id, x => x);
         var memberById = model.Declarations.Members.ToDictionary(x => x.Id, x => x);
         var fileById = model.Files.ToDictionary(x => x.Id, x => x);
+        var namespaceBacklinksByFileId = BuildNamespaceBacklinksByFileId(model.Declarations.Namespaces, fileById);
+        var typeBacklinksByFileId = BuildTypeBacklinksByFileId(model.Declarations.Types, fileById);
+        var memberBacklinksByFileId = BuildMemberBacklinksByFileId(model.Declarations.Members, fileById);
 
         var pages = new List<WikiPage>
         {
@@ -84,8 +87,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         pages.AddRange(orderedProjects.Select(project => RenderProjectPage(model.Repository.Id.Value, project, packageById, resolver)));
         pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, resolver)));
         pages.AddRange(orderedNamespaces.Select(namespaceDeclaration => RenderNamespacePage(model.Repository.Id.Value, namespaceDeclaration, namespaceById, typeById, resolver)));
-        pages.AddRange(orderedTypes.Select(typeDeclaration => RenderTypePage(model.Repository.Id.Value, typeDeclaration, namespaceById, typeById, memberById, fileById, resolver)));
-        pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, resolver, maxMergeEntriesPerFile)));
+        pages.AddRange(orderedTypes.Select(typeDeclaration => RenderTypePage(model.Repository.Id.Value, typeDeclaration, namespaceById, typeById, memberById, fileById, orderedProjects, resolver)));
+        pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, namespaceBacklinksByFileId, typeBacklinksByFileId, memberBacklinksByFileId, resolver, maxMergeEntriesPerFile)));
 
         pages.Add(RenderIndexPage(model, resolver, indexPath));
 
@@ -293,6 +296,110 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 sb.ToString().TrimEnd()));
     }
 
+    private static IReadOnlyDictionary<EntityId, IReadOnlyList<NamespaceDeclarationNode>> BuildNamespaceBacklinksByFileId(
+        IReadOnlyList<NamespaceDeclarationNode> namespaces,
+        IReadOnlyDictionary<EntityId, FileNode> fileById)
+    {
+        return namespaces
+            .SelectMany(namespaceDeclaration => namespaceDeclaration.DeclarationFileIds.Select(fileId => (fileId, namespaceDeclaration)))
+            .GroupBy(x => x.fileId)
+            .ToDictionary(
+                x => x.Key,
+                x =>
+                {
+                    var filePath = fileById.TryGetValue(x.Key, out var file) ? file.Path : string.Empty;
+
+                    return (IReadOnlyList<NamespaceDeclarationNode>)x
+                    .Select(v => v.namespaceDeclaration)
+                    .DistinctBy(v => v.Id)
+                    .OrderBy(v => filePath, StringComparer.Ordinal)
+                    .ThenBy(v => ResolveDeclarationLocationSortLine(v.DeclarationLocations, filePath))
+                    .ThenBy(v => ResolveDeclarationLocationSortColumn(v.DeclarationLocations, filePath))
+                    .ThenBy(v => v.Path, StringComparer.Ordinal)
+                    .ThenBy(v => v.Name, StringComparer.Ordinal)
+                    .ThenBy(v => v.Id.Value, StringComparer.Ordinal)
+                    .ToArray();
+                });
+    }
+
+    private static IReadOnlyDictionary<EntityId, IReadOnlyList<TypeDeclarationNode>> BuildTypeBacklinksByFileId(
+        IReadOnlyList<TypeDeclarationNode> types,
+        IReadOnlyDictionary<EntityId, FileNode> fileById)
+    {
+        return types
+            .SelectMany(typeDeclaration => typeDeclaration.DeclarationFileIds.Select(fileId => (fileId, typeDeclaration)))
+            .GroupBy(x => x.fileId)
+            .ToDictionary(
+                x => x.Key,
+                x =>
+                {
+                    var filePath = fileById.TryGetValue(x.Key, out var file) ? file.Path : string.Empty;
+
+                    return (IReadOnlyList<TypeDeclarationNode>)x
+                    .Select(v => v.typeDeclaration)
+                    .DistinctBy(v => v.Id)
+                    .OrderBy(v => filePath, StringComparer.Ordinal)
+                    .ThenBy(v => ResolveDeclarationLocationSortLine(v.DeclarationLocations, filePath))
+                    .ThenBy(v => ResolveDeclarationLocationSortColumn(v.DeclarationLocations, filePath))
+                    .ThenBy(v => v.Path, StringComparer.Ordinal)
+                    .ThenBy(v => v.Name, StringComparer.Ordinal)
+                    .ThenBy(v => v.Id.Value, StringComparer.Ordinal)
+                    .ToArray();
+                });
+    }
+
+    private static IReadOnlyDictionary<EntityId, IReadOnlyList<MemberDeclarationNode>> BuildMemberBacklinksByFileId(
+        IReadOnlyList<MemberDeclarationNode> members,
+        IReadOnlyDictionary<EntityId, FileNode> fileById)
+    {
+        return members
+            .SelectMany(member => member.DeclarationFileIds.Select(fileId => (fileId, member)))
+            .GroupBy(x => x.fileId)
+            .ToDictionary(
+                x => x.Key,
+                x =>
+                {
+                    var filePath = fileById.TryGetValue(x.Key, out var file) ? file.Path : string.Empty;
+
+                    return (IReadOnlyList<MemberDeclarationNode>)x
+                    .Select(v => v.member)
+                    .DistinctBy(v => v.Id)
+                    .OrderBy(v => filePath, StringComparer.Ordinal)
+                    .ThenBy(v => ResolveDeclarationLocationSortLine(v.DeclarationLocations, filePath))
+                    .ThenBy(v => ResolveDeclarationLocationSortColumn(v.DeclarationLocations, filePath))
+                    .ThenBy(v => v.Kind.ToString(), StringComparer.Ordinal)
+                    .ThenBy(v => v.Name, StringComparer.Ordinal)
+                    .ThenBy(v => v.Id.Value, StringComparer.Ordinal)
+                    .ToArray();
+                });
+    }
+
+    private static int ResolveDeclarationLocationSortLine(
+        IReadOnlyList<DeclarationLocationNode> locations,
+        string filePath)
+    {
+        var location = locations
+            .Where(x => x.FilePath.Equals(filePath, StringComparison.Ordinal))
+            .OrderBy(x => x.Line)
+            .ThenBy(x => x.Column)
+            .FirstOrDefault();
+
+        return location?.Line ?? int.MaxValue;
+    }
+
+    private static int ResolveDeclarationLocationSortColumn(
+        IReadOnlyList<DeclarationLocationNode> locations,
+        string filePath)
+    {
+        var location = locations
+            .Where(x => x.FilePath.Equals(filePath, StringComparison.Ordinal))
+            .OrderBy(x => x.Line)
+            .ThenBy(x => x.Column)
+            .FirstOrDefault();
+
+        return location?.Column ?? int.MaxValue;
+    }
+
     private static WikiPage RenderNamespacePage(
         string repositoryId,
         NamespaceDeclarationNode namespaceDeclaration,
@@ -364,6 +471,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
         IReadOnlyDictionary<EntityId, MemberDeclarationNode> memberById,
         IReadOnlyDictionary<EntityId, FileNode> fileById,
+        IReadOnlyList<ProjectNode> projects,
         WikiPathResolver resolver)
     {
         var sb = new StringBuilder();
@@ -484,6 +592,14 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             frontMatter.Add(KeyValue("declaring_type_name", parentType.Name));
         }
 
+        if (TryResolvePrimaryProject(typeDeclaration, fileById, projects, out var primaryProject))
+        {
+            frontMatter.Add(KeyValue("primary_project_id", primaryProject.Id.Value));
+            frontMatter.Add(KeyValue("primary_project_name", primaryProject.Name));
+            frontMatter.Add(KeyValue("primary_assembly_name", primaryProject.Name));
+            frontMatter.Add(KeyValue("primary_project_path", primaryProject.Path));
+        }
+
         return new WikiPage(
             RelativePath: resolver.GetPath(typeDeclaration.Id),
             Title: typeDeclaration.Name,
@@ -546,6 +662,9 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
     private static WikiPage RenderFilePage(
         RepositoryNode repository,
         FileNode file,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<NamespaceDeclarationNode>> namespaceBacklinksByFileId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<TypeDeclarationNode>> typeBacklinksByFileId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<MemberDeclarationNode>> memberBacklinksByFileId,
         WikiPathResolver resolver,
         int? maxMergeEntriesPerFile)
     {
@@ -589,6 +708,48 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             sb.AppendLine($"  source_branch_file_commit_count: {merge.SourceBranchFileCommitCount}");
         }
 
+        sb.AppendLine();
+        sb.AppendLine("## Declared Symbols");
+
+        sb.AppendLine("### Namespaces");
+        if (namespaceBacklinksByFileId.TryGetValue(file.Id, out var namespaces))
+        {
+            foreach (var namespaceDeclaration in namespaces)
+            {
+                sb.AppendLine($"- {resolver.ToWikiLink(namespaceDeclaration.Id, namespaceDeclaration.Name)}");
+            }
+        }
+        else
+        {
+            sb.AppendLine("- none");
+        }
+
+        sb.AppendLine("### Types");
+        if (typeBacklinksByFileId.TryGetValue(file.Id, out var types))
+        {
+            foreach (var typeDeclaration in types)
+            {
+                sb.AppendLine($"- {resolver.ToWikiLink(typeDeclaration.Id, typeDeclaration.Name)}");
+            }
+        }
+        else
+        {
+            sb.AppendLine("- none");
+        }
+
+        sb.AppendLine("### Members");
+        if (memberBacklinksByFileId.TryGetValue(file.Id, out var members))
+        {
+            foreach (var member in members)
+            {
+                sb.AppendLine($"- {member.Name} ({member.Kind.ToString().ToLowerInvariant()})");
+            }
+        }
+        else
+        {
+            sb.AppendLine("- none");
+        }
+
         return new WikiPage(
             RelativePath: resolver.GetPath(file.Id),
             Title: file.Path,
@@ -601,6 +762,57 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     KeyValue("file_path", file.Path),
                 ],
                 sb.ToString().TrimEnd()));
+    }
+
+    private static bool TryResolvePrimaryProject(
+        TypeDeclarationNode typeDeclaration,
+        IReadOnlyDictionary<EntityId, FileNode> fileById,
+        IReadOnlyList<ProjectNode> projects,
+        out ProjectNode primaryProject)
+    {
+        var orderedDeclarationFilePaths = typeDeclaration.DeclarationLocations
+            .OrderBy(x => x.FilePath, StringComparer.Ordinal)
+            .ThenBy(x => x.Line)
+            .ThenBy(x => x.Column)
+            .Select(x => x.FilePath)
+            .Concat(typeDeclaration.DeclarationFileIds
+                .Where(fileById.ContainsKey)
+                .Select(id => fileById[id].Path))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        foreach (var declarationFilePath in orderedDeclarationFilePaths)
+        {
+            var project = projects
+                .Where(candidate => IsFileWithinProject(candidate.Path, declarationFilePath))
+                .OrderByDescending(candidate => candidate.Path.Length)
+                .ThenBy(candidate => candidate.Path, StringComparer.Ordinal)
+                .ThenBy(candidate => candidate.Id.Value, StringComparer.Ordinal)
+                .FirstOrDefault();
+
+            if (project is not null)
+            {
+                primaryProject = project;
+                return true;
+            }
+        }
+
+        primaryProject = null!;
+        return false;
+    }
+
+    private static bool IsFileWithinProject(string projectPath, string filePath)
+    {
+        var projectDirectory = projectPath.Replace('\\', '/');
+        var lastSlash = projectDirectory.LastIndexOf('/');
+        var directoryPath = lastSlash >= 0 ? projectDirectory[..lastSlash] : string.Empty;
+        if (string.IsNullOrWhiteSpace(directoryPath))
+        {
+            return false;
+        }
+
+        return filePath.StartsWith(directoryPath + "/", StringComparison.Ordinal)
+               || filePath.Equals(directoryPath, StringComparison.Ordinal);
     }
 
     private static DateTimeOffset ParseTimestamp(string value)

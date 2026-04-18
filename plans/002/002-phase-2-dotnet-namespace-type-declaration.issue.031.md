@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 002](./002-phase-2-dotnet-namespace-type-declaration.prd.md)
 
 - Issue: [#31](https://github.com/vbfg1973/code-llm-wiki/issues/31)
-- [ ] Status: open
-- [ ] Completion date: 
+- [x] Status: complete
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,10 +18,10 @@ Complete bidirectional declaration traceability by enriching file pages with gro
 
 ## Acceptance criteria
 
-- [ ] Type declarations link back to all declaration files/locations deterministically.
-- [ ] File pages include grouped declaration backlinks by kind (namespace/type/member).
-- [ ] Backlink ordering is deterministic by file path/source location/symbol identity tie-break.
-- [ ] Primary scalar project/assembly context is chosen deterministically by first declaration.
+- [x] Type declarations link back to all declaration files/locations deterministically.
+- [x] File pages include grouped declaration backlinks by kind (namespace/type/member).
+- [x] Backlink ordering is deterministic by file path/source location/symbol identity tie-break.
+- [x] Primary scalar project/assembly context is chosen deterministically by first declaration.
 
 ## Blocked by
 

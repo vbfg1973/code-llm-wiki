@@ -316,6 +316,18 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     CorePredicates.DeclaresNamespace,
                     new EntityNode(namespaceId)));
             }
+
+            foreach (var location in ns.DeclarationLocations
+                         .Distinct()
+                         .OrderBy(x => x.RelativeFilePath, StringComparer.Ordinal)
+                         .ThenBy(x => x.Line)
+                         .ThenBy(x => x.Column))
+            {
+                triples.Add(new SemanticTriple(
+                    new EntityNode(namespaceId),
+                    CorePredicates.DeclarationSourceLocation,
+                    new LiteralNode(FormatDeclarationSourceLocation(location))));
+            }
         }
 
         var typeGroups = discovery.Types
@@ -417,6 +429,19 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     new EntityNode(typeId)));
             }
 
+            foreach (var location in group
+                         .Select(x => new DeclarationSourceLocation(x.RelativeFilePath, x.SourceLine, x.SourceColumn))
+                         .Distinct()
+                         .OrderBy(x => x.RelativeFilePath, StringComparer.Ordinal)
+                         .ThenBy(x => x.Line)
+                         .ThenBy(x => x.Column))
+            {
+                triples.Add(new SemanticTriple(
+                    new EntityNode(typeId),
+                    CorePredicates.DeclarationSourceLocation,
+                    new LiteralNode(FormatDeclarationSourceLocation(location))));
+            }
+
             var memberGroups = group
                 .SelectMany(x => x.Members)
                 .GroupBy(x => $"{x.Kind}:{x.Name}", StringComparer.Ordinal)
@@ -491,6 +516,19 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                         new EntityNode(memberFileId),
                         CorePredicates.DeclaresMember,
                         new EntityNode(memberId)));
+                }
+
+                foreach (var location in memberGroup
+                             .Select(x => new DeclarationSourceLocation(x.RelativeFilePath, x.SourceLine, x.SourceColumn))
+                             .Distinct()
+                             .OrderBy(x => x.RelativeFilePath, StringComparer.Ordinal)
+                             .ThenBy(x => x.Line)
+                             .ThenBy(x => x.Column))
+                {
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(memberId),
+                        CorePredicates.DeclarationSourceLocation,
+                        new LiteralNode(FormatDeclarationSourceLocation(location))));
                 }
             }
         }
@@ -608,6 +646,11 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 CorePredicates.HasDeclaredType,
                 new EntityNode(resolvedMemberTypeId)));
         }
+    }
+
+    private static string FormatDeclarationSourceLocation(DeclarationSourceLocation location)
+    {
+        return $"{location.RelativeFilePath}|{location.Line}|{location.Column}";
     }
 
     private static string? ResolveInternalTypeName(

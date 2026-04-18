@@ -14,6 +14,7 @@ internal static class CSharpDeclarationScanner
         CancellationToken cancellationToken)
     {
         var declaredNamespaceFiles = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var declaredNamespaceLocations = new Dictionary<string, HashSet<DeclarationSourceLocation>>();
         var discoveredTypes = new List<TypeDiscoveryNode>();
 
         foreach (var relativePath in relativeSourcePaths)
@@ -41,6 +42,7 @@ internal static class CSharpDeclarationScanner
                 relativePath,
                 rootImportContext,
                 declaredNamespaceFiles,
+                declaredNamespaceLocations,
                 discoveredTypes);
         }
 
@@ -61,6 +63,13 @@ internal static class CSharpDeclarationScanner
                 GetParentNamespace(name),
                 declaredNamespaceFiles.TryGetValue(name, out var files)
                     ? files.OrderBy(x => x, StringComparer.Ordinal).ToArray()
+                    : [],
+                declaredNamespaceLocations.TryGetValue(name, out var locations)
+                    ? locations
+                        .OrderBy(x => x.RelativeFilePath, StringComparer.Ordinal)
+                        .ThenBy(x => x.Line)
+                        .ThenBy(x => x.Column)
+                        .ToArray()
                     : []))
             .OrderBy(x => x.Name, StringComparer.Ordinal)
             .ToArray();
@@ -81,6 +90,7 @@ internal static class CSharpDeclarationScanner
         string relativePath,
         TypeImportContext importContext,
         Dictionary<string, HashSet<string>> declaredNamespaceFiles,
+        Dictionary<string, HashSet<DeclarationSourceLocation>> declaredNamespaceLocations,
         List<TypeDiscoveryNode> discoveredTypes)
     {
         foreach (var member in members)
@@ -95,6 +105,10 @@ internal static class CSharpDeclarationScanner
 
                 var namespaceName = CombineNamespace(currentNamespace, declaredName);
                 RegisterDeclarationFile(declaredNamespaceFiles, namespaceName, relativePath);
+                RegisterDeclarationLocation(
+                    declaredNamespaceLocations,
+                    namespaceName,
+                    ToSourceLocation(namespaceDeclaration.Name.GetLocation(), relativePath));
 
                 var namespaceImportContext = MergeImportContexts(importContext, BuildImportContext(namespaceDeclaration.Usings));
 
@@ -105,6 +119,7 @@ internal static class CSharpDeclarationScanner
                     relativePath,
                     namespaceImportContext,
                     declaredNamespaceFiles,
+                    declaredNamespaceLocations,
                     discoveredTypes);
                 continue;
             }
@@ -116,6 +131,7 @@ internal static class CSharpDeclarationScanner
                 relativePath,
                 importContext,
                 declaredNamespaceFiles,
+                declaredNamespaceLocations,
                 discoveredTypes);
         }
     }
@@ -127,6 +143,7 @@ internal static class CSharpDeclarationScanner
         string relativePath,
         TypeImportContext importContext,
         Dictionary<string, HashSet<string>> declaredNamespaceFiles,
+        Dictionary<string, HashSet<DeclarationSourceLocation>> declaredNamespaceLocations,
         List<TypeDiscoveryNode> discoveredTypes)
     {
         var namespaceName = ResolveNamespace(currentNamespace);
@@ -147,9 +164,11 @@ internal static class CSharpDeclarationScanner
                     ParseDirectRelationships(classDeclaration),
                     ParseDeclaredMembers(classDeclaration.Members, relativePath),
                     relativePath,
+                    ToSourceLocation(classDeclaration.Identifier.GetLocation(), relativePath),
                     classDeclaration.Members,
                     importContext,
                     declaredNamespaceFiles,
+                    declaredNamespaceLocations,
                     discoveredTypes);
                 break;
             case InterfaceDeclarationSyntax interfaceDeclaration:
@@ -166,9 +185,11 @@ internal static class CSharpDeclarationScanner
                     ParseDirectRelationships(interfaceDeclaration),
                     ParseDeclaredMembers(interfaceDeclaration.Members, relativePath),
                     relativePath,
+                    ToSourceLocation(interfaceDeclaration.Identifier.GetLocation(), relativePath),
                     interfaceDeclaration.Members,
                     importContext,
                     declaredNamespaceFiles,
+                    declaredNamespaceLocations,
                     discoveredTypes);
                 break;
             case StructDeclarationSyntax structDeclaration:
@@ -185,9 +206,11 @@ internal static class CSharpDeclarationScanner
                     ParseDirectRelationships(structDeclaration),
                     ParseDeclaredMembers(structDeclaration.Members, relativePath),
                     relativePath,
+                    ToSourceLocation(structDeclaration.Identifier.GetLocation(), relativePath),
                     structDeclaration.Members,
                     importContext,
                     declaredNamespaceFiles,
+                    declaredNamespaceLocations,
                     discoveredTypes);
                 break;
             case RecordDeclarationSyntax recordDeclaration:
@@ -208,9 +231,11 @@ internal static class CSharpDeclarationScanner
                         .ThenBy(x => x.Name, StringComparer.Ordinal)
                         .ToArray(),
                     relativePath,
+                    ToSourceLocation(recordDeclaration.Identifier.GetLocation(), relativePath),
                     recordDeclaration.Members,
                     importContext,
                     declaredNamespaceFiles,
+                    declaredNamespaceLocations,
                     discoveredTypes);
                 break;
             case EnumDeclarationSyntax enumDeclaration:
@@ -227,9 +252,11 @@ internal static class CSharpDeclarationScanner
                     ([], []),
                     ParseEnumMembers(enumDeclaration, relativePath),
                     relativePath,
+                    ToSourceLocation(enumDeclaration.Identifier.GetLocation(), relativePath),
                     members: default,
                     importContext,
                     declaredNamespaceFiles,
+                    declaredNamespaceLocations,
                     discoveredTypes);
                 break;
             case DelegateDeclarationSyntax delegateDeclaration:
@@ -246,9 +273,11 @@ internal static class CSharpDeclarationScanner
                     ([], []),
                     [],
                     relativePath,
+                    ToSourceLocation(delegateDeclaration.Identifier.GetLocation(), relativePath),
                     members: default,
                     importContext,
                     declaredNamespaceFiles,
+                    declaredNamespaceLocations,
                     discoveredTypes);
                 break;
         }
@@ -267,9 +296,11 @@ internal static class CSharpDeclarationScanner
         (IReadOnlyList<string> Bases, IReadOnlyList<string> Interfaces) relationships,
         IReadOnlyList<MemberDiscoveryNode> discoveredMembers,
         string relativePath,
+        DeclarationSourceLocation sourceLocation,
         SyntaxList<MemberDeclarationSyntax> members,
         TypeImportContext importContext,
         Dictionary<string, HashSet<string>> declaredNamespaceFiles,
+        Dictionary<string, HashSet<DeclarationSourceLocation>> declaredNamespaceLocations,
         List<TypeDiscoveryNode> discoveredTypes)
     {
         var qualifiedName = BuildQualifiedTypeName(namespaceName, currentDeclaringTypeQualifiedName, typeName, arity);
@@ -290,11 +321,17 @@ internal static class CSharpDeclarationScanner
             importContext.Namespaces,
             importContext.Aliases,
             discoveredMembers,
-            relativePath));
+            relativePath,
+            sourceLocation.Line,
+            sourceLocation.Column));
 
         if (namespaceName == GlobalNamespaceName)
         {
             RegisterDeclarationFile(declaredNamespaceFiles, GlobalNamespaceName, relativePath);
+            RegisterDeclarationLocation(
+                declaredNamespaceLocations,
+                GlobalNamespaceName,
+                sourceLocation);
         }
 
         if (members.Count == 0)
@@ -309,6 +346,7 @@ internal static class CSharpDeclarationScanner
             relativePath,
             importContext,
             declaredNamespaceFiles,
+            declaredNamespaceLocations,
             discoveredTypes);
     }
 
@@ -416,25 +454,31 @@ internal static class CSharpDeclarationScanner
 
                     foreach (var variable in fieldDeclaration.Declaration.Variables)
                     {
+                        var sourceLocation = ToSourceLocation(variable.Identifier.GetLocation(), relativePath);
                         discoveredMembers.Add(new MemberDiscoveryNode(
                             "field",
                             variable.Identifier.ValueText,
                             accessibility,
                             declaredType,
                             variable.Initializer?.Value.ToString(),
-                            relativePath));
+                            relativePath,
+                            sourceLocation.Line,
+                            sourceLocation.Column));
                     }
 
                     break;
                 }
                 case PropertyDeclarationSyntax propertyDeclaration:
+                    var propertyLocation = ToSourceLocation(propertyDeclaration.Identifier.GetLocation(), relativePath);
                     discoveredMembers.Add(new MemberDiscoveryNode(
                         "property",
                         propertyDeclaration.Identifier.ValueText,
                         ParseAccessibility(propertyDeclaration.Modifiers),
                         NormalizeTypeReference(propertyDeclaration.Type.ToString()),
                         null,
-                        relativePath));
+                        relativePath,
+                        propertyLocation.Line,
+                        propertyLocation.Column));
                     break;
             }
         }
@@ -480,13 +524,16 @@ internal static class CSharpDeclarationScanner
                 lastIntegralValue = nextValue;
             }
 
+            var memberLocation = ToSourceLocation(member.Identifier.GetLocation(), relativePath);
             members.Add(new MemberDiscoveryNode(
                 "enum-member",
                 member.Identifier.ValueText,
                 "public",
                 null,
                 constantValue,
-                relativePath));
+                relativePath,
+                memberLocation.Line,
+                memberLocation.Column));
         }
 
         return members
@@ -502,13 +549,19 @@ internal static class CSharpDeclarationScanner
         }
 
         return recordDeclaration.ParameterList.Parameters
-            .Select(parameter => new MemberDiscoveryNode(
-                "record-parameter",
-                parameter.Identifier.ValueText,
-                "public",
-                parameter.Type is null ? null : NormalizeTypeReference(parameter.Type.ToString()),
-                null,
-                relativePath))
+            .Select(parameter =>
+            {
+                var parameterLocation = ToSourceLocation(parameter.Identifier.GetLocation(), relativePath);
+                return new MemberDiscoveryNode(
+                    "record-parameter",
+                    parameter.Identifier.ValueText,
+                    "public",
+                    parameter.Type is null ? null : NormalizeTypeReference(parameter.Type.ToString()),
+                    null,
+                    relativePath,
+                    parameterLocation.Line,
+                    parameterLocation.Column);
+            })
             .OrderBy(x => x.Name, StringComparer.Ordinal)
             .ToArray();
     }
@@ -709,6 +762,29 @@ internal static class CSharpDeclarationScanner
         }
 
         files.Add(relativePath);
+    }
+
+    private static void RegisterDeclarationLocation(
+        Dictionary<string, HashSet<DeclarationSourceLocation>> declaredNamespaceLocations,
+        string namespaceName,
+        DeclarationSourceLocation sourceLocation)
+    {
+        if (!declaredNamespaceLocations.TryGetValue(namespaceName, out var locations))
+        {
+            locations = new HashSet<DeclarationSourceLocation>();
+            declaredNamespaceLocations[namespaceName] = locations;
+        }
+
+        locations.Add(sourceLocation);
+    }
+
+    private static DeclarationSourceLocation ToSourceLocation(Location location, string relativePath)
+    {
+        var lineSpan = location.GetLineSpan();
+        return new DeclarationSourceLocation(
+            relativePath,
+            lineSpan.StartLinePosition.Line + 1,
+            lineSpan.StartLinePosition.Character + 1);
     }
 
     private static void AddNamespaceAndParents(HashSet<string> names, string namespaceName)

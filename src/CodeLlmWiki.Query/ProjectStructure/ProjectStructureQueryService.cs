@@ -563,6 +563,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         var containsMemberEdges = BuildEntityEdges(triples, CorePredicates.ContainsMember);
         var memberDeclaredTypeEdges = BuildEntityEdges(triples, CorePredicates.HasDeclaredType);
         var fileDeclaresMember = BuildEntityEdges(triples, CorePredicates.DeclaresMember);
+        var declarationLocationsByEntityId = BuildDeclarationLocationsByEntityId(triples);
 
         var namespaceIds = metadataById
             .Where(x => x.Value.IsType("namespace"))
@@ -707,7 +708,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 declarationFilesByNamespace.TryGetValue(namespaceId, out var declarationFileIds);
                 declarationFileIds ??= [];
 
-                return new NamespaceDeclarationNode(
+                var namespaceNode = new NamespaceDeclarationNode(
                     namespaceId,
                     meta.Name,
                     meta.Path,
@@ -715,6 +716,16 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     childNamespaceIds,
                     containedTypeIds,
                     declarationFileIds);
+
+                if (declarationLocationsByEntityId.TryGetValue(namespaceId, out var declarationLocations))
+                {
+                    namespaceNode = namespaceNode with
+                    {
+                        DeclarationLocations = declarationLocations,
+                    };
+                }
+
+                return namespaceNode;
             })
             .OrderBy(
                 x => DeclarationOrderingRules.GetDeterministicSortKey(
@@ -743,7 +754,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 memberIdsByType.TryGetValue(typeId, out var memberIds);
                 memberIds ??= [];
 
-                return new TypeDeclarationNode(
+                var typeNode = new TypeDeclarationNode(
                     typeId,
                     ParseTypeKind(meta.TypeKind),
                     meta.Name,
@@ -769,6 +780,16 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                         .ToArray(),
                     memberIds,
                     declarationFileIds);
+
+                if (declarationLocationsByEntityId.TryGetValue(typeId, out var declarationLocations))
+                {
+                    typeNode = typeNode with
+                    {
+                        DeclarationLocations = declarationLocations,
+                    };
+                }
+
+                return typeNode;
             })
             .OrderBy(
                 x => DeclarationOrderingRules.GetDeterministicSortKey(
@@ -813,7 +834,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                             : declaredTypeId.Value,
                         GetReferenceResolutionStatus(declaredTypeId, metadataById));
 
-                return new MemberDeclarationNode(
+                var memberNode = new MemberDeclarationNode(
                     memberId,
                     ParseMemberKind(meta.MemberKind),
                     meta.Name,
@@ -823,6 +844,16 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     declaredType,
                     string.IsNullOrWhiteSpace(meta.ConstantValue) ? null : meta.ConstantValue,
                     declarationFileIds);
+
+                if (declarationLocationsByEntityId.TryGetValue(memberId, out var declarationLocations))
+                {
+                    memberNode = memberNode with
+                    {
+                        DeclarationLocations = declarationLocations,
+                    };
+                }
+
+                return memberNode;
             })
             .Where(x => x.DeclaringTypeId != default)
             .OrderBy(
@@ -902,6 +933,57 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         }
 
         return DeclarationResolutionStatus.Unresolved;
+    }
+
+    private static IReadOnlyDictionary<EntityId, IReadOnlyList<DeclarationLocationNode>> BuildDeclarationLocationsByEntityId(
+        IReadOnlyList<SemanticTriple> triples)
+    {
+        return triples
+            .Where(x => x.Predicate == CorePredicates.DeclarationSourceLocation)
+            .Where(x => x.Subject is EntityNode && x.Object is LiteralNode)
+            .Select(x => (EntityId: ((EntityNode)x.Subject).Id, Location: ParseDeclarationLocation(((LiteralNode)x.Object).Value?.ToString() ?? string.Empty)))
+            .Where(x => x.Location is not null)
+            .GroupBy(x => x.EntityId)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<DeclarationLocationNode>)x
+                    .Select(v => v.Location!)
+                    .Distinct()
+                    .OrderBy(v => v.FilePath, StringComparer.Ordinal)
+                    .ThenBy(v => v.Line)
+                    .ThenBy(v => v.Column)
+                    .ToArray());
+    }
+
+    private static DeclarationLocationNode? ParseDeclarationLocation(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var parts = value.Split('|', StringSplitOptions.None);
+        if (parts.Length != 3)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(parts[0]))
+        {
+            return null;
+        }
+
+        if (!int.TryParse(parts[1], out var line) || line <= 0)
+        {
+            return null;
+        }
+
+        if (!int.TryParse(parts[2], out var column) || column <= 0)
+        {
+            return null;
+        }
+
+        return new DeclarationLocationNode(parts[0], line, column);
     }
 
     private static IReadOnlyList<EntityEdge> BuildEntityEdges(
