@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 003](./003-phase-3-dotnet-method-extraction-and-relations.prd.md)
 
 - Issue: [#45](https://github.com/vbfg1973/code-llm-wiki/issues/45)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: completed
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,10 +18,10 @@ Deliver method call relationship extraction for internal callers, including inte
 
 ## Acceptance criteria
 
-- [ ] `calls` edges are created for internal method callers with semantically resolved targets where possible.
-- [ ] External invocation usage is represented at external type and external assembly granularity (no deep external method pages).
-- [ ] Extension methods are captured, flagged, resolved from extension-call syntax, and linked to extended internal types.
-- [ ] Method pages render deterministic `Calls`/`Called By` sections and degradation diagnostics/provenance when semantic binding fails.
+- [x] `calls` edges are created for internal method callers with semantically resolved targets where possible.
+- [x] External invocation usage is represented at external type and external assembly granularity (no deep external method pages).
+- [x] Extension methods are captured, flagged, resolved from extension-call syntax, and linked to extended internal types.
+- [x] Method pages render deterministic `Calls`/`Called By` sections and degradation diagnostics/provenance when semantic binding fails.
 
 ## Blocked by
 

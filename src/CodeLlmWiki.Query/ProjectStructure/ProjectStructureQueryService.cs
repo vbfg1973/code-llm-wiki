@@ -393,6 +393,14 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             {
                 meta.ParameterName = value;
             }
+            else if (triple.Predicate == CorePredicates.ExternalAssemblyName)
+            {
+                meta.ExternalAssemblyName = value;
+            }
+            else if (triple.Predicate == CorePredicates.ResolutionReason)
+            {
+                meta.ResolutionReason = value;
+            }
         }
 
         return byId;
@@ -1101,14 +1109,39 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 null,
                 null,
                 GetReferenceResolutionStatus(x.Object, metadataById))))
-            .Concat(methodCallsEdges.Select(x => new MethodRelationNode(
-                x.Subject,
-                MethodRelationKind.Calls,
-                x.Object,
-                null,
-                null,
-                null,
-                GetReferenceResolutionStatus(x.Object, metadataById))))
+            .Concat(methodCallsEdges.Select(x =>
+            {
+                var resolutionStatus = GetReferenceResolutionStatus(x.Object, metadataById);
+                if (metadataById.TryGetValue(x.Object, out var targetMeta) && targetMeta.IsType("method-declaration"))
+                {
+                    return new MethodRelationNode(
+                        x.Subject,
+                        MethodRelationKind.Calls,
+                        x.Object,
+                        null,
+                        null,
+                        null,
+                        resolutionStatus,
+                        null);
+                }
+
+                return new MethodRelationNode(
+                    x.Subject,
+                    MethodRelationKind.Calls,
+                    null,
+                    null,
+                    new TypeReferenceNode(
+                        x.Object,
+                        metadataById.TryGetValue(x.Object, out var externalMeta) ? externalMeta.Name : x.Object.Value,
+                        resolutionStatus),
+                    metadataById.TryGetValue(x.Object, out var callTargetMeta) && !string.IsNullOrWhiteSpace(callTargetMeta.ExternalAssemblyName)
+                        ? callTargetMeta.ExternalAssemblyName
+                        : null,
+                    resolutionStatus,
+                    metadataById.TryGetValue(x.Object, out var unresolvedTargetMeta) && !string.IsNullOrWhiteSpace(unresolvedTargetMeta.ResolutionReason)
+                        ? unresolvedTargetMeta.ResolutionReason
+                        : null);
+            }))
             .Concat(methodReadsPropertyEdges.Select(x => new MethodRelationNode(
                 x.Subject,
                 MethodRelationKind.ReadsProperty,
@@ -1355,6 +1388,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             IsExtensionMethod = false;
             ParameterName = string.Empty;
             ParameterOrdinal = -1;
+            ExternalAssemblyName = string.Empty;
+            ResolutionReason = string.Empty;
         }
 
         public EntityId Id { get; }
@@ -1428,6 +1463,10 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         public string ParameterName { get; set; }
 
         public int ParameterOrdinal { get; set; }
+
+        public string ExternalAssemblyName { get; set; }
+
+        public string ResolutionReason { get; set; }
 
         public bool IsType(string entityType) => EntityType.Equals(entityType, StringComparison.OrdinalIgnoreCase);
     }

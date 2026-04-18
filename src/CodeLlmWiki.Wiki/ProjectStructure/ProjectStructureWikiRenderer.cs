@@ -110,6 +110,26 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     .Distinct()
                     .OrderBy(v => v.Value, StringComparer.Ordinal)
                     .ToArray());
+        var callRelationsBySourceMethodId = model.Declarations.Methods.Relations
+            .Where(x => x.Kind == MethodRelationKind.Calls)
+            .GroupBy(x => x.SourceMethodId)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<MethodRelationNode>)x
+                    .OrderBy(v => v.TargetMethodId?.Value ?? string.Empty, StringComparer.Ordinal)
+                    .ThenBy(v => v.ExternalTargetType?.DisplayText ?? string.Empty, StringComparer.Ordinal)
+                    .ThenBy(v => v.ExternalAssemblyName ?? string.Empty, StringComparer.Ordinal)
+                    .ToArray());
+        var calledByMethodIdsByTargetMethodId = model.Declarations.Methods.Relations
+            .Where(x => x.Kind == MethodRelationKind.Calls && x.TargetMethodId is not null)
+            .GroupBy(x => x.TargetMethodId!.Value)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.SourceMethodId)
+                    .Distinct()
+                    .OrderBy(v => v.Value, StringComparer.Ordinal)
+                    .ToArray());
         var fileById = model.Files.ToDictionary(x => x.Id, x => x);
         var namespaceBacklinksByFileId = BuildNamespaceBacklinksByFileId(model.Declarations.Namespaces, fileById);
         var typeBacklinksByFileId = BuildTypeBacklinksByFileId(model.Declarations.Types, fileById);
@@ -134,6 +154,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 methodById,
                 implementedMethodIdsBySourceMethodId,
                 overriddenMethodIdsBySourceMethodId,
+                callRelationsBySourceMethodId,
+                calledByMethodIdsByTargetMethodId,
                 fileById,
                 resolver)));
         pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, namespaceBacklinksByFileId, typeBacklinksByFileId, memberBacklinksByFileId, methodBacklinksByFileId, resolver, maxMergeEntriesPerFile)));
@@ -779,6 +801,50 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         }
     }
 
+    private static void AppendOutgoingCallSection(
+        StringBuilder sb,
+        EntityId sourceMethodId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<MethodRelationNode>> callRelationsBySourceMethodId,
+        IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        WikiPathResolver resolver)
+    {
+        if (!callRelationsBySourceMethodId.TryGetValue(sourceMethodId, out var callRelations) || callRelations.Count == 0)
+        {
+            sb.AppendLine("- none");
+            return;
+        }
+
+        foreach (var relation in callRelations)
+        {
+            if (relation.TargetMethodId is { } targetMethodId && methodById.TryGetValue(targetMethodId, out var targetMethod))
+            {
+                sb.AppendLine($"- {resolver.ToWikiLink(targetMethod.Id, FormatMethodLinkAlias(targetMethod))}");
+                continue;
+            }
+
+            if (relation.ExternalTargetType is not null)
+            {
+                var assemblySuffix = string.IsNullOrWhiteSpace(relation.ExternalAssemblyName)
+                    ? string.Empty
+                    : $" ({relation.ExternalAssemblyName})";
+                var unresolvedReasonSuffix = string.IsNullOrWhiteSpace(relation.ResolutionReason)
+                    ? string.Empty
+                    : $": {relation.ResolutionReason}";
+                var statusSuffix = relation.ExternalTargetType.ResolutionStatus switch
+                {
+                    DeclarationResolutionStatus.ExternalStub => " (external)",
+                    DeclarationResolutionStatus.SourceTextFallback => $" (unresolved{unresolvedReasonSuffix})",
+                    DeclarationResolutionStatus.Unresolved => $" (unresolved{unresolvedReasonSuffix})",
+                    _ => string.Empty,
+                };
+                sb.AppendLine($"- {relation.ExternalTargetType.DisplayText}{assemblySuffix}{statusSuffix}");
+                continue;
+            }
+
+            sb.AppendLine("- unresolved target");
+        }
+    }
+
     private static string FormatMethodLinkAlias(MethodDeclarationNode method)
     {
         var orderedParameters = method.Parameters
@@ -825,6 +891,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
         IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> implementedMethodIdsBySourceMethodId,
         IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> overriddenMethodIdsBySourceMethodId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<MethodRelationNode>> callRelationsBySourceMethodId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> calledByMethodIdsByTargetMethodId,
         IReadOnlyDictionary<EntityId, FileNode> fileById,
         WikiPathResolver resolver)
     {
@@ -885,6 +953,24 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             sb,
             methodDeclaration.Id,
             overriddenMethodIdsBySourceMethodId,
+            methodById,
+            resolver);
+
+        sb.AppendLine();
+        sb.AppendLine("## Calls");
+        AppendOutgoingCallSection(
+            sb,
+            methodDeclaration.Id,
+            callRelationsBySourceMethodId,
+            methodById,
+            resolver);
+
+        sb.AppendLine();
+        sb.AppendLine("## Called By");
+        AppendMethodRelationshipSection(
+            sb,
+            methodDeclaration.Id,
+            calledByMethodIdsByTargetMethodId,
             methodById,
             resolver);
 

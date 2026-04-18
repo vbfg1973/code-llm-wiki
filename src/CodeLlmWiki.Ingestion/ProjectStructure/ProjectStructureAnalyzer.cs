@@ -5,6 +5,9 @@ using System.Globalization;
 using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Query.ProjectStructure;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.Build.Construction;
 using Microsoft.Build.Evaluation;
 
@@ -348,9 +351,12 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         var directInterfaceTypeIdsByTypeId = new Dictionary<EntityId, List<EntityId>>();
         var pendingMemberTypeLinks = new List<PendingMemberTypeLink>();
         var pendingMethodReturnTypeLinks = new List<PendingMethodReturnTypeLink>();
+        var pendingMethodExtendedTypeLinks = new List<PendingMethodExtendedTypeLink>();
         var pendingMethodParameterTypeLinks = new List<PendingMethodParameterTypeLink>();
+        var methodIdByDeclarationLocation = new Dictionary<MethodDeclarationLocationKey, EntityId>();
         var externalStubIdByReference = new Dictionary<string, EntityId>(StringComparer.Ordinal);
         var unresolvedReferenceIdByText = new Dictionary<string, EntityId>(StringComparer.Ordinal);
+        var unresolvedCallTargetIdByText = new Dictionary<string, EntityId>(StringComparer.Ordinal);
         var projectAssemblyContexts = BuildProjectAssemblyContexts(repositoryRoot, projectAssemblyNameByPath);
 
         foreach (var group in typeGroups)
@@ -607,6 +613,24 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     CorePredicates.ContainsMethod,
                     new EntityNode(methodId)));
 
+                if (representativeMethod.IsExtensionMethod)
+                {
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(methodId),
+                        CorePredicates.IsExtensionMethod,
+                        new LiteralNode("true")));
+
+                    if (!string.IsNullOrWhiteSpace(representativeMethod.ExtendedTypeName))
+                    {
+                        pendingMethodExtendedTypeLinks.Add(new PendingMethodExtendedTypeLink(
+                            methodId,
+                            representative.NamespaceName,
+                            representativeMethod.ExtendedTypeName!,
+                            representative.ImportedNamespaces,
+                            representative.ImportedAliases));
+                    }
+                }
+
                 if (!methodCandidatesByTypeId.TryGetValue(typeId, out var methodCandidates))
                 {
                     methodCandidates = new List<MethodRelationshipCandidate>();
@@ -659,6 +683,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                              .ThenBy(x => x.Line)
                              .ThenBy(x => x.Column))
                 {
+                    methodIdByDeclarationLocation[new MethodDeclarationLocationKey(location.RelativeFilePath, location.Line, location.Column)] = methodId;
                     triples.Add(new SemanticTriple(
                         new EntityNode(methodId),
                         CorePredicates.DeclarationSourceLocation,
@@ -922,6 +947,17 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             }
         }
 
+        CaptureMethodCalls(
+            repositoryRoot,
+            sourceFiles,
+            typeIdByQualifiedName,
+            methodCandidatesByTypeId,
+            methodIdByDeclarationLocation,
+            externalStubIdByReference,
+            unresolvedCallTargetIdByText,
+            triples,
+            diagnostics);
+
         foreach (var pendingMemberTypeLink in pendingMemberTypeLinks)
         {
             var resolvedMemberTypeName = ResolveInternalTypeName(
@@ -985,6 +1021,38 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 new EntityNode(resolvedReturnTypeId)));
         }
 
+        foreach (var pendingExtendedTypeLink in pendingMethodExtendedTypeLinks)
+        {
+            var resolvedExtendedTypeName = ResolveInternalTypeName(
+                pendingExtendedTypeLink.NamespaceName,
+                pendingExtendedTypeLink.ExtendedTypeName,
+                pendingExtendedTypeLink.ImportedNamespaces,
+                pendingExtendedTypeLink.ImportedAliases,
+                typeIdByQualifiedName,
+                declaredTypeNamesBySimpleName);
+
+            if (resolvedExtendedTypeName is null || !typeIdByQualifiedName.TryGetValue(resolvedExtendedTypeName, out var resolvedExtendedTypeId))
+            {
+                var normalizedExtendedType = NormalizeTypeReferenceName(pendingExtendedTypeLink.ExtendedTypeName);
+                if (IsExternalStubCandidate(normalizedExtendedType))
+                {
+                    resolvedExtendedTypeId = GetOrCreateExternalStubId(normalizedExtendedType, externalStubIdByReference, triples);
+                }
+                else
+                {
+                    diagnostics.Add(new IngestionDiagnostic(
+                        "type:resolution:fallback",
+                        $"Unresolved extension target type '{pendingExtendedTypeLink.ExtendedTypeName}' for method '{pendingExtendedTypeLink.MethodId.Value}'."));
+                    continue;
+                }
+            }
+
+            triples.Add(new SemanticTriple(
+                new EntityNode(pendingExtendedTypeLink.MethodId),
+                CorePredicates.ExtendsType,
+                new EntityNode(resolvedExtendedTypeId)));
+        }
+
         foreach (var pendingParameterTypeLink in pendingMethodParameterTypeLinks)
         {
             var resolvedParameterTypeName = ResolveInternalTypeName(
@@ -1016,6 +1084,354 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 CorePredicates.HasDeclaredType,
                 new EntityNode(resolvedParameterTypeId)));
         }
+    }
+
+    private void CaptureMethodCalls(
+        string repositoryRoot,
+        IReadOnlyList<string> sourceFiles,
+        IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
+        IReadOnlyDictionary<EntityId, List<MethodRelationshipCandidate>> methodCandidatesByTypeId,
+        IReadOnlyDictionary<MethodDeclarationLocationKey, EntityId> methodIdByDeclarationLocation,
+        Dictionary<string, EntityId> externalStubIdByReference,
+        Dictionary<string, EntityId> unresolvedCallTargetIdByText,
+        List<SemanticTriple> triples,
+        List<IngestionDiagnostic> diagnostics)
+    {
+        if (sourceFiles.Count == 0 || methodIdByDeclarationLocation.Count == 0)
+        {
+            return;
+        }
+
+        var syntaxTrees = new List<SyntaxTree>(sourceFiles.Count);
+        foreach (var relativePath in sourceFiles.OrderBy(x => x, StringComparer.Ordinal))
+        {
+            var fullPath = Path.Combine(repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(fullPath))
+            {
+                continue;
+            }
+
+            var sourceText = File.ReadAllText(fullPath);
+            var syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: relativePath);
+            syntaxTrees.Add(syntaxTree);
+        }
+
+        if (syntaxTrees.Count == 0)
+        {
+            return;
+        }
+
+        var references = BuildCompilationReferences(diagnostics);
+        var compilation = CSharpCompilation.Create(
+            assemblyName: "CodeLlmWiki.CallGraph",
+            syntaxTrees: syntaxTrees,
+            references: references,
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        foreach (var syntaxTree in syntaxTrees)
+        {
+            var semanticModel = compilation.GetSemanticModel(syntaxTree, ignoreAccessibility: true);
+            var root = syntaxTree.GetRoot() as CompilationUnitSyntax;
+            if (root is null)
+            {
+                continue;
+            }
+
+            foreach (var methodDeclaration in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
+            {
+                if (methodDeclaration.Body is null && methodDeclaration.ExpressionBody is null)
+                {
+                    continue;
+                }
+
+                var sourceMethodId = ResolveSourceMethodId(methodDeclaration.Identifier.GetLocation(), methodIdByDeclarationLocation);
+                if (sourceMethodId == default)
+                {
+                    continue;
+                }
+
+                AddCallEdgesForInvocations(
+                    methodDeclaration,
+                    sourceMethodId,
+                    semanticModel,
+                    typeIdByQualifiedName,
+                    methodCandidatesByTypeId,
+                    externalStubIdByReference,
+                    unresolvedCallTargetIdByText,
+                    triples,
+                    diagnostics);
+            }
+
+            foreach (var constructorDeclaration in root.DescendantNodes().OfType<ConstructorDeclarationSyntax>())
+            {
+                if (constructorDeclaration.Body is null && constructorDeclaration.ExpressionBody is null)
+                {
+                    continue;
+                }
+
+                var sourceMethodId = ResolveSourceMethodId(constructorDeclaration.Identifier.GetLocation(), methodIdByDeclarationLocation);
+                if (sourceMethodId == default)
+                {
+                    continue;
+                }
+
+                AddCallEdgesForInvocations(
+                    constructorDeclaration,
+                    sourceMethodId,
+                    semanticModel,
+                    typeIdByQualifiedName,
+                    methodCandidatesByTypeId,
+                    externalStubIdByReference,
+                    unresolvedCallTargetIdByText,
+                    triples,
+                    diagnostics);
+            }
+        }
+    }
+
+    private void AddCallEdgesForInvocations(
+        MemberDeclarationSyntax declaration,
+        EntityId sourceMethodId,
+        SemanticModel semanticModel,
+        IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
+        IReadOnlyDictionary<EntityId, List<MethodRelationshipCandidate>> methodCandidatesByTypeId,
+        Dictionary<string, EntityId> externalStubIdByReference,
+        Dictionary<string, EntityId> unresolvedCallTargetIdByText,
+        List<SemanticTriple> triples,
+        List<IngestionDiagnostic> diagnostics)
+    {
+        var invocations = declaration
+            .DescendantNodes()
+            .OfType<InvocationExpressionSyntax>()
+            .ToArray();
+
+        foreach (var invocation in invocations)
+        {
+            var symbolInfo = semanticModel.GetSymbolInfo(invocation);
+            var calledSymbol = symbolInfo.Symbol as IMethodSymbol
+                               ?? symbolInfo.CandidateSymbols.OfType<IMethodSymbol>().FirstOrDefault();
+
+            if (calledSymbol is null)
+            {
+                var unresolvedTarget = invocation.Expression.ToString().Trim();
+                if (string.IsNullOrWhiteSpace(unresolvedTarget))
+                {
+                    unresolvedTarget = invocation.ToString().Trim();
+                }
+
+                var unresolvedTargetId = GetOrCreateUnresolvedCallTargetId(
+                    unresolvedTarget,
+                    "symbol-unresolved",
+                    unresolvedCallTargetIdByText,
+                    triples);
+                triples.Add(new SemanticTriple(
+                    new EntityNode(sourceMethodId),
+                    CorePredicates.Calls,
+                    new EntityNode(unresolvedTargetId)));
+                diagnostics.Add(new IngestionDiagnostic(
+                    "method:call:resolution:failed",
+                    $"Failed to resolve invocation '{invocation}' in method '{sourceMethodId.Value}'."));
+                continue;
+            }
+
+            var targetSymbol = calledSymbol.ReducedFrom ?? calledSymbol;
+            if (targetSymbol.ContainingType is null)
+            {
+                var unresolvedTarget = invocation.Expression.ToString().Trim();
+                if (string.IsNullOrWhiteSpace(unresolvedTarget))
+                {
+                    unresolvedTarget = invocation.ToString().Trim();
+                }
+
+                var unresolvedTargetId = GetOrCreateUnresolvedCallTargetId(
+                    unresolvedTarget,
+                    "missing-containing-type",
+                    unresolvedCallTargetIdByText,
+                    triples);
+                triples.Add(new SemanticTriple(
+                    new EntityNode(sourceMethodId),
+                    CorePredicates.Calls,
+                    new EntityNode(unresolvedTargetId)));
+                diagnostics.Add(new IngestionDiagnostic(
+                    "method:call:resolution:failed",
+                    $"Invocation target has no containing type for '{targetSymbol.Name}' in method '{sourceMethodId.Value}'."));
+                continue;
+            }
+
+            var targetTypeQualifiedName = GetTypeQualifiedName(targetSymbol.ContainingType);
+            if (typeIdByQualifiedName.TryGetValue(targetTypeQualifiedName, out var targetTypeId))
+            {
+                if (methodCandidatesByTypeId.TryGetValue(targetTypeId, out var targetCandidates))
+                {
+                    var targetMethodId = ResolveTargetMethodId(targetSymbol, targetCandidates);
+                    if (targetMethodId is not null)
+                    {
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(sourceMethodId),
+                            CorePredicates.Calls,
+                            new EntityNode(targetMethodId.Value)));
+                        continue;
+                    }
+                }
+
+                var unresolvedTarget = invocation.Expression.ToString().Trim();
+                if (string.IsNullOrWhiteSpace(unresolvedTarget))
+                {
+                    unresolvedTarget = invocation.ToString().Trim();
+                }
+
+                var unresolvedTargetId = GetOrCreateUnresolvedCallTargetId(
+                    unresolvedTarget,
+                    "internal-target-unmatched",
+                    unresolvedCallTargetIdByText,
+                    triples);
+                triples.Add(new SemanticTriple(
+                    new EntityNode(sourceMethodId),
+                    CorePredicates.Calls,
+                    new EntityNode(unresolvedTargetId)));
+                diagnostics.Add(new IngestionDiagnostic(
+                    "method:call:internal-target-unmatched",
+                    $"Invocation '{invocation}' resolved to internal type '{targetTypeQualifiedName}' but no unique method declaration could be matched in method '{sourceMethodId.Value}'."));
+                continue;
+            }
+
+            var externalTypeName = targetSymbol.ContainingType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            var externalTypeId = GetOrCreateExternalStubId(externalTypeName, externalStubIdByReference, triples);
+            if (!string.IsNullOrWhiteSpace(targetSymbol.ContainingAssembly?.Name))
+            {
+                triples.Add(new SemanticTriple(
+                    new EntityNode(externalTypeId),
+                    CorePredicates.ExternalAssemblyName,
+                    new LiteralNode(targetSymbol.ContainingAssembly!.Name)));
+            }
+
+            triples.Add(new SemanticTriple(
+                new EntityNode(sourceMethodId),
+                CorePredicates.Calls,
+                new EntityNode(externalTypeId)));
+        }
+    }
+
+    private static IReadOnlyList<MetadataReference> BuildCompilationReferences(List<IngestionDiagnostic> diagnostics)
+    {
+        var tpa = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
+        if (string.IsNullOrWhiteSpace(tpa))
+        {
+            diagnostics.Add(new IngestionDiagnostic(
+                "method:call:references:missing",
+                "Trusted platform assemblies were unavailable; semantic call resolution may be degraded."));
+            return [];
+        }
+
+        return tpa
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Where(File.Exists)
+            .Select(path => MetadataReference.CreateFromFile(path))
+            .ToArray();
+    }
+
+    private static EntityId ResolveSourceMethodId(
+        Location declarationLocation,
+        IReadOnlyDictionary<MethodDeclarationLocationKey, EntityId> methodIdByDeclarationLocation)
+    {
+        var lineSpan = declarationLocation.GetLineSpan();
+        var key = new MethodDeclarationLocationKey(
+            declarationLocation.SourceTree?.FilePath ?? string.Empty,
+            lineSpan.StartLinePosition.Line + 1,
+            lineSpan.StartLinePosition.Character + 1);
+
+        return methodIdByDeclarationLocation.TryGetValue(key, out var methodId)
+            ? methodId
+            : default;
+    }
+
+    private static EntityId? ResolveTargetMethodId(
+        IMethodSymbol targetSymbol,
+        IReadOnlyList<MethodRelationshipCandidate> candidates)
+    {
+        var targetName = targetSymbol.MethodKind == MethodKind.Constructor
+            ? ".ctor"
+            : targetSymbol.Name;
+        var arity = targetSymbol.Arity;
+        var parameterCount = targetSymbol.Parameters.Length;
+
+        var nameAndShapeMatches = candidates
+            .Where(x =>
+                string.Equals(x.Kind, "method", StringComparison.Ordinal)
+                && ExtractMethodNameForRelationship(x.CanonicalName).Equals(targetName, StringComparison.Ordinal)
+                && x.Arity == arity
+                && x.ParameterTypeSignatures.Count == parameterCount)
+            .ToArray();
+
+        if (nameAndShapeMatches.Length == 1)
+        {
+            return nameAndShapeMatches[0].MethodId;
+        }
+
+        if (nameAndShapeMatches.Length == 0)
+        {
+            return null;
+        }
+
+        var symbolParameterSignatures = targetSymbol.Parameters
+            .Select(x => NormalizeMethodIdentityTypeSignature(x.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)))
+            .ToArray();
+
+        var exactMatches = nameAndShapeMatches
+            .Where(candidate => candidate.ParameterTypeSignatures.SequenceEqual(symbolParameterSignatures, StringComparer.Ordinal))
+            .ToArray();
+
+        return exactMatches.Length == 1
+            ? exactMatches[0].MethodId
+            : null;
+    }
+
+    private static string GetTypeQualifiedName(ITypeSymbol typeSymbol)
+    {
+        var segments = new Stack<string>();
+        var currentType = typeSymbol;
+        while (currentType is not null)
+        {
+            segments.Push(currentType.MetadataName);
+            currentType = currentType.ContainingType;
+        }
+
+        var namespaceName = typeSymbol.ContainingNamespace?.ToDisplayString();
+        if (!string.IsNullOrWhiteSpace(namespaceName) && !typeSymbol.ContainingNamespace!.IsGlobalNamespace)
+        {
+            segments.Push(namespaceName);
+        }
+
+        return string.Join(".", segments);
+    }
+
+    private EntityId GetOrCreateUnresolvedCallTargetId(
+        string targetText,
+        string resolutionReason,
+        Dictionary<string, EntityId> unresolvedCallTargetIdByText,
+        List<SemanticTriple> triples)
+    {
+        var key = $"{resolutionReason}|{targetText}";
+        if (unresolvedCallTargetIdByText.TryGetValue(key, out var existing))
+        {
+            return existing;
+        }
+
+        var unresolvedNaturalKey = $"{resolutionReason}:{targetText}";
+        var unresolvedId = _stableIdGenerator.Create(new EntityKey("unresolved-call-target", unresolvedNaturalKey));
+        unresolvedCallTargetIdByText[key] = unresolvedId;
+        AddEntityTriples(
+            triples,
+            unresolvedId,
+            "unresolved-call-target",
+            targetText,
+            $"unresolved-call/{targetText}");
+        triples.Add(new SemanticTriple(
+            new EntityNode(unresolvedId),
+            CorePredicates.ResolutionReason,
+            new LiteralNode(resolutionReason)));
+
+        return unresolvedId;
     }
 
     private static string FormatDeclarationSourceLocation(DeclarationSourceLocation location)
@@ -1378,12 +1794,21 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         IReadOnlyList<string> ImportedNamespaces,
         IReadOnlyDictionary<string, string> ImportedAliases);
 
+    private sealed record PendingMethodExtendedTypeLink(
+        EntityId MethodId,
+        string NamespaceName,
+        string ExtendedTypeName,
+        IReadOnlyList<string> ImportedNamespaces,
+        IReadOnlyDictionary<string, string> ImportedAliases);
+
     private sealed record PendingMethodParameterTypeLink(
         EntityId ParameterId,
         string NamespaceName,
         string DeclaredTypeName,
         IReadOnlyList<string> ImportedNamespaces,
         IReadOnlyDictionary<string, string> ImportedAliases);
+
+    private sealed record MethodDeclarationLocationKey(string RelativeFilePath, int Line, int Column);
 
     private sealed record ProjectAssemblyContext(string RelativeDirectory, string AssemblyName);
 
