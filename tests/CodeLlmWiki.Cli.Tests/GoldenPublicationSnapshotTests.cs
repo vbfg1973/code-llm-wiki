@@ -140,7 +140,41 @@ public sealed class GoldenPublicationSnapshotTests
             type_kind: class
             type_path: Sample.Thing
             accessibility: public
+            constructor_count: 0
+            method_count: 1
+            property_count: 0
+            field_count: 0
+            enum_member_count: 0
+            record_parameter_count: 0
+            behavioral_method_count: 1
             primary_project_id: project-1
+            ---
+
+            # Type: Thing
+            """;
+
+        Assert.ThrowsAny<Exception>(() => ValidateFrontMatterDocument("types/Sample/Thing.md", markdown));
+    }
+
+    [Fact]
+    public void FrontMatterValidation_Fails_OnMissingTypeCountScalar()
+    {
+        var markdown =
+            """
+            ---
+            entity_id: type-1
+            entity_type: type
+            repository_id: repo-1
+            type_name: Thing
+            type_kind: class
+            type_path: Sample.Thing
+            accessibility: public
+            constructor_count: 0
+            method_count: 1
+            property_count: 0
+            field_count: 0
+            enum_member_count: 0
+            behavioral_method_count: 1
             ---
 
             # Type: Thing
@@ -276,7 +310,20 @@ public sealed class GoldenPublicationSnapshotTests
         }
         else if (relativePath.StartsWith("types/", StringComparison.Ordinal))
         {
-            ValidateRequiredFields(frontMatter, "type", "type_name", "type_kind", "type_path", "accessibility");
+            ValidateRequiredFields(
+                frontMatter,
+                "type",
+                "type_name",
+                "type_kind",
+                "type_path",
+                "accessibility",
+                "constructor_count",
+                "method_count",
+                "property_count",
+                "field_count",
+                "enum_member_count",
+                "record_parameter_count",
+                "behavioral_method_count");
             ValidateAllowedFields(
                 frontMatter,
                 "entity_id",
@@ -286,6 +333,13 @@ public sealed class GoldenPublicationSnapshotTests
                 "type_kind",
                 "type_path",
                 "accessibility",
+                "constructor_count",
+                "method_count",
+                "property_count",
+                "field_count",
+                "enum_member_count",
+                "record_parameter_count",
+                "behavioral_method_count",
                 "is_nested_type",
                 "is_partial_type",
                 "namespace_name",
@@ -311,6 +365,14 @@ public sealed class GoldenPublicationSnapshotTests
             Assert.True(
                 presentPrimaryKeyCount is 0 or 4,
                 $"Primary project/assembly keys must be emitted as a complete set in {relativePath}");
+
+            ValidateNonNegativeIntegerField(frontMatter, "constructor_count", relativePath);
+            ValidateNonNegativeIntegerField(frontMatter, "method_count", relativePath);
+            ValidateNonNegativeIntegerField(frontMatter, "property_count", relativePath);
+            ValidateNonNegativeIntegerField(frontMatter, "field_count", relativePath);
+            ValidateNonNegativeIntegerField(frontMatter, "enum_member_count", relativePath);
+            ValidateNonNegativeIntegerField(frontMatter, "record_parameter_count", relativePath);
+            ValidateNonNegativeIntegerField(frontMatter, "behavioral_method_count", relativePath);
         }
         else if (relativePath.StartsWith("methods/", StringComparison.Ordinal))
         {
@@ -420,6 +482,16 @@ public sealed class GoldenPublicationSnapshotTests
         }
     }
 
+    private static void ValidateNonNegativeIntegerField(
+        IReadOnlyDictionary<string, string> frontMatter,
+        string key,
+        string relativePath)
+    {
+        Assert.True(frontMatter.TryGetValue(key, out var value), $"Missing required scalar key '{key}' in {relativePath}");
+        Assert.True(int.TryParse(value, out var parsed), $"Scalar key '{key}' must be an integer in {relativePath}");
+        Assert.True(parsed >= 0, $"Scalar key '{key}' must be non-negative in {relativePath}");
+    }
+
     private static string ComputeSha256(string value)
     {
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
@@ -510,7 +582,28 @@ public sealed class GoldenPublicationSnapshotTests
                 }
                 """);
 
-            await File.WriteAllTextAsync(Path.Combine(appDir, "Program.cs"), "Console.WriteLine(\"golden\");\n");
+            await File.WriteAllTextAsync(Path.Combine(appDir, "Program.cs"),
+                """
+                namespace Golden.Sample;
+
+                public interface IWorker
+                {
+                    void Run();
+                }
+
+                public sealed class Worker : IWorker
+                {
+                    private int _count;
+                    public int Count { get; private set; }
+
+                    public void Run()
+                    {
+                        _count++;
+                        Count = _count;
+                        MissingApi.Call();
+                    }
+                }
+                """);
             await File.WriteAllTextAsync(Path.Combine(repositoryPath, "README.md"), "# golden\n");
 
             RunGit(repositoryPath, "init", "-b", "main");

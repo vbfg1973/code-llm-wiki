@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 003](./003-phase-3-dotnet-method-extraction-and-relations.prd.md)
 
 - Issue: [#47](https://github.com/vbfg1973/code-llm-wiki/issues/47)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: complete
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,10 +18,10 @@ Harden PRD 003 publication and quality gates: validate method page/front matter 
 
 ## Acceptance criteria
 
-- [ ] Method/type front matter validation enforces approved minimal scalar contracts and conditional fields.
-- [ ] Visible wiki body content remains ID-light/human-readable while IDs remain queryable via front matter/index.
-- [ ] `HEAD` + git-tracked boundary behavior remains enforced for method/data-flow publication outputs.
-- [ ] Golden and behavioral test suites verify deterministic method outputs, relationship rendering, and degraded semantic diagnostics/provenance.
+- [x] Method/type front matter validation enforces approved minimal scalar contracts and conditional fields.
+- [x] Visible wiki body content remains ID-light/human-readable while IDs remain queryable via front matter/index.
+- [x] `HEAD` + git-tracked boundary behavior remains enforced for method/data-flow publication outputs.
+- [x] Golden and behavioral test suites verify deterministic method outputs, relationship rendering, and degraded semantic diagnostics/provenance.
 
 ## Blocked by
 
