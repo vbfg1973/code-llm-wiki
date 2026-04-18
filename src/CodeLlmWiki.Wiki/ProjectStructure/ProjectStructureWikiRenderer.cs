@@ -61,6 +61,23 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             resolver.RegisterType(typeDeclaration);
         }
 
+        var typeById = model.Declarations.Types.ToDictionary(x => x.Id, x => x);
+        var orderedMethods = model.Declarations.Methods.Declarations
+            .OrderBy(x => typeById.TryGetValue(x.DeclaringTypeId, out var declaringType) ? declaringType.Path : string.Empty, StringComparer.Ordinal)
+            .ThenBy(x => x.Signature, StringComparer.Ordinal)
+            .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        foreach (var methodDeclaration in orderedMethods)
+        {
+            if (!typeById.TryGetValue(methodDeclaration.DeclaringTypeId, out var declaringType))
+            {
+                continue;
+            }
+
+            resolver.RegisterMethod(methodDeclaration, declaringType);
+        }
+
         var orderedFiles = model.Files.OrderBy(x => x.Path, StringComparer.Ordinal).ToArray();
         foreach (var file in orderedFiles)
         {
@@ -71,12 +88,13 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         var packageById = model.Packages.ToDictionary(x => x.Id, x => x);
         var projectById = model.Projects.ToDictionary(x => x.Id, x => x);
         var namespaceById = model.Declarations.Namespaces.ToDictionary(x => x.Id, x => x);
-        var typeById = model.Declarations.Types.ToDictionary(x => x.Id, x => x);
         var memberById = model.Declarations.Members.ToDictionary(x => x.Id, x => x);
+        var methodById = orderedMethods.ToDictionary(x => x.Id, x => x);
         var fileById = model.Files.ToDictionary(x => x.Id, x => x);
         var namespaceBacklinksByFileId = BuildNamespaceBacklinksByFileId(model.Declarations.Namespaces, fileById);
         var typeBacklinksByFileId = BuildTypeBacklinksByFileId(model.Declarations.Types, fileById);
         var memberBacklinksByFileId = BuildMemberBacklinksByFileId(model.Declarations.Members, fileById);
+        var methodBacklinksByFileId = BuildMethodBacklinksByFileId(orderedMethods, fileById);
 
         var pages = new List<WikiPage>
         {
@@ -87,8 +105,9 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         pages.AddRange(orderedProjects.Select(project => RenderProjectPage(model.Repository.Id.Value, project, packageById, resolver)));
         pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, resolver)));
         pages.AddRange(orderedNamespaces.Select(namespaceDeclaration => RenderNamespacePage(model.Repository.Id.Value, namespaceDeclaration, namespaceById, typeById, resolver)));
-        pages.AddRange(orderedTypes.Select(typeDeclaration => RenderTypePage(model.Repository.Id.Value, typeDeclaration, namespaceById, typeById, memberById, fileById, orderedProjects, resolver)));
-        pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, namespaceBacklinksByFileId, typeBacklinksByFileId, memberBacklinksByFileId, resolver, maxMergeEntriesPerFile)));
+        pages.AddRange(orderedTypes.Select(typeDeclaration => RenderTypePage(model.Repository.Id.Value, typeDeclaration, namespaceById, typeById, memberById, methodById, fileById, orderedProjects, resolver)));
+        pages.AddRange(orderedMethods.Select(method => RenderMethodPage(model.Repository.Id.Value, method, typeById, fileById, resolver)));
+        pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, namespaceBacklinksByFileId, typeBacklinksByFileId, memberBacklinksByFileId, methodBacklinksByFileId, resolver, maxMergeEntriesPerFile)));
 
         pages.Add(RenderIndexPage(model, resolver, indexPath));
 
@@ -110,6 +129,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine($"- Packages: {model.Packages.Count}");
         sb.AppendLine($"- Namespaces: {model.Declarations.Namespaces.Count}");
         sb.AppendLine($"- Types: {model.Declarations.Types.Count}");
+        sb.AppendLine($"- Methods: {model.Declarations.Methods.Declarations.Count}");
         sb.AppendLine($"- Files: {model.Files.Count}");
         sb.AppendLine($"- Submodules: {model.Submodules.Count}");
         sb.AppendLine($"- Index: {ToWikiLink("index/repository-index", "Repository Index")}");
@@ -374,6 +394,31 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 });
     }
 
+    private static IReadOnlyDictionary<EntityId, IReadOnlyList<MethodDeclarationNode>> BuildMethodBacklinksByFileId(
+        IReadOnlyList<MethodDeclarationNode> methods,
+        IReadOnlyDictionary<EntityId, FileNode> fileById)
+    {
+        return methods
+            .SelectMany(method => method.DeclarationFileIds.Select(fileId => (fileId, method)))
+            .GroupBy(x => x.fileId)
+            .ToDictionary(
+                x => x.Key,
+                x =>
+                {
+                    var filePath = fileById.TryGetValue(x.Key, out var file) ? file.Path : string.Empty;
+
+                    return (IReadOnlyList<MethodDeclarationNode>)x
+                    .Select(v => v.method)
+                    .DistinctBy(v => v.Id)
+                    .OrderBy(v => filePath, StringComparer.Ordinal)
+                    .ThenBy(v => ResolveDeclarationLocationSortLine(v.DeclarationLocations, filePath))
+                    .ThenBy(v => ResolveDeclarationLocationSortColumn(v.DeclarationLocations, filePath))
+                    .ThenBy(v => v.Signature, StringComparer.Ordinal)
+                    .ThenBy(v => v.Id.Value, StringComparer.Ordinal)
+                    .ToArray();
+                });
+    }
+
     private static int ResolveDeclarationLocationSortLine(
         IReadOnlyList<DeclarationLocationNode> locations,
         string filePath)
@@ -470,6 +515,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         IReadOnlyDictionary<EntityId, NamespaceDeclarationNode> namespaceById,
         IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
         IReadOnlyDictionary<EntityId, MemberDeclarationNode> memberById,
+        IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
         IReadOnlyDictionary<EntityId, FileNode> fileById,
         IReadOnlyList<ProjectNode> projects,
         WikiPathResolver resolver)
@@ -533,6 +579,10 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         AppendMemberSection(sb, "Fields", typeDeclaration, memberById, MemberDeclarationKind.Field);
         AppendMemberSection(sb, "Record Parameters", typeDeclaration, memberById, MemberDeclarationKind.RecordParameter);
         AppendMemberSection(sb, "Enum Members", typeDeclaration, memberById, MemberDeclarationKind.EnumMember);
+
+        sb.AppendLine();
+        sb.AppendLine("## Methods");
+        AppendMethodSection(sb, typeDeclaration, methodById, resolver);
 
         if (typeDeclaration.GenericParameters.Count > 0 || typeDeclaration.GenericConstraints.Count > 0)
         {
@@ -648,6 +698,56 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         }
     }
 
+    private static void AppendMethodSection(
+        StringBuilder sb,
+        TypeDeclarationNode typeDeclaration,
+        IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        WikiPathResolver resolver)
+    {
+        var methods = typeDeclaration.MethodIds
+            .Where(methodById.ContainsKey)
+            .Select(id => methodById[id])
+            .OrderBy(x => x.Kind.ToString(), StringComparer.Ordinal)
+            .ThenBy(x => x.Signature, StringComparer.Ordinal)
+            .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        if (methods.Length == 0)
+        {
+            sb.AppendLine("- none");
+            return;
+        }
+
+        foreach (var method in methods)
+        {
+            sb.AppendLine($"- {resolver.ToWikiLink(method.Id, FormatMethodLinkAlias(method))}");
+        }
+    }
+
+    private static string FormatMethodLinkAlias(MethodDeclarationNode method)
+    {
+        var orderedParameters = method.Parameters
+            .OrderBy(x => x.Ordinal)
+            .ToArray();
+
+        if (method.Kind == MethodDeclarationKind.Constructor)
+        {
+            if (orderedParameters.Length == 0)
+            {
+                return "ctor()";
+            }
+
+            return $"ctor({string.Join(", ", orderedParameters.Select(x => x.Type?.DisplayText ?? "unknown"))})";
+        }
+
+        if (orderedParameters.Length == 0)
+        {
+            return $"{method.Name}()";
+        }
+
+        return $"{method.Name}({string.Join(", ", orderedParameters.Select(x => x.Type?.DisplayText ?? "unknown"))})";
+    }
+
     private static string FormatTypeReference(TypeReferenceNode reference)
     {
         return reference.ResolutionStatus switch
@@ -659,12 +759,95 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         };
     }
 
+    private static WikiPage RenderMethodPage(
+        string repositoryId,
+        MethodDeclarationNode methodDeclaration,
+        IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
+        IReadOnlyDictionary<EntityId, FileNode> fileById,
+        WikiPathResolver resolver)
+    {
+        var declaringType = typeById.TryGetValue(methodDeclaration.DeclaringTypeId, out var resolvedDeclaringType)
+            ? resolvedDeclaringType
+            : null;
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"# Method: {FormatMethodLinkAlias(methodDeclaration)}");
+        sb.AppendLine();
+        sb.AppendLine($"- Kind: {methodDeclaration.Kind.ToString().ToLowerInvariant()}");
+        sb.AppendLine($"- Accessibility: {methodDeclaration.Accessibility.ToString().ToLowerInvariant()}");
+        sb.AppendLine($"- Arity: {methodDeclaration.Arity}");
+
+        if (declaringType is not null)
+        {
+            sb.AppendLine($"- Declaring Type: {resolver.ToWikiLink(declaringType.Id, declaringType.Name)}");
+        }
+        else
+        {
+            sb.AppendLine($"- Declaring Type: `{methodDeclaration.DeclaringTypeId.Value}`");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Signature");
+        sb.AppendLine($"- `{methodDeclaration.Signature}`");
+        sb.AppendLine($"- Return Type: {(methodDeclaration.ReturnType is null ? "none" : FormatTypeReference(methodDeclaration.ReturnType))}");
+
+        sb.AppendLine();
+        sb.AppendLine("## Parameters");
+        if (methodDeclaration.Parameters.Count == 0)
+        {
+            sb.AppendLine("- none");
+        }
+        else
+        {
+            foreach (var parameter in methodDeclaration.Parameters.OrderBy(x => x.Ordinal))
+            {
+                var parameterType = parameter.Type is null
+                    ? "unknown"
+                    : FormatTypeReference(parameter.Type);
+                sb.AppendLine($"- {parameter.Name}: {parameterType}");
+            }
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Declaration Files");
+        foreach (var declarationFileId in methodDeclaration.DeclarationFileIds)
+        {
+            if (fileById.TryGetValue(declarationFileId, out var file))
+            {
+                sb.AppendLine($"- {resolver.ToWikiLink(file.Id, file.Path)}");
+            }
+        }
+
+        var frontMatter = new List<KeyValuePair<string, string>>
+        {
+            KeyValue("entity_id", methodDeclaration.Id.Value),
+            KeyValue("entity_type", "method"),
+            KeyValue("repository_id", repositoryId),
+            KeyValue("method_name", methodDeclaration.Name),
+            KeyValue("method_kind", methodDeclaration.Kind.ToString().ToLowerInvariant()),
+            KeyValue("method_signature", methodDeclaration.Signature),
+            KeyValue("accessibility", methodDeclaration.Accessibility.ToString().ToLowerInvariant()),
+            KeyValue("declaring_type_id", methodDeclaration.DeclaringTypeId.Value),
+        };
+
+        if (declaringType is not null)
+        {
+            frontMatter.Add(KeyValue("declaring_type_name", declaringType.Name));
+        }
+
+        return new WikiPage(
+            RelativePath: resolver.GetPath(methodDeclaration.Id),
+            Title: FormatMethodLinkAlias(methodDeclaration),
+            Markdown: WithFrontMatter(frontMatter, sb.ToString().TrimEnd()));
+    }
+
     private static WikiPage RenderFilePage(
         RepositoryNode repository,
         FileNode file,
         IReadOnlyDictionary<EntityId, IReadOnlyList<NamespaceDeclarationNode>> namespaceBacklinksByFileId,
         IReadOnlyDictionary<EntityId, IReadOnlyList<TypeDeclarationNode>> typeBacklinksByFileId,
         IReadOnlyDictionary<EntityId, IReadOnlyList<MemberDeclarationNode>> memberBacklinksByFileId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<MethodDeclarationNode>> methodBacklinksByFileId,
         WikiPathResolver resolver,
         int? maxMergeEntriesPerFile)
     {
@@ -743,6 +926,19 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             foreach (var member in members)
             {
                 sb.AppendLine($"- {member.Name} ({member.Kind.ToString().ToLowerInvariant()})");
+            }
+        }
+        else
+        {
+            sb.AppendLine("- none");
+        }
+
+        sb.AppendLine("### Methods");
+        if (methodBacklinksByFileId.TryGetValue(file.Id, out var methods))
+        {
+            foreach (var method in methods)
+            {
+                sb.AppendLine($"- {FormatMethodLinkAlias(method)} ({method.Kind.ToString().ToLowerInvariant()})");
             }
         }
         else
@@ -876,6 +1072,22 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 .OrderBy(x => x.Path, StringComparer.Ordinal)
                 .ThenBy(x => x.Name, StringComparer.Ordinal)
                 .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .ToArray());
+
+        var typeById = model.Declarations.Types.ToDictionary(x => x.Id, x => x);
+        AppendTable(
+            sb,
+            "Methods",
+            model.Declarations.Methods.Declarations
+                .OrderBy(x => x.Signature, StringComparer.Ordinal)
+                .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
+                .Select(x =>
+                {
+                    var declaringTypePath = typeById.TryGetValue(x.DeclaringTypeId, out var declaringType)
+                        ? declaringType.Path
+                        : "<unknown-type>";
+                    return new IndexRow(FormatMethodLinkAlias(x), $"{declaringTypePath}::{x.Signature}", x.Id.Value, resolver.ToWikiLink(x.Id, FormatMethodLinkAlias(x)));
+                })
                 .ToArray());
 
         AppendTable(

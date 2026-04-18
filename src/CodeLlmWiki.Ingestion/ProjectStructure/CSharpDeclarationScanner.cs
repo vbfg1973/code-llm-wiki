@@ -163,6 +163,7 @@ internal static class CSharpDeclarationScanner
                     ParseGenericConstraints(classDeclaration.ConstraintClauses),
                     ParseDirectRelationships(classDeclaration),
                     ParseDeclaredMembers(classDeclaration.Members, relativePath),
+                    ParseDeclaredMethods(classDeclaration.Members, relativePath),
                     relativePath,
                     ToSourceLocation(classDeclaration.Identifier.GetLocation(), relativePath),
                     classDeclaration.Members,
@@ -184,6 +185,7 @@ internal static class CSharpDeclarationScanner
                     ParseGenericConstraints(interfaceDeclaration.ConstraintClauses),
                     ParseDirectRelationships(interfaceDeclaration),
                     ParseDeclaredMembers(interfaceDeclaration.Members, relativePath),
+                    ParseDeclaredMethods(interfaceDeclaration.Members, relativePath),
                     relativePath,
                     ToSourceLocation(interfaceDeclaration.Identifier.GetLocation(), relativePath),
                     interfaceDeclaration.Members,
@@ -205,6 +207,7 @@ internal static class CSharpDeclarationScanner
                     ParseGenericConstraints(structDeclaration.ConstraintClauses),
                     ParseDirectRelationships(structDeclaration),
                     ParseDeclaredMembers(structDeclaration.Members, relativePath),
+                    ParseDeclaredMethods(structDeclaration.Members, relativePath),
                     relativePath,
                     ToSourceLocation(structDeclaration.Identifier.GetLocation(), relativePath),
                     structDeclaration.Members,
@@ -230,6 +233,7 @@ internal static class CSharpDeclarationScanner
                         .OrderBy(x => x.Kind, StringComparer.Ordinal)
                         .ThenBy(x => x.Name, StringComparer.Ordinal)
                         .ToArray(),
+                    ParseDeclaredMethods(recordDeclaration.Members, relativePath),
                     relativePath,
                     ToSourceLocation(recordDeclaration.Identifier.GetLocation(), relativePath),
                     recordDeclaration.Members,
@@ -251,6 +255,7 @@ internal static class CSharpDeclarationScanner
                     [],
                     ([], []),
                     ParseEnumMembers(enumDeclaration, relativePath),
+                    [],
                     relativePath,
                     ToSourceLocation(enumDeclaration.Identifier.GetLocation(), relativePath),
                     members: default,
@@ -271,6 +276,7 @@ internal static class CSharpDeclarationScanner
                     ParseGenericParameters(delegateDeclaration.TypeParameterList),
                     ParseGenericConstraints(delegateDeclaration.ConstraintClauses),
                     ([], []),
+                    [],
                     [],
                     relativePath,
                     ToSourceLocation(delegateDeclaration.Identifier.GetLocation(), relativePath),
@@ -295,6 +301,7 @@ internal static class CSharpDeclarationScanner
         IReadOnlyList<string> genericConstraints,
         (IReadOnlyList<string> Bases, IReadOnlyList<string> Interfaces) relationships,
         IReadOnlyList<MemberDiscoveryNode> discoveredMembers,
+        IReadOnlyList<MethodDiscoveryNode> discoveredMethods,
         string relativePath,
         DeclarationSourceLocation sourceLocation,
         SyntaxList<MemberDeclarationSyntax> members,
@@ -321,6 +328,7 @@ internal static class CSharpDeclarationScanner
             importContext.Namespaces,
             importContext.Aliases,
             discoveredMembers,
+            discoveredMethods,
             relativePath,
             sourceLocation.Line,
             sourceLocation.Column));
@@ -487,6 +495,92 @@ internal static class CSharpDeclarationScanner
             .OrderBy(x => x.Kind, StringComparer.Ordinal)
             .ThenBy(x => x.Name, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private static IReadOnlyList<MethodDiscoveryNode> ParseDeclaredMethods(
+        SyntaxList<MemberDeclarationSyntax> members,
+        string relativePath)
+    {
+        var discoveredMethods = new List<MethodDiscoveryNode>();
+
+        foreach (var member in members)
+        {
+            switch (member)
+            {
+                case MethodDeclarationSyntax methodDeclaration:
+                {
+                    var methodLocation = ToSourceLocation(methodDeclaration.Identifier.GetLocation(), relativePath);
+                    var methodName = methodDeclaration.Identifier.ValueText;
+                    var explicitInterface = methodDeclaration.ExplicitInterfaceSpecifier?.Name.ToString()?.Trim();
+                    var canonicalName = string.IsNullOrWhiteSpace(explicitInterface)
+                        ? methodName
+                        : $"{explicitInterface}.{methodName}";
+
+                    discoveredMethods.Add(new MethodDiscoveryNode(
+                        Kind: "method",
+                        Name: methodName,
+                        CanonicalName: canonicalName,
+                        Accessibility: ParseAccessibility(methodDeclaration.Modifiers),
+                        Arity: methodDeclaration.TypeParameterList?.Parameters.Count ?? 0,
+                        ReturnTypeName: NormalizeTypeReference(methodDeclaration.ReturnType.ToString()),
+                        Parameters: ParseMethodParameters(methodDeclaration.ParameterList.Parameters),
+                        RelativeFilePath: relativePath,
+                        SourceLine: methodLocation.Line,
+                        SourceColumn: methodLocation.Column));
+                    break;
+                }
+                case ConstructorDeclarationSyntax constructorDeclaration:
+                {
+                    var ctorLocation = ToSourceLocation(constructorDeclaration.Identifier.GetLocation(), relativePath);
+                    discoveredMethods.Add(new MethodDiscoveryNode(
+                        Kind: "constructor",
+                        Name: ".ctor",
+                        CanonicalName: ".ctor",
+                        Accessibility: ParseAccessibility(constructorDeclaration.Modifiers),
+                        Arity: 0,
+                        ReturnTypeName: null,
+                        Parameters: ParseMethodParameters(constructorDeclaration.ParameterList.Parameters),
+                        RelativeFilePath: relativePath,
+                        SourceLine: ctorLocation.Line,
+                        SourceColumn: ctorLocation.Column));
+                    break;
+                }
+            }
+        }
+
+        return discoveredMethods
+            .OrderBy(x => x.Kind, StringComparer.Ordinal)
+            .ThenBy(x => x.CanonicalName, StringComparer.Ordinal)
+            .ThenBy(x => x.Arity)
+            .ThenBy(
+                x => string.Join(
+                    ",",
+                    x.Parameters.OrderBy(p => p.Ordinal).Select(p => p.DeclaredTypeName ?? string.Empty)),
+                StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<MethodParameterDiscoveryNode> ParseMethodParameters(
+        SeparatedSyntaxList<ParameterSyntax> parameters)
+    {
+        if (parameters.Count == 0)
+        {
+            return [];
+        }
+
+        var discoveredParameters = new List<MethodParameterDiscoveryNode>(parameters.Count);
+        for (var index = 0; index < parameters.Count; index++)
+        {
+            var parameter = parameters[index];
+            discoveredParameters.Add(new MethodParameterDiscoveryNode(
+                Name: parameter.Identifier.ValueText,
+                Ordinal: index,
+                DeclaredTypeName: parameter.Type is null
+                    ? null
+                    : NormalizeTypeReference(parameter.Type.ToString())));
+        }
+
+        return discoveredParameters;
     }
 
     private static IReadOnlyList<MemberDiscoveryNode> ParseEnumMembers(EnumDeclarationSyntax enumDeclaration, string relativePath)
