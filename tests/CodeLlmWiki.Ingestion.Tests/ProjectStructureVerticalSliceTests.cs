@@ -56,7 +56,8 @@ public sealed class ProjectStructureVerticalSliceTests
         Assert.Equal(first.Count, second.Count);
         Assert.Equal(first.Select(x => x.RelativePath), second.Select(x => x.RelativePath));
         Assert.Equal(first.Select(x => x.Markdown), second.Select(x => x.Markdown));
-        Assert.Equal(4, first.Count);
+        Assert.Equal(5, first.Count);
+        Assert.Contains(first, x => x.RelativePath == "index/repository-index.md");
     }
 
     private sealed class ProjectStructureFixture

@@ -8,33 +8,55 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
 {
     public IReadOnlyList<WikiPage> Render(ProjectStructureWikiModel model)
     {
+        var resolver = new WikiPathResolver();
+        resolver.RegisterRepository(model.Repository);
+
+        var orderedSolutions = model.Solutions.OrderBy(x => x.Path, StringComparer.Ordinal).ToArray();
+        foreach (var solution in orderedSolutions)
+        {
+            resolver.RegisterSolution(solution);
+        }
+
+        var orderedProjects = model.Projects.OrderBy(x => x.Path, StringComparer.Ordinal).ToArray();
+        foreach (var project in orderedProjects)
+        {
+            resolver.RegisterProject(project);
+        }
+
+        var orderedPackages = model.Packages.OrderBy(x => x.Name, StringComparer.Ordinal).ToArray();
+        foreach (var package in orderedPackages)
+        {
+            resolver.RegisterPackage(package);
+        }
+
+        var orderedFiles = model.Files.OrderBy(x => x.Path, StringComparer.Ordinal).ToArray();
+        foreach (var file in orderedFiles)
+        {
+            resolver.RegisterFile(file);
+        }
+
+        var indexPath = resolver.RegisterIndex();
         var packageById = model.Packages.ToDictionary(x => x.Id, x => x);
+        var projectById = model.Projects.ToDictionary(x => x.Id, x => x);
 
         var pages = new List<WikiPage>
         {
-            RenderRepositoryPage(model),
+            RenderRepositoryPage(model, resolver),
         };
 
-        pages.AddRange(model.Solutions
-            .OrderBy(x => x.Path, StringComparer.Ordinal)
-            .Select(solution => RenderSolutionPage(solution, model.Projects)));
+        pages.AddRange(orderedSolutions.Select(solution => RenderSolutionPage(solution, projectById, resolver)));
+        pages.AddRange(orderedProjects.Select(project => RenderProjectPage(project, packageById, resolver)));
+        pages.AddRange(orderedPackages.Select(package => RenderPackagePage(package, resolver)));
+        pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, resolver)));
 
-        pages.AddRange(model.Projects
-            .OrderBy(x => x.Path, StringComparer.Ordinal)
-            .Select(project => RenderProjectPage(project, packageById)));
+        pages.Add(RenderIndexPage(model, resolver, indexPath));
 
-        pages.AddRange(model.Packages
-            .OrderBy(x => x.Name, StringComparer.Ordinal)
-            .Select(RenderPackagePage));
-
-        pages.AddRange(model.Files
-            .OrderBy(x => x.Path, StringComparer.Ordinal)
-            .Select(file => RenderFilePage(model.Repository, file)));
-
-        return pages;
+        return pages
+            .OrderBy(x => x.RelativePath, StringComparer.Ordinal)
+            .ToArray();
     }
 
-    private static WikiPage RenderRepositoryPage(ProjectStructureWikiModel model)
+    private static WikiPage RenderRepositoryPage(ProjectStructureWikiModel model, WikiPathResolver resolver)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# Repository: {model.Repository.Name}");
@@ -47,12 +69,13 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine($"- Packages: {model.Packages.Count}");
         sb.AppendLine($"- Files: {model.Files.Count}");
         sb.AppendLine($"- Submodules: {model.Submodules.Count}");
+        sb.AppendLine($"- Index: {ToWikiLink("index/repository-index", "Repository Index")}");
         sb.AppendLine();
         sb.AppendLine("## Solutions");
 
         foreach (var solution in model.Solutions.OrderBy(x => x.Path, StringComparer.Ordinal))
         {
-            sb.AppendLine($"- `{solution.Path}`");
+            sb.AppendLine($"- {resolver.ToWikiLink(solution.Id, solution.Name)}");
         }
 
         sb.AppendLine();
@@ -64,15 +87,16 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         }
 
         return new WikiPage(
-            RelativePath: $"repositories/{ToSlug(model.Repository.Id.Value)}.md",
+            RelativePath: resolver.GetPath(model.Repository.Id),
             Title: model.Repository.Name,
             Markdown: WithFrontMatter(model.Repository.Id.Value, "repository", model.Repository.Id.Value, sb.ToString().TrimEnd()));
     }
 
-    private static WikiPage RenderSolutionPage(SolutionNode solution, IReadOnlyList<ProjectNode> projects)
+    private static WikiPage RenderSolutionPage(
+        SolutionNode solution,
+        IReadOnlyDictionary<EntityId, ProjectNode> projectById,
+        WikiPathResolver resolver)
     {
-        var projectById = projects.ToDictionary(x => x.Id, x => x);
-
         var sb = new StringBuilder();
         sb.AppendLine($"# Solution: {solution.Name}");
         sb.AppendLine();
@@ -85,17 +109,20 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         {
             if (projectById.TryGetValue(projectId, out var project))
             {
-                sb.AppendLine($"- `{project.Path}`");
+                sb.AppendLine($"- {resolver.ToWikiLink(project.Id, project.Name)}");
             }
         }
 
         return new WikiPage(
-            RelativePath: $"solutions/{ToSlug(solution.Id.Value)}.md",
+            RelativePath: resolver.GetPath(solution.Id),
             Title: solution.Name,
             Markdown: WithFrontMatter(solution.Id.Value, "solution", string.Empty, sb.ToString().TrimEnd()));
     }
 
-    private static WikiPage RenderProjectPage(ProjectNode project, IReadOnlyDictionary<EntityId, PackageNode> packageById)
+    private static WikiPage RenderProjectPage(
+        ProjectNode project,
+        IReadOnlyDictionary<EntityId, PackageNode> packageById,
+        WikiPathResolver resolver)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# Project: {project.Name}");
@@ -112,16 +139,16 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 continue;
             }
 
-            sb.AppendLine($"- [{package.Name}](../packages/{ToSlug(package.Id.Value)}.md)");
+            sb.AppendLine($"- {resolver.ToWikiLink(package.Id, package.Name)}");
         }
 
         return new WikiPage(
-            RelativePath: $"projects/{ToSlug(project.Id.Value)}.md",
+            RelativePath: resolver.GetPath(project.Id),
             Title: project.Name,
             Markdown: WithFrontMatter(project.Id.Value, "project", string.Empty, sb.ToString().TrimEnd()));
     }
 
-    private static WikiPage RenderPackagePage(PackageNode package)
+    private static WikiPage RenderPackagePage(PackageNode package, WikiPathResolver resolver)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# Package: {package.Name}");
@@ -141,12 +168,15 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         }
 
         return new WikiPage(
-            RelativePath: $"packages/{ToSlug(package.Id.Value)}.md",
+            RelativePath: resolver.GetPath(package.Id),
             Title: package.Name,
             Markdown: WithFrontMatter(package.Id.Value, "package", string.Empty, sb.ToString().TrimEnd()));
     }
 
-    private static WikiPage RenderFilePage(RepositoryNode repository, FileNode file)
+    private static WikiPage RenderFilePage(
+        RepositoryNode repository,
+        FileNode file,
+        WikiPathResolver resolver)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# File: {file.Name}");
@@ -180,14 +210,85 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         }
 
         return new WikiPage(
-            RelativePath: $"files/{ToSlug(file.Id.Value)}.md",
+            RelativePath: resolver.GetPath(file.Id),
             Title: file.Name,
             Markdown: WithFrontMatter(file.Id.Value, "file", repository.Id.Value, sb.ToString().TrimEnd()));
     }
 
-    private static string ToSlug(string value)
+    private static WikiPage RenderIndexPage(
+        ProjectStructureWikiModel model,
+        WikiPathResolver resolver,
+        string indexPath)
     {
-        return value.Replace(':', '-').Replace('/', '-');
+        var sb = new StringBuilder();
+        sb.AppendLine("# Repository Index");
+        sb.AppendLine();
+
+        AppendTable(
+            sb,
+            "Repositories",
+            [new IndexRow(model.Repository.Name, model.Repository.Path, model.Repository.Id.Value, resolver.ToWikiLink(model.Repository.Id, model.Repository.Name))]);
+
+        AppendTable(
+            sb,
+            "Solutions",
+            model.Solutions
+                .OrderBy(x => x.Path, StringComparer.Ordinal)
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .ToArray());
+
+        AppendTable(
+            sb,
+            "Projects",
+            model.Projects
+                .OrderBy(x => x.Path, StringComparer.Ordinal)
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .ToArray());
+
+        AppendTable(
+            sb,
+            "Packages",
+            model.Packages
+                .OrderBy(x => x.Name, StringComparer.Ordinal)
+                .Select(x => new IndexRow(x.Name, x.Name, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .ToArray());
+
+        AppendTable(
+            sb,
+            "Files",
+            model.Files
+                .OrderBy(x => x.Path, StringComparer.Ordinal)
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Path)))
+                .ToArray());
+
+        return new WikiPage(
+            RelativePath: indexPath,
+            Title: "Repository Index",
+            Markdown: sb.ToString().TrimEnd());
+    }
+
+    private static void AppendTable(StringBuilder sb, string title, IReadOnlyList<IndexRow> rows)
+    {
+        sb.AppendLine($"## {title}");
+        sb.AppendLine("| name | path | entity_id | page_link |");
+        sb.AppendLine("| --- | --- | --- | --- |");
+
+        foreach (var row in rows)
+        {
+            sb.AppendLine($"| {EscapePipes(row.Name)} | {EscapePipes(row.Path)} | `{row.EntityId}` | {row.PageLink} |");
+        }
+
+        sb.AppendLine();
+    }
+
+    private static string EscapePipes(string value)
+    {
+        return value.Replace("|", "\\|", StringComparison.Ordinal);
+    }
+
+    private static string ToWikiLink(string target, string alias)
+    {
+        return $"[[{target}|{alias}]]";
     }
 
     private static string WithFrontMatter(string entityId, string entityType, string repositoryId, string body)
@@ -207,4 +308,6 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.Append(body);
         return sb.ToString();
     }
+
+    private sealed record IndexRow(string Name, string Path, string EntityId, string PageLink);
 }

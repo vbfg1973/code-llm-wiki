@@ -63,10 +63,34 @@ public sealed class FileInventoryVerticalSliceTests
         Assert.Equal(5, filePages.Length);
 
         var programPage = filePages.Single(x => x.Markdown.Contains("src/App/Program.cs", StringComparison.Ordinal));
+        Assert.Contains(filePages, x => x.RelativePath == "files/src/App/Program.cs.md");
+        Assert.DoesNotContain(filePages, x => x.RelativePath.Contains("file-", StringComparison.Ordinal));
         Assert.StartsWith("---", programPage.Markdown, StringComparison.Ordinal);
         Assert.Contains("entity_type: file", programPage.Markdown, StringComparison.Ordinal);
         Assert.Contains("classification: dotnet-source", programPage.Markdown, StringComparison.Ordinal);
         Assert.DoesNotContain("HELLO FROM SOURCE", programPage.Markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Render_GeneratesCanonicalRepositoryIndexWithEntityMappings()
+    {
+        var fixture = await FileInventoryFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var query = new ProjectStructureQueryService(analysis.Triples);
+        var model = query.GetModel(analysis.RepositoryId);
+
+        var renderer = new ProjectStructureWikiRenderer();
+        var pages = renderer.Render(model);
+
+        var indexPage = pages.Single(x => x.RelativePath == "index/repository-index.md");
+        Assert.Contains("| name | path | entity_id | page_link |", indexPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("## Projects", indexPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("## Files", indexPage.Markdown, StringComparison.Ordinal);
+
+        var project = model.Projects.Single();
+        Assert.Contains(project.Id.Value, indexPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("[[projects/", indexPage.Markdown, StringComparison.Ordinal);
     }
 
     private sealed class FileInventoryFixture

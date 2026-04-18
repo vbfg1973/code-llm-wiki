@@ -101,6 +101,12 @@ public sealed class GoldenPublicationSnapshotTests
     {
         foreach (var path in Directory.EnumerateFiles(wikiRoot, "*.md", SearchOption.AllDirectories))
         {
+            var relative = Path.GetRelativePath(wikiRoot, path).Replace('\\', '/');
+            if (relative.Equals("index/repository-index.md", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             var content = File.ReadAllText(path);
             Assert.StartsWith("---", content, StringComparison.Ordinal);
 
