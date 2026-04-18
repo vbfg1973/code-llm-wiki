@@ -1,5 +1,15 @@
 # Plans Structure Standard
 
+Backlog tracker:
+
+- `/plans/BACKLOG.md`
+
+Agent orientation docs:
+
+- `/AGENTS.md`
+- `/CLAUDE.md`
+- `/CODEX.md`
+
 Directory and file naming standard:
 
 - `/plans/{prd_id}/{prd_id}-{name}.prd.md`
