@@ -1,6 +1,6 @@
 # Plan: Phase 1 .NET Repository Structure Ingestion and Wiki Output
 
-> Source PRD: `plans/prds/001-phase-1-dotnet-project-structure-prd.md`
+> Source PRD: `plans/001/001-phase-1-dotnet-project-structure.prd.md`
 
 ## Architectural decisions
 
