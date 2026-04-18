@@ -401,7 +401,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             }
             else
             {
-                sb.AppendLine($"- {directBaseType.DisplayText}");
+                sb.AppendLine($"- {FormatTypeReference(directBaseType)}");
             }
         }
 
@@ -415,7 +415,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             }
             else
             {
-                sb.AppendLine($"- {directInterface.DisplayText}");
+                sb.AppendLine($"- {FormatTypeReference(directInterface)}");
             }
         }
 
@@ -528,8 +528,19 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 continue;
             }
 
-            sb.AppendLine($"- {member.Name}: {declaredType}");
+            sb.AppendLine($"- {member.Name}: {FormatTypeReference(member.DeclaredType!)}");
         }
+    }
+
+    private static string FormatTypeReference(TypeReferenceNode reference)
+    {
+        return reference.ResolutionStatus switch
+        {
+            DeclarationResolutionStatus.ExternalStub => $"{reference.DisplayText} (external)",
+            DeclarationResolutionStatus.SourceTextFallback => $"{reference.DisplayText} (unresolved)",
+            DeclarationResolutionStatus.Unresolved => $"{reference.DisplayText} (unresolved)",
+            _ => reference.DisplayText,
+        };
     }
 
     private static WikiPage RenderFilePage(

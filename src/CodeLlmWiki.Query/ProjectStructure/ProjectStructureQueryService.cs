@@ -760,12 +760,12 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     directBaseIds.Select(id => new TypeReferenceNode(
                             id,
                             metadataById.TryGetValue(id, out var targetMeta) ? targetMeta.Name : id.Value,
-                            DeclarationResolutionStatus.Resolved))
+                            GetReferenceResolutionStatus(id, metadataById)))
                         .ToArray(),
                     directInterfaceIds.Select(id => new TypeReferenceNode(
                             id,
                             metadataById.TryGetValue(id, out var targetMeta) ? targetMeta.Name : id.Value,
-                            DeclarationResolutionStatus.Resolved))
+                            GetReferenceResolutionStatus(id, metadataById)))
                         .ToArray(),
                     memberIds,
                     declarationFileIds);
@@ -811,7 +811,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                         metadataById.TryGetValue(declaredTypeId, out var declaredTypeMeta)
                             ? declaredTypeMeta.Name
                             : declaredTypeId.Value,
-                        DeclarationResolutionStatus.Resolved);
+                        GetReferenceResolutionStatus(declaredTypeId, metadataById));
 
                 return new MemberDeclarationNode(
                     memberId,
@@ -875,6 +875,28 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             "record-parameter" => MemberDeclarationKind.RecordParameter,
             _ => MemberDeclarationKind.Unknown,
         };
+    }
+
+    private static DeclarationResolutionStatus GetReferenceResolutionStatus(
+        EntityId targetId,
+        IReadOnlyDictionary<EntityId, EntityMetadata> metadataById)
+    {
+        if (!metadataById.TryGetValue(targetId, out var targetMeta))
+        {
+            return DeclarationResolutionStatus.Unresolved;
+        }
+
+        if (targetMeta.IsType("type-declaration"))
+        {
+            return DeclarationResolutionStatus.Resolved;
+        }
+
+        if (targetMeta.IsType("external-type-stub"))
+        {
+            return DeclarationResolutionStatus.ExternalStub;
+        }
+
+        return DeclarationResolutionStatus.Unresolved;
     }
 
     private static IReadOnlyList<EntityEdge> BuildEntityEdges(
