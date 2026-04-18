@@ -205,6 +205,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             })
             .ToArray();
 
+        var declarations = BuildDeclarationCatalog(_triples, metadataById, repositoryId);
+
         var repository = new RepositoryNode(
             repositoryId,
             repoMeta.Name,
@@ -214,7 +216,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
 
         return new ProjectStructureWikiModel(repository, solutions, projects, packages, files, submodules)
         {
-            Declarations = DeclarationCatalog.Empty,
+            Declarations = declarations,
         };
     }
 
@@ -328,6 +330,10 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             else if (triple.Predicate == CorePredicates.SubmoduleUrl)
             {
                 meta.SubmoduleUrl = value;
+            }
+            else if (triple.Predicate == CorePredicates.TypeKind)
+            {
+                meta.TypeKind = value;
             }
         }
 
@@ -504,6 +510,197 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             .ToArray();
     }
 
+    private static DeclarationCatalog BuildDeclarationCatalog(
+        IReadOnlyList<SemanticTriple> triples,
+        IReadOnlyDictionary<EntityId, EntityMetadata> metadataById,
+        EntityId repositoryId)
+    {
+        var namespaceContainment = BuildEntityEdges(triples, CorePredicates.ContainsNamespace);
+        var typeContainment = BuildEntityEdges(triples, CorePredicates.ContainsType);
+        var fileDeclaresNamespace = BuildEntityEdges(triples, CorePredicates.DeclaresNamespace);
+        var fileDeclaresType = BuildEntityEdges(triples, CorePredicates.DeclaresType);
+
+        var namespaceIds = metadataById
+            .Where(x => x.Value.IsType("namespace"))
+            .Select(x => x.Key)
+            .Concat(namespaceContainment.Select(x => x.Object))
+            .Distinct()
+            .OrderBy(x => metadataById.TryGetValue(x, out var meta) ? meta.Name : x.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        var parentByNamespace = new Dictionary<EntityId, EntityId>();
+        foreach (var edge in namespaceContainment)
+        {
+            if (edge.Subject == repositoryId)
+            {
+                continue;
+            }
+
+            if (!metadataById.TryGetValue(edge.Subject, out var parentMeta) || !parentMeta.IsType("namespace"))
+            {
+                continue;
+            }
+
+            parentByNamespace[edge.Object] = edge.Subject;
+        }
+
+        var childrenByNamespace = namespaceContainment
+            .Where(x => metadataById.TryGetValue(x.Subject, out var parentMeta) && parentMeta.IsType("namespace"))
+            .GroupBy(x => x.Subject)
+            .ToDictionary(
+                x => x.Key,
+                x => x.Select(v => v.Object)
+                    .Distinct()
+                    .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Name : id.Value, StringComparer.Ordinal)
+                    .ToArray());
+
+        var typeNamespaceMap = typeContainment
+            .Where(x => metadataById.TryGetValue(x.Subject, out var namespaceMeta) && namespaceMeta.IsType("namespace"))
+            .Where(x => metadataById.TryGetValue(x.Object, out var typeMeta) && typeMeta.IsType("type-declaration"))
+            .ToArray();
+
+        var typeIds = typeNamespaceMap
+            .Select(x => x.Object)
+            .Concat(metadataById.Where(x => x.Value.IsType("type-declaration")).Select(x => x.Key))
+            .Distinct()
+            .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        var namespaceByTypeId = typeNamespaceMap
+            .GroupBy(x => x.Object)
+            .ToDictionary(x => x.Key, x => x.First().Subject);
+
+        var containedTypesByNamespace = typeNamespaceMap
+            .GroupBy(x => x.Subject)
+            .ToDictionary(
+                x => x.Key,
+                x => x.Select(v => v.Object)
+                    .Distinct()
+                    .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Name : id.Value, StringComparer.Ordinal)
+                    .ThenBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
+                    .ToArray());
+
+        var declarationFilesByNamespace = fileDeclaresNamespace
+            .GroupBy(x => x.Object)
+            .ToDictionary(
+                x => x.Key,
+                x => x.Select(v => v.Subject)
+                    .Distinct()
+                    .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
+                    .ToArray());
+
+        var declarationFilesByType = fileDeclaresType
+            .GroupBy(x => x.Object)
+            .ToDictionary(
+                x => x.Key,
+                x => x.Select(v => v.Subject)
+                    .Distinct()
+                    .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
+                    .ToArray());
+
+        var namespaces = namespaceIds
+            .Select(namespaceId =>
+            {
+                var meta = metadataById.TryGetValue(namespaceId, out var namespaceMeta)
+                    ? namespaceMeta
+                    : new EntityMetadata(namespaceId);
+
+                parentByNamespace.TryGetValue(namespaceId, out var parentNamespaceId);
+                childrenByNamespace.TryGetValue(namespaceId, out var childNamespaceIds);
+                childNamespaceIds ??= [];
+
+                containedTypesByNamespace.TryGetValue(namespaceId, out var containedTypeIds);
+                containedTypeIds ??= [];
+
+                declarationFilesByNamespace.TryGetValue(namespaceId, out var declarationFileIds);
+                declarationFileIds ??= [];
+
+                return new NamespaceDeclarationNode(
+                    namespaceId,
+                    meta.Name,
+                    meta.Path,
+                    parentNamespaceId == default ? null : parentNamespaceId,
+                    childNamespaceIds,
+                    containedTypeIds,
+                    declarationFileIds);
+            })
+            .OrderBy(
+                x => DeclarationOrderingRules.GetDeterministicSortKey(
+                    x.Name,
+                    x.Name,
+                    x.Path,
+                    x.Id.Value),
+                StringComparer.Ordinal)
+            .ToArray();
+
+        var types = typeIds
+            .Select(typeId =>
+            {
+                var meta = metadataById.TryGetValue(typeId, out var typeMeta)
+                    ? typeMeta
+                    : new EntityMetadata(typeId);
+
+                namespaceByTypeId.TryGetValue(typeId, out var namespaceId);
+                declarationFilesByType.TryGetValue(typeId, out var declarationFileIds);
+                declarationFileIds ??= [];
+
+                return new TypeDeclarationNode(
+                    typeId,
+                    ParseTypeKind(meta.TypeKind),
+                    meta.Name,
+                    meta.Name,
+                    meta.Path,
+                    namespaceId == default ? null : namespaceId,
+                    null,
+                    false,
+                    false,
+                    DeclarationAccessibility.Unknown,
+                    0,
+                    [],
+                    [],
+                    [],
+                    [],
+                    [],
+                    declarationFileIds);
+            })
+            .OrderBy(
+                x => DeclarationOrderingRules.GetDeterministicSortKey(
+                    x.NamespaceId is not null && metadataById.TryGetValue(x.NamespaceId.Value, out var namespaceMeta) ? namespaceMeta.Name : string.Empty,
+                    x.Name,
+                    x.Path,
+                    x.Id.Value),
+                StringComparer.Ordinal)
+            .ToArray();
+
+        return new DeclarationCatalog(namespaces, types, []);
+    }
+
+    private static TypeDeclarationKind ParseTypeKind(string kind)
+    {
+        return kind.ToLowerInvariant() switch
+        {
+            "interface" => TypeDeclarationKind.Interface,
+            "class" => TypeDeclarationKind.Class,
+            "record" => TypeDeclarationKind.Record,
+            "struct" => TypeDeclarationKind.Struct,
+            "enum" => TypeDeclarationKind.Enum,
+            "delegate" => TypeDeclarationKind.Delegate,
+            _ => TypeDeclarationKind.Unknown,
+        };
+    }
+
+    private static IReadOnlyList<EntityEdge> BuildEntityEdges(
+        IReadOnlyList<SemanticTriple> triples,
+        PredicateId predicate)
+    {
+        return triples
+            .Where(x => x.Predicate == predicate)
+            .Where(x => x.Subject is EntityNode && x.Object is EntityNode)
+            .Select(x => new EntityEdge(((EntityNode)x.Subject).Id, ((EntityNode)x.Object).Id))
+            .Distinct()
+            .ToArray();
+    }
+
     private static DateTimeOffset ParseTimestamp(string value)
     {
         return DateTimeOffset.TryParse(value, out var parsed)
@@ -537,6 +734,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             TargetBranch = string.Empty;
             SourceBranchFileCommitCount = 0;
             SubmoduleUrl = string.Empty;
+            TypeKind = string.Empty;
         }
 
         public EntityId Id { get; }
@@ -583,6 +781,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
 
         public string SubmoduleUrl { get; set; }
 
+        public string TypeKind { get; set; }
+
         public bool IsType(string entityType) => EntityType.Equals(entityType, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -592,6 +792,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
     private sealed record PackageReferenceTargetEdge(EntityId PackageReferenceId, EntityId PackageId);
     private sealed record FileHistoryEdge(EntityId FileId, EntityId EventId);
     private sealed record SubmoduleEdge(EntityId RepositoryId, EntityId SubmoduleId);
+    private sealed record EntityEdge(EntityId Subject, EntityId Object);
 
     private sealed record PackageVersionMetadata(
         HashSet<string> DeclaredVersions,

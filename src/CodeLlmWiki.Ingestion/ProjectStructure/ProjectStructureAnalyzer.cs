@@ -159,10 +159,13 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
         var solutionMemberPaths = BuildSolutionMemberPathSet(fullRepositoryPath, solutionProjectMap);
         var gitTrackedFiles = DiscoverGitTrackedHeadFiles(fullRepositoryPath, diagnostics);
+        var fileIdByRelativePath = new Dictionary<string, EntityId>(StringComparer.OrdinalIgnoreCase);
+        var dotNetSourceFiles = new List<string>();
 
         foreach (var relativeFilePath in gitTrackedFiles.OrderBy(x => x, StringComparer.Ordinal))
         {
             var fileId = _stableIdGenerator.Create(new EntityKey("file", relativeFilePath));
+            fileIdByRelativePath[relativeFilePath] = fileId;
             AddEntityTriples(
                 triples,
                 fileId,
@@ -175,6 +178,11 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 new EntityNode(fileId),
                 CorePredicates.IsSolutionMember,
                 new LiteralNode(IsSolutionMember(relativeFilePath, solutionMemberPaths).ToString().ToLowerInvariant())));
+
+            if (relativeFilePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+            {
+                dotNetSourceFiles.Add(relativeFilePath);
+            }
 
             var fileHistory = DiscoverFileHistory(fullRepositoryPath, relativeFilePath, mainlineBranch, diagnostics);
             triples.Add(new SemanticTriple(new EntityNode(fileId), CorePredicates.EditCount, new LiteralNode(fileHistory.Commits.Count.ToString())));
@@ -219,7 +227,134 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             triples.Add(new SemanticTriple(new EntityNode(repositoryId), CorePredicates.Contains, new EntityNode(fileId)));
         }
 
+        IngestNamespaces(
+            repositoryId,
+            fullRepositoryPath,
+            dotNetSourceFiles,
+            fileIdByRelativePath,
+            triples,
+            diagnostics,
+            cancellationToken);
+
         return Task.FromResult(new ProjectStructureAnalysisResult(repositoryId, triples, diagnostics));
+    }
+
+    private void IngestNamespaces(
+        EntityId repositoryId,
+        string repositoryRoot,
+        IReadOnlyList<string> sourceFiles,
+        IReadOnlyDictionary<string, EntityId> fileIdByRelativePath,
+        List<SemanticTriple> triples,
+        List<IngestionDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        if (sourceFiles.Count == 0)
+        {
+            return;
+        }
+
+        NamespaceDiscoveryResult discovery;
+        try
+        {
+            discovery = CSharpDeclarationScanner.Discover(repositoryRoot, sourceFiles, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            diagnostics.Add(new IngestionDiagnostic(
+                "namespace:discovery:failed",
+                $"Failed to discover namespaces from source files: {ex.Message}"));
+            return;
+        }
+
+        if (discovery.Namespaces.Count == 0)
+        {
+            return;
+        }
+
+        var namespaceIdByName = new Dictionary<string, EntityId>(StringComparer.Ordinal);
+        foreach (var ns in discovery.Namespaces.OrderBy(x => x.Name, StringComparer.Ordinal))
+        {
+            var namespaceId = _stableIdGenerator.Create(new EntityKey("namespace", ns.Name));
+            namespaceIdByName[ns.Name] = namespaceId;
+
+            AddEntityTriples(
+                triples,
+                namespaceId,
+                "namespace",
+                ns.Name,
+                ns.Name.Replace('.', '/'));
+        }
+
+        foreach (var ns in discovery.Namespaces.OrderBy(x => x.Name, StringComparer.Ordinal))
+        {
+            var namespaceId = namespaceIdByName[ns.Name];
+
+            if (!string.IsNullOrWhiteSpace(ns.ParentName) && namespaceIdByName.TryGetValue(ns.ParentName, out var parentNamespaceId))
+            {
+                triples.Add(new SemanticTriple(
+                    new EntityNode(parentNamespaceId),
+                    CorePredicates.ContainsNamespace,
+                    new EntityNode(namespaceId)));
+            }
+            else
+            {
+                triples.Add(new SemanticTriple(
+                    new EntityNode(repositoryId),
+                    CorePredicates.ContainsNamespace,
+                    new EntityNode(namespaceId)));
+            }
+
+            foreach (var relativePath in ns.DeclarationFilePaths.OrderBy(x => x, StringComparer.Ordinal))
+            {
+                if (!fileIdByRelativePath.TryGetValue(relativePath, out var fileId))
+                {
+                    continue;
+                }
+
+                triples.Add(new SemanticTriple(
+                    new EntityNode(fileId),
+                    CorePredicates.DeclaresNamespace,
+                    new EntityNode(namespaceId)));
+            }
+        }
+
+        foreach (var type in discovery.Types.OrderBy(x => x.NamespaceName, StringComparer.Ordinal).ThenBy(x => x.TypeName, StringComparer.Ordinal).ThenBy(x => x.RelativeFilePath, StringComparer.Ordinal))
+        {
+            if (!namespaceIdByName.TryGetValue(type.NamespaceName, out var namespaceId))
+            {
+                continue;
+            }
+
+            var naturalKey = $"{type.NamespaceName}:{type.TypeName}:{type.RelativeFilePath}";
+            var typeId = _stableIdGenerator.Create(new EntityKey("type-declaration", naturalKey));
+
+            AddEntityTriples(
+                triples,
+                typeId,
+                "type-declaration",
+                type.TypeName,
+                $"{type.NamespaceName}.{type.TypeName}");
+
+            triples.Add(new SemanticTriple(
+                new EntityNode(typeId),
+                CorePredicates.TypeKind,
+                new LiteralNode(type.Kind)));
+
+            triples.Add(new SemanticTriple(
+                new EntityNode(namespaceId),
+                CorePredicates.ContainsType,
+                new EntityNode(typeId)));
+
+            if (!fileIdByRelativePath.TryGetValue(type.RelativeFilePath, out var fileId))
+            {
+                continue;
+            }
+
+            triples.Add(new SemanticTriple(
+                new EntityNode(fileId),
+                CorePredicates.DeclaresType,
+                new EntityNode(typeId)));
+        }
     }
 
     private static void AddEntityTriples(

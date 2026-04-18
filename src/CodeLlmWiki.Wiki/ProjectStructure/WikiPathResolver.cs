@@ -29,6 +29,15 @@ internal sealed class WikiPathResolver
         return RegisterNamedPath("packages", package.Id, package.Name, package.Name);
     }
 
+    public string RegisterNamespace(NamespaceDeclarationNode namespaceDeclaration)
+    {
+        var namespacePath = NormalizePath(namespaceDeclaration.Path.Replace('.', '/'));
+        var candidate = $"namespaces/{namespacePath}.md";
+        var path = ReserveWithCounter(candidate);
+        _pathByEntityId[namespaceDeclaration.Id] = path;
+        return path;
+    }
+
     public string RegisterFile(FileNode file)
     {
         var normalizedPath = NormalizePath(file.Path);

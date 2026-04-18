@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 002](./002-phase-2-dotnet-namespace-type-declaration.prd.md)
 
 - Issue: [#26](https://github.com/vbfg1973/code-llm-wiki/issues/26)
-- [ ] Status: open
-- [ ] Completion date: 
+- [x] Status: complete
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,10 +18,10 @@ Implement namespace ingestion as first-class graph facts with explicit hierarchy
 
 ## Acceptance criteria
 
-- [ ] Namespace entities are ingested repository-globally with explicit `contains_namespace` and `contains_type` edges.
-- [ ] Namespace pages render deterministic hierarchy and contained-type sections.
-- [ ] Namespace paths follow approved hierarchy-based contract with deterministic collision handling.
-- [ ] Namespace front matter remains minimal scalar with conditional parent-hierarchy fields.
+- [x] Namespace entities are ingested repository-globally with explicit `contains_namespace` and `contains_type` edges.
+- [x] Namespace pages render deterministic hierarchy and contained-type sections.
+- [x] Namespace paths follow approved hierarchy-based contract with deterministic collision handling.
+- [x] Namespace front matter remains minimal scalar with conditional parent-hierarchy fields.
 
 ## Blocked by
 
