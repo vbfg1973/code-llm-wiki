@@ -99,7 +99,8 @@ Purpose: Track durable product capabilities from the original specification (not
 - [ ] `BL-017` Query and publication expansion
   - Detail: richer wiki projections and ad hoc query interfaces (including MCP-facing usage).
   - Planned in:
-    - PRD TBD
+    - [PRD 004](/home/vbfg/dev/dotnet-llm-wiki/plans/004/004-phase-4-wiki-navigation-link-consistency.prd.md)
+    - GitHub issue: `#54`
 
 - [ ] `BL-018` Multi-language analyzer expansion
   - Detail: extend shared repository analysis interfaces to Python and frontend frameworks (React, Vue, Angular).
