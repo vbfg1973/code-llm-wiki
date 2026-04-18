@@ -42,29 +42,29 @@ Purpose: Track durable product capabilities from the original specification (not
   - Implemented in:
     - [PRD 002](/home/vbfg/dev/dotnet-llm-wiki/plans/002/002-phase-2-dotnet-namespace-type-declaration.prd.md)
 
-- [ ] `BL-008` Method declarations
+- [x] `BL-008` Method declarations
   - Detail: methods, signatures, parameters, return types, declaring types, declaration files/locations.
-  - Planned in:
+  - Implemented in:
     - [PRD 003](/home/vbfg/dev/dotnet-llm-wiki/plans/003/003-phase-3-dotnet-method-extraction-and-relations.prd.md)
-    - GitHub issue: `#41`
     - Plan: [PRD 003 plan](/home/vbfg/dev/dotnet-llm-wiki/plans/003/003-phase-3-dotnet-method-extraction-and-relations.plan.md)
-    - Implementation issues: `#42`, `#43`, `#44`, `#45`, `#46`, `#47`
+    - Implementation issues (closed): `#42`, `#43`, `#44`, `#45`, `#46`, `#47`
+    - Parent GitHub issue (closed): `#41`
 
-- [ ] `BL-009` Method relationships
+- [x] `BL-009` Method relationships
   - Detail: interface method implementation links, overrides, method call graph edges.
-  - Planned in:
+  - Implemented in:
     - [PRD 003](/home/vbfg/dev/dotnet-llm-wiki/plans/003/003-phase-3-dotnet-method-extraction-and-relations.prd.md)
-    - GitHub issue: `#41`
     - Plan: [PRD 003 plan](/home/vbfg/dev/dotnet-llm-wiki/plans/003/003-phase-3-dotnet-method-extraction-and-relations.plan.md)
-    - Implementation issues: `#42`, `#43`, `#44`, `#45`, `#46`, `#47`
+    - Implementation issues (closed): `#42`, `#43`, `#44`, `#45`, `#46`, `#47`
+    - Parent GitHub issue (closed): `#41`
 
-- [ ] `BL-010` Property access behavior
+- [x] `BL-010` Property access behavior
   - Detail: property/field reads and writes captured as graph relationships.
-  - Planned in:
+  - Implemented in:
     - [PRD 003](/home/vbfg/dev/dotnet-llm-wiki/plans/003/003-phase-3-dotnet-method-extraction-and-relations.prd.md)
-    - GitHub issue: `#41`
     - Plan: [PRD 003 plan](/home/vbfg/dev/dotnet-llm-wiki/plans/003/003-phase-3-dotnet-method-extraction-and-relations.plan.md)
-    - Implementation issues: `#42`, `#43`, `#44`, `#45`, `#46`, `#47`
+    - Implementation issues (closed): `#42`, `#43`, `#44`, `#45`, `#46`, `#47`
+    - Parent GitHub issue (closed): `#41`
 
 - [ ] `BL-011` Dependency usage mapping
   - Detail: class/type dependency map with source provenance (namespace/project/package; internal vs external).

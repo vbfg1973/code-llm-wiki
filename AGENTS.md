@@ -13,6 +13,8 @@ Use this file to rehydrate project context quickly for any new agent/session.
    - `/plans/001/001-phase-1-dotnet-project-structure.plan.md`
    - `/plans/002/002-phase-2-dotnet-namespace-type-declaration.prd.md`
    - `/plans/002/002-phase-2-dotnet-namespace-type-declaration.plan.md`
+   - `/plans/003/003-phase-3-dotnet-method-extraction-and-relations.prd.md`
+   - `/plans/003/003-phase-3-dotnet-method-extraction-and-relations.plan.md`
 4. If implementing a capability, read its linked issue file(s):
    - `/plans/{prd_id}/{prd_id}-{name}.issue.{issue_id}.md`
 
@@ -20,9 +22,10 @@ Use this file to rehydrate project context quickly for any new agent/session.
 
 - `PRD 001`: complete
 - `PRD 002`: complete
-- `PRD 003`: drafted, pending plan/issues
+- `PRD 003`: complete
   - Local PRD: `/plans/003/003-phase-3-dotnet-method-extraction-and-relations.prd.md`
-  - GitHub issue: `#41`
+  - GitHub issue (closed): `#41`
+  - Completed implementation issues (closed): `#42`, `#43`, `#44`, `#45`, `#46`, `#47`
 
 Canonical feature backlog:
 - `/plans/BACKLOG.md`
