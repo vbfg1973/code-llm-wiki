@@ -49,7 +49,7 @@ public sealed class NamespaceVerticalSliceTests
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(["PaymentService"], containedTypeNames);
+        Assert.Equal(["AccountingService", "PaymentService"], containedTypeNames);
     }
 
     [Fact]
@@ -71,7 +71,28 @@ public sealed class NamespaceVerticalSliceTests
         Assert.Contains("namespace_name: Acme.Payments.Services", servicesPage.Markdown, StringComparison.Ordinal);
         Assert.Contains("parent_namespace_id:", servicesPage.Markdown, StringComparison.Ordinal);
         Assert.Contains("## Contained Types", servicesPage.Markdown, StringComparison.Ordinal);
-        Assert.Contains("PaymentService", servicesPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains(
+            "- [[types/Acme/Payments/Services/AccountingService|AccountingService]] (class)",
+            servicesPage.Markdown,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "- [[types/Acme/Payments/Services/PaymentService|PaymentService]] (class)",
+            servicesPage.Markdown,
+            StringComparison.Ordinal);
+        Assert.True(
+            servicesPage.Markdown.IndexOf(
+                "- [[types/Acme/Payments/Services/AccountingService|AccountingService]] (class)",
+                StringComparison.Ordinal) <
+            servicesPage.Markdown.IndexOf(
+                "- [[types/Acme/Payments/Services/PaymentService|PaymentService]] (class)",
+                StringComparison.Ordinal),
+            "Contained types should render in deterministic sorted order.");
+
+        var contractsPage = pages.Single(x => x.RelativePath == "namespaces/Acme/Payments/Contracts.md");
+        Assert.Contains(
+            "- [[types/Acme/Payments/Contracts/IPaymentGateway|IPaymentGateway]] (interface)",
+            contractsPage.Markdown,
+            StringComparison.Ordinal);
 
         var rootPage = pages.Single(x => x.RelativePath == "namespaces/Acme.md");
         Assert.DoesNotContain("parent_namespace_id:", rootPage.Markdown, StringComparison.Ordinal);
@@ -153,6 +174,13 @@ public sealed class NamespaceVerticalSliceTests
                 namespace Acme.Payments.Services;
 
                 public sealed class PaymentService { }
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(appDir, "AccountingService.cs"),
+                """
+                namespace Acme.Payments.Services;
+
+                public sealed class AccountingService { }
                 """);
 
             await File.WriteAllTextAsync(Path.Combine(appDir, "Gateway.cs"),

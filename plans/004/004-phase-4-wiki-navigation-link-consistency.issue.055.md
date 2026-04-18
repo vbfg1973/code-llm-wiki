@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 004](./004-phase-4-wiki-navigation-link-consistency.prd.md)
 
 - Issue: [#55](https://github.com/vbfg1973/code-llm-wiki/issues/55)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: completed
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,9 +18,9 @@ Implement end-to-end namespace page rendering behavior where `Contained Types` e
 
 ## Acceptance criteria
 
-- [ ] Namespace page `Contained Types` entries render as wiki links for resolvable type targets.
-- [ ] Existing alias/readability format is preserved (`TypeName (kind)` with linked `TypeName`).
-- [ ] Focused tests verify linked rendering and deterministic ordering for namespace contained-type entries.
+- [x] Namespace page `Contained Types` entries render as wiki links for resolvable type targets.
+- [x] Existing alias/readability format is preserved (`TypeName (kind)` with linked `TypeName`).
+- [x] Focused tests verify linked rendering and deterministic ordering for namespace contained-type entries.
 
 ## Blocked by
 
