@@ -5,7 +5,7 @@
 ## Execution checklist
 
 - [x] Phase 1: Namespace Contained-Type Linking Slice — completion date: 2026-04-18
-- [ ] Phase 2: File Declared-Method Linking Slice — completion date:
+- [x] Phase 2: File Declared-Method Linking Slice — completion date: 2026-04-18
 - [ ] Phase 3: Publication Invariant Gate Slice — completion date:
 
 ---

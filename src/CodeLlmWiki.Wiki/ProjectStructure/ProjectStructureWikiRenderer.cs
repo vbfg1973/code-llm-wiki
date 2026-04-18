@@ -1360,7 +1360,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         {
             foreach (var method in methods)
             {
-                sb.AppendLine($"- {FormatMethodLinkAlias(method)} ({method.Kind.ToString().ToLowerInvariant()})");
+                sb.AppendLine($"- {resolver.ToWikiLink(method.Id, FormatMethodLinkAlias(method))} ({method.Kind.ToString().ToLowerInvariant()})");
             }
         }
         else

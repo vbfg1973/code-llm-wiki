@@ -86,6 +86,38 @@ public sealed class MethodDeclarationVerticalSliceTests
         Assert.Contains("## Declaration Files", methodPage.Markdown, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Render_TypeMethodsSection_ContainsOnlyWikiLinks()
+    {
+        var fixture = await MethodFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+        var pages = new ProjectStructureWikiRenderer().Render(model);
+
+        var workerPage = pages.Single(x => x.RelativePath == "types/Acme/Methods/Worker.md");
+        var methodsSection = ExtractSection(workerPage.Markdown, "## Methods", "## Member Data Flow");
+
+        var methodLines = methodsSection
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.StartsWith("- ", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.NotEmpty(methodLines);
+        Assert.All(methodLines, line => Assert.StartsWith("- [[methods/", line, StringComparison.Ordinal));
+    }
+
+    private static string ExtractSection(string markdown, string sectionHeader, string nextSectionHeader)
+    {
+        var start = markdown.IndexOf(sectionHeader, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Missing section '{sectionHeader}'.");
+
+        var end = markdown.IndexOf(nextSectionHeader, start + sectionHeader.Length, StringComparison.Ordinal);
+        Assert.True(end > start, $"Missing next section '{nextSectionHeader}'.");
+
+        return markdown[start..end];
+    }
+
     private sealed class MethodFixture
     {
         private MethodFixture(string repositoryPath)

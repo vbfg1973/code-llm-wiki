@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 004](./004-phase-4-wiki-navigation-link-consistency.prd.md)
 
 - Issue: [#56](https://github.com/vbfg1973/code-llm-wiki/issues/56)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: completed
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,10 +18,10 @@ Implement end-to-end file page rendering behavior where `Declared Symbols -> Met
 
 ## Acceptance criteria
 
-- [ ] File page `Declared Symbols -> Methods` entries render as wiki links for resolvable method targets.
-- [ ] Existing alias/readability format is preserved (`MethodAlias (kind)` with linked `MethodAlias`).
-- [ ] Focused tests verify linked rendering and deterministic ordering for file method entries.
-- [ ] Regression test explicitly guards against non-linked method listings in type method sections.
+- [x] File page `Declared Symbols -> Methods` entries render as wiki links for resolvable method targets.
+- [x] Existing alias/readability format is preserved (`MethodAlias (kind)` with linked `MethodAlias`).
+- [x] Focused tests verify linked rendering and deterministic ordering for file method entries.
+- [x] Regression test explicitly guards against non-linked method listings in type method sections.
 
 ## Blocked by
 

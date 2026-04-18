@@ -41,10 +41,27 @@ public sealed class FileBacklinkTraceabilityTests
         Assert.Contains("### Namespaces", filePage.Markdown, StringComparison.Ordinal);
         Assert.Contains("### Types", filePage.Markdown, StringComparison.Ordinal);
         Assert.Contains("### Members", filePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("### Methods", filePage.Markdown, StringComparison.Ordinal);
         Assert.Contains("Trace.Sample", filePage.Markdown, StringComparison.Ordinal);
         Assert.Contains("Shared", filePage.Markdown, StringComparison.Ordinal);
         Assert.Contains("AValue", filePage.Markdown, StringComparison.Ordinal);
         Assert.Contains("ZValue", filePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains(
+            "- [[methods/Trace/Sample/Shared/Zed--no-params|Zed()]] (method)",
+            filePage.Markdown,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "- [[methods/Trace/Sample/Shared/Alpha--no-params|Alpha()]] (method)",
+            filePage.Markdown,
+            StringComparison.Ordinal);
+
+        var zedIndex = filePage.Markdown.IndexOf(
+            "- [[methods/Trace/Sample/Shared/Zed--no-params|Zed()]] (method)",
+            StringComparison.Ordinal);
+        var alphaIndex = filePage.Markdown.IndexOf(
+            "- [[methods/Trace/Sample/Shared/Alpha--no-params|Alpha()]] (method)",
+            StringComparison.Ordinal);
+        Assert.True(zedIndex >= 0 && alphaIndex > zedIndex);
     }
 
     [Fact]
@@ -151,6 +168,8 @@ public sealed class FileBacklinkTraceabilityTests
                 {
                     public int ZValue { get; set; }
                     public int AValue { get; set; }
+                    public void Zed() { }
+                    public void Alpha() { }
                 }
                 """);
 
