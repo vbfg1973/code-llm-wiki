@@ -14,7 +14,7 @@
 
 ## Output style addendum phases (queued)
 
-- [ ] [#16](https://github.com/vbfg1973/code-llm-wiki/issues/16) Phase 8: Human-Readable Obsidian Page Contracts
-- [ ] [#17](https://github.com/vbfg1973/code-llm-wiki/issues/17) Phase 9: Scalar Front Matter Schema v1
-- [ ] [#18](https://github.com/vbfg1973/code-llm-wiki/issues/18) Phase 10: Package Membership and Version Context
+- [x] [#16](https://github.com/vbfg1973/code-llm-wiki/issues/16) Phase 8: Human-Readable Obsidian Page Contracts
+- [x] [#17](https://github.com/vbfg1973/code-llm-wiki/issues/17) Phase 9: Scalar Front Matter Schema v1
+- [x] [#18](https://github.com/vbfg1973/code-llm-wiki/issues/18) Phase 10: Package Membership and Version Context
 - [ ] [#19](https://github.com/vbfg1973/code-llm-wiki/issues/19) Phase 11: File History Presentation Controls

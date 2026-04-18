@@ -6,7 +6,7 @@ namespace CodeLlmWiki.Wiki.ProjectStructure;
 
 public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
 {
-    public IReadOnlyList<WikiPage> Render(ProjectStructureWikiModel model)
+    public IReadOnlyList<WikiPage> Render(ProjectStructureWikiModel model, int? maxMergeEntriesPerFile = null)
     {
         var resolver = new WikiPathResolver();
         resolver.RegisterRepository(model.Repository);
@@ -47,7 +47,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         pages.AddRange(orderedSolutions.Select(solution => RenderSolutionPage(model.Repository.Id.Value, solution, projectById, resolver)));
         pages.AddRange(orderedProjects.Select(project => RenderProjectPage(model.Repository.Id.Value, project, packageById, resolver)));
         pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, resolver)));
-        pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, resolver)));
+        pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, resolver, maxMergeEntriesPerFile)));
 
         pages.Add(RenderIndexPage(model, resolver, indexPath));
 
@@ -236,10 +236,11 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
     private static WikiPage RenderFilePage(
         RepositoryNode repository,
         FileNode file,
-        WikiPathResolver resolver)
+        WikiPathResolver resolver,
+        int? maxMergeEntriesPerFile)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"# File: {file.Name}");
+        sb.AppendLine($"# File: {file.Path}");
         sb.AppendLine();
         sb.AppendLine($"- Path: `{file.Path}`");
         sb.AppendLine($"- classification: {file.Classification}");
@@ -260,7 +261,16 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine();
         sb.AppendLine("## Merge To Mainline");
 
-        foreach (var merge in file.MergeToMainlineEvents)
+        IEnumerable<FileMergeEventNode> mergeEvents = file.MergeToMainlineEvents
+            .OrderByDescending(x => ParseTimestamp(x.TimestampUtc))
+            .ThenBy(x => x.MergeCommitSha, StringComparer.Ordinal);
+
+        if (maxMergeEntriesPerFile is int cap)
+        {
+            mergeEvents = mergeEvents.Take(Math.Max(cap, 0));
+        }
+
+        foreach (var merge in mergeEvents)
         {
             sb.AppendLine($"- merge_commit: `{merge.MergeCommitSha}`");
             sb.AppendLine($"  merged_at_utc: `{merge.TimestampUtc}`");
@@ -271,7 +281,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
 
         return new WikiPage(
             RelativePath: resolver.GetPath(file.Id),
-            Title: file.Name,
+            Title: file.Path,
             Markdown: WithFrontMatter(
                 [
                     KeyValue("entity_id", file.Id.Value),
@@ -281,6 +291,13 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     KeyValue("file_path", file.Path),
                 ],
                 sb.ToString().TrimEnd()));
+    }
+
+    private static DateTimeOffset ParseTimestamp(string value)
+    {
+        return DateTimeOffset.TryParse(value, out var parsed)
+            ? parsed
+            : DateTimeOffset.MinValue;
     }
 
     private static WikiPage RenderIndexPage(

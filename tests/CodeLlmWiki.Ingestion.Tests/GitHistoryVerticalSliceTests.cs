@@ -60,6 +60,41 @@ public sealed class GitHistoryVerticalSliceTests
         Assert.Contains("branch_snapshot: main", page.Markdown, StringComparison.Ordinal);
         Assert.Contains("source_branch_file_commit_count: 2", page.Markdown, StringComparison.Ordinal);
         Assert.Contains($"merge_commit: `{fixture.MergeCommit}`", page.Markdown, StringComparison.Ordinal);
+        Assert.Equal("src/App/Renamed.cs", page.Title);
+    }
+
+    [Fact]
+    public void Render_FileMergeHistory_IsMostRecentFirst_AndUnboundedByDefault()
+    {
+        var model = CreateModelWithMergeHistoryOutOfOrder();
+        var renderer = new ProjectStructureWikiRenderer();
+
+        var page = renderer.Render(model)
+            .Single(x => x.RelativePath == "files/src/App/Program.cs.md");
+
+        Assert.Equal("src/App/Program.cs", page.Title);
+        Assert.Equal(3, CountOccurrences(page.Markdown, "merge_commit:"));
+
+        var newestIndex = page.Markdown.IndexOf("merge_commit: `commit-newest`", StringComparison.Ordinal);
+        var middleIndex = page.Markdown.IndexOf("merge_commit: `commit-middle`", StringComparison.Ordinal);
+        var oldestIndex = page.Markdown.IndexOf("merge_commit: `commit-oldest`", StringComparison.Ordinal);
+
+        Assert.True(newestIndex >= 0 && middleIndex > newestIndex && oldestIndex > middleIndex);
+    }
+
+    [Fact]
+    public void Render_FileMergeHistory_HonorsMaxMergeEntriesPerFileCap()
+    {
+        var model = CreateModelWithMergeHistoryOutOfOrder();
+        var renderer = new ProjectStructureWikiRenderer();
+
+        var page = renderer.Render(model, maxMergeEntriesPerFile: 2)
+            .Single(x => x.RelativePath == "files/src/App/Program.cs.md");
+
+        Assert.Equal(2, CountOccurrences(page.Markdown, "merge_commit:"));
+        Assert.Contains("merge_commit: `commit-newest`", page.Markdown, StringComparison.Ordinal);
+        Assert.Contains("merge_commit: `commit-middle`", page.Markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("merge_commit: `commit-oldest`", page.Markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -104,6 +139,69 @@ public sealed class GitHistoryVerticalSliceTests
         Assert.Contains("core:sourceBranchFileCommitCount", predicateIds);
         Assert.Contains("core:hasSubmodule", predicateIds);
         Assert.Contains("core:submoduleUrl", predicateIds);
+    }
+
+    private static int CountOccurrences(string content, string token)
+    {
+        var count = 0;
+        var startIndex = 0;
+
+        while (true)
+        {
+            var index = content.IndexOf(token, startIndex, StringComparison.Ordinal);
+            if (index < 0)
+            {
+                return count;
+            }
+
+            count++;
+            startIndex = index + token.Length;
+        }
+    }
+
+    private static ProjectStructureWikiModel CreateModelWithMergeHistoryOutOfOrder()
+    {
+        var repository = new RepositoryNode(
+            new EntityId("repository:test"),
+            "test-repo",
+            ".",
+            "main",
+            "main");
+
+        var file = new FileNode(
+            new EntityId("file:src/App/Program.cs"),
+            "Program.cs",
+            "src/App/Program.cs",
+            "source-code",
+            true,
+            3,
+            null,
+            [],
+            [
+                new FileMergeEventNode(
+                    "commit-oldest",
+                    "2026-01-01T00:00:00.0000000Z",
+                    "Alice",
+                    "alice@example.com",
+                    "main",
+                    1),
+                new FileMergeEventNode(
+                    "commit-newest",
+                    "2026-01-03T00:00:00.0000000Z",
+                    "Bob",
+                    "bob@example.com",
+                    "main",
+                    2),
+                new FileMergeEventNode(
+                    "commit-middle",
+                    "2026-01-02T00:00:00.0000000Z",
+                    "Chris",
+                    "chris@example.com",
+                    "main",
+                    1),
+            ]);
+
+        return new ProjectStructureWikiModel(repository, [], [], [], [file], []);
     }
 
     private sealed class GitHistoryFixture

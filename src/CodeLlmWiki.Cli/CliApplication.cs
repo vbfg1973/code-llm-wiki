@@ -53,6 +53,9 @@ public sealed class CliApplication
             ?? config.OutputRoot
             ?? DefaultOutputRoot;
 
+        var maxMergeEntriesPerFile = options.MaxMergeEntriesPerFile
+            ?? config.MaxMergeEntriesPerFile;
+
         var request = new IngestionRunRequest(
             RepositoryPath: options.RepositoryPath,
             ConfigPath: options.ConfigPath,
@@ -69,7 +72,8 @@ public sealed class CliApplication
                 OutputRootPath: outputRoot,
                 StartedAtUtc: startedAtUtc,
                 CompletedAtUtc: completedAtUtc,
-                RunResult: result),
+                RunResult: result,
+                MaxMergeEntriesPerFile: maxMergeEntriesPerFile),
             cancellationToken);
 
         if (!publication.Succeeded)
