@@ -447,14 +447,49 @@ internal static class CSharpDeclarationScanner
 
     private static IReadOnlyList<MemberDiscoveryNode> ParseEnumMembers(EnumDeclarationSyntax enumDeclaration, string relativePath)
     {
-        return enumDeclaration.Members
-            .Select(member => new MemberDiscoveryNode(
+        var members = new List<MemberDiscoveryNode>();
+        long? lastIntegralValue = null;
+
+        foreach (var member in enumDeclaration.Members)
+        {
+            string? constantValue;
+
+            if (member.EqualsValue is not null)
+            {
+                var initializerText = member.EqualsValue.Value.ToString().Trim();
+                if (TryParseIntegralConstant(initializerText, out var parsedValue))
+                {
+                    constantValue = parsedValue.ToString();
+                    lastIntegralValue = parsedValue;
+                }
+                else
+                {
+                    constantValue = initializerText;
+                    lastIntegralValue = null;
+                }
+            }
+            else if (lastIntegralValue is null)
+            {
+                constantValue = "0";
+                lastIntegralValue = 0;
+            }
+            else
+            {
+                var nextValue = lastIntegralValue.Value + 1;
+                constantValue = nextValue.ToString();
+                lastIntegralValue = nextValue;
+            }
+
+            members.Add(new MemberDiscoveryNode(
                 "enum-member",
                 member.Identifier.ValueText,
                 "public",
                 null,
-                member.EqualsValue?.Value.ToString(),
-                relativePath))
+                constantValue,
+                relativePath));
+        }
+
+        return members
             .OrderBy(x => x.Name, StringComparer.Ordinal)
             .ToArray();
     }
@@ -538,6 +573,36 @@ internal static class CSharpDeclarationScanner
         }
 
         return value.Trim();
+    }
+
+    private static bool TryParseIntegralConstant(string value, out long parsed)
+    {
+        var normalized = value.Replace("_", string.Empty, StringComparison.Ordinal).Trim();
+
+        if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            return long.TryParse(normalized[2..], System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out parsed);
+        }
+
+        if (normalized.StartsWith("0b", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                parsed = Convert.ToInt64(normalized[2..], 2);
+                return true;
+            }
+            catch
+            {
+                parsed = default;
+                return false;
+            }
+        }
+
+        return long.TryParse(
+            normalized,
+            System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out parsed);
     }
 
     private static bool LooksLikeInterfaceName(string typeName)

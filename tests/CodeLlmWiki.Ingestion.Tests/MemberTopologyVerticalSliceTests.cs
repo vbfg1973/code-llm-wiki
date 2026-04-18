@@ -123,8 +123,8 @@ public sealed class MemberTopologyVerticalSliceTests
 
                 public enum Status
                 {
-                    Unknown = 0,
-                    Ready = 1
+                    Unknown,
+                    Ready
                 }
                 """);
 
