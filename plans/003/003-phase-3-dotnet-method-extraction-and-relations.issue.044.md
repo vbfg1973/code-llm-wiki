@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 003](./003-phase-3-dotnet-method-extraction-and-relations.prd.md)
 
 - Issue: [#44](https://github.com/vbfg1973/code-llm-wiki/issues/44)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: completed
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,10 +18,10 @@ Add direct method relationship mapping for interface implementation and override
 
 ## Acceptance criteria
 
-- [ ] `implements_method` edges are captured for explicit and implicit interface implementations.
-- [ ] `overrides_method` edges are captured for overriding methods with deterministic target resolution.
-- [ ] Method pages render `Implements` and `Overrides` sections with deterministic ordering.
-- [ ] Relationship projection degrades safely when semantic resolution is partial, without fabricating edges.
+- [x] `implements_method` edges are captured for explicit and implicit interface implementations.
+- [x] `overrides_method` edges are captured for overriding methods with deterministic target resolution.
+- [x] Method pages render `Implements` and `Overrides` sections with deterministic ordering.
+- [x] Relationship projection degrades safely when semantic resolution is partial, without fabricating edges.
 
 ## Blocked by
 

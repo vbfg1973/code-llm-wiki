@@ -90,6 +90,26 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         var namespaceById = model.Declarations.Namespaces.ToDictionary(x => x.Id, x => x);
         var memberById = model.Declarations.Members.ToDictionary(x => x.Id, x => x);
         var methodById = orderedMethods.ToDictionary(x => x.Id, x => x);
+        var implementedMethodIdsBySourceMethodId = model.Declarations.Methods.Relations
+            .Where(x => x.Kind == MethodRelationKind.ImplementsMethod && x.TargetMethodId is not null)
+            .GroupBy(x => x.SourceMethodId)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.TargetMethodId!.Value)
+                    .Distinct()
+                    .OrderBy(v => v.Value, StringComparer.Ordinal)
+                    .ToArray());
+        var overriddenMethodIdsBySourceMethodId = model.Declarations.Methods.Relations
+            .Where(x => x.Kind == MethodRelationKind.OverridesMethod && x.TargetMethodId is not null)
+            .GroupBy(x => x.SourceMethodId)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.TargetMethodId!.Value)
+                    .Distinct()
+                    .OrderBy(v => v.Value, StringComparer.Ordinal)
+                    .ToArray());
         var fileById = model.Files.ToDictionary(x => x.Id, x => x);
         var namespaceBacklinksByFileId = BuildNamespaceBacklinksByFileId(model.Declarations.Namespaces, fileById);
         var typeBacklinksByFileId = BuildTypeBacklinksByFileId(model.Declarations.Types, fileById);
@@ -106,7 +126,16 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, resolver)));
         pages.AddRange(orderedNamespaces.Select(namespaceDeclaration => RenderNamespacePage(model.Repository.Id.Value, namespaceDeclaration, namespaceById, typeById, resolver)));
         pages.AddRange(orderedTypes.Select(typeDeclaration => RenderTypePage(model.Repository.Id.Value, typeDeclaration, namespaceById, typeById, memberById, methodById, fileById, orderedProjects, resolver)));
-        pages.AddRange(orderedMethods.Select(method => RenderMethodPage(model.Repository.Id.Value, method, typeById, fileById, resolver)));
+        pages.AddRange(orderedMethods.Select(method =>
+            RenderMethodPage(
+                model.Repository.Id.Value,
+                method,
+                typeById,
+                methodById,
+                implementedMethodIdsBySourceMethodId,
+                overriddenMethodIdsBySourceMethodId,
+                fileById,
+                resolver)));
         pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, namespaceBacklinksByFileId, typeBacklinksByFileId, memberBacklinksByFileId, methodBacklinksByFileId, resolver, maxMergeEntriesPerFile)));
 
         pages.Add(RenderIndexPage(model, resolver, indexPath));
@@ -724,6 +753,32 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         }
     }
 
+    private static void AppendMethodRelationshipSection(
+        StringBuilder sb,
+        EntityId sourceMethodId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> targetMethodIdsBySourceMethodId,
+        IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        WikiPathResolver resolver)
+    {
+        if (!targetMethodIdsBySourceMethodId.TryGetValue(sourceMethodId, out var targetMethodIds) || targetMethodIds.Count == 0)
+        {
+            sb.AppendLine("- none");
+            return;
+        }
+
+        foreach (var targetMethodId in targetMethodIds)
+        {
+            if (methodById.TryGetValue(targetMethodId, out var targetMethod))
+            {
+                sb.AppendLine($"- {resolver.ToWikiLink(targetMethod.Id, FormatMethodLinkAlias(targetMethod))}");
+            }
+            else
+            {
+                sb.AppendLine("- unresolved target");
+            }
+        }
+    }
+
     private static string FormatMethodLinkAlias(MethodDeclarationNode method)
     {
         var orderedParameters = method.Parameters
@@ -767,6 +822,9 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         string repositoryId,
         MethodDeclarationNode methodDeclaration,
         IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
+        IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> implementedMethodIdsBySourceMethodId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> overriddenMethodIdsBySourceMethodId,
         IReadOnlyDictionary<EntityId, FileNode> fileById,
         WikiPathResolver resolver)
     {
@@ -811,6 +869,24 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 sb.AppendLine($"- {parameter.Name}: {parameterType}");
             }
         }
+
+        sb.AppendLine();
+        sb.AppendLine("## Implements");
+        AppendMethodRelationshipSection(
+            sb,
+            methodDeclaration.Id,
+            implementedMethodIdsBySourceMethodId,
+            methodById,
+            resolver);
+
+        sb.AppendLine();
+        sb.AppendLine("## Overrides");
+        AppendMethodRelationshipSection(
+            sb,
+            methodDeclaration.Id,
+            overriddenMethodIdsBySourceMethodId,
+            methodById,
+            resolver);
 
         sb.AppendLine();
         sb.AppendLine("## Declaration Locations");

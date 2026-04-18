@@ -5,6 +5,7 @@ internal sealed record MethodDiscoveryNode(
     string Name,
     string CanonicalName,
     string Accessibility,
+    bool IsOverride,
     int Arity,
     string? ReturnTypeName,
     IReadOnlyList<MethodParameterDiscoveryNode> Parameters,
