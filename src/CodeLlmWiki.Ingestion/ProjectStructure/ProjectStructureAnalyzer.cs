@@ -1219,7 +1219,11 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     unresolvedTarget = invocation.ToString().Trim();
                 }
 
-                var unresolvedTargetId = GetOrCreateUnresolvedCallTargetId(unresolvedTarget, unresolvedCallTargetIdByText, triples);
+                var unresolvedTargetId = GetOrCreateUnresolvedCallTargetId(
+                    unresolvedTarget,
+                    "symbol-unresolved",
+                    unresolvedCallTargetIdByText,
+                    triples);
                 triples.Add(new SemanticTriple(
                     new EntityNode(sourceMethodId),
                     CorePredicates.Calls,
@@ -1233,6 +1237,21 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             var targetSymbol = calledSymbol.ReducedFrom ?? calledSymbol;
             if (targetSymbol.ContainingType is null)
             {
+                var unresolvedTarget = invocation.Expression.ToString().Trim();
+                if (string.IsNullOrWhiteSpace(unresolvedTarget))
+                {
+                    unresolvedTarget = invocation.ToString().Trim();
+                }
+
+                var unresolvedTargetId = GetOrCreateUnresolvedCallTargetId(
+                    unresolvedTarget,
+                    "missing-containing-type",
+                    unresolvedCallTargetIdByText,
+                    triples);
+                triples.Add(new SemanticTriple(
+                    new EntityNode(sourceMethodId),
+                    CorePredicates.Calls,
+                    new EntityNode(unresolvedTargetId)));
                 diagnostics.Add(new IngestionDiagnostic(
                     "method:call:resolution:failed",
                     $"Invocation target has no containing type for '{targetSymbol.Name}' in method '{sourceMethodId.Value}'."));
@@ -1240,18 +1259,40 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             }
 
             var targetTypeQualifiedName = GetTypeQualifiedName(targetSymbol.ContainingType);
-            if (typeIdByQualifiedName.TryGetValue(targetTypeQualifiedName, out var targetTypeId) &&
-                methodCandidatesByTypeId.TryGetValue(targetTypeId, out var targetCandidates))
+            if (typeIdByQualifiedName.TryGetValue(targetTypeQualifiedName, out var targetTypeId))
             {
-                var targetMethodId = ResolveTargetMethodId(targetSymbol, targetCandidates);
-                if (targetMethodId is not null)
+                if (methodCandidatesByTypeId.TryGetValue(targetTypeId, out var targetCandidates))
                 {
-                    triples.Add(new SemanticTriple(
-                        new EntityNode(sourceMethodId),
-                        CorePredicates.Calls,
-                        new EntityNode(targetMethodId.Value)));
-                    continue;
+                    var targetMethodId = ResolveTargetMethodId(targetSymbol, targetCandidates);
+                    if (targetMethodId is not null)
+                    {
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(sourceMethodId),
+                            CorePredicates.Calls,
+                            new EntityNode(targetMethodId.Value)));
+                        continue;
+                    }
                 }
+
+                var unresolvedTarget = invocation.Expression.ToString().Trim();
+                if (string.IsNullOrWhiteSpace(unresolvedTarget))
+                {
+                    unresolvedTarget = invocation.ToString().Trim();
+                }
+
+                var unresolvedTargetId = GetOrCreateUnresolvedCallTargetId(
+                    unresolvedTarget,
+                    "internal-target-unmatched",
+                    unresolvedCallTargetIdByText,
+                    triples);
+                triples.Add(new SemanticTriple(
+                    new EntityNode(sourceMethodId),
+                    CorePredicates.Calls,
+                    new EntityNode(unresolvedTargetId)));
+                diagnostics.Add(new IngestionDiagnostic(
+                    "method:call:internal-target-unmatched",
+                    $"Invocation '{invocation}' resolved to internal type '{targetTypeQualifiedName}' but no unique method declaration could be matched in method '{sourceMethodId.Value}'."));
+                continue;
             }
 
             var externalTypeName = targetSymbol.ContainingType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
@@ -1366,22 +1407,29 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
     private EntityId GetOrCreateUnresolvedCallTargetId(
         string targetText,
+        string resolutionReason,
         Dictionary<string, EntityId> unresolvedCallTargetIdByText,
         List<SemanticTriple> triples)
     {
-        if (unresolvedCallTargetIdByText.TryGetValue(targetText, out var existing))
+        var key = $"{resolutionReason}|{targetText}";
+        if (unresolvedCallTargetIdByText.TryGetValue(key, out var existing))
         {
             return existing;
         }
 
-        var unresolvedId = _stableIdGenerator.Create(new EntityKey("unresolved-call-target", targetText));
-        unresolvedCallTargetIdByText[targetText] = unresolvedId;
+        var unresolvedNaturalKey = $"{resolutionReason}:{targetText}";
+        var unresolvedId = _stableIdGenerator.Create(new EntityKey("unresolved-call-target", unresolvedNaturalKey));
+        unresolvedCallTargetIdByText[key] = unresolvedId;
         AddEntityTriples(
             triples,
             unresolvedId,
             "unresolved-call-target",
             targetText,
             $"unresolved-call/{targetText}");
+        triples.Add(new SemanticTriple(
+            new EntityNode(unresolvedId),
+            CorePredicates.ResolutionReason,
+            new LiteralNode(resolutionReason)));
 
         return unresolvedId;
     }

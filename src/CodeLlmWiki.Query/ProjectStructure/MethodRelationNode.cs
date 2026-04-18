@@ -9,4 +9,5 @@ public sealed record MethodRelationNode(
     EntityId? TargetMemberId,
     TypeReferenceNode? ExternalTargetType,
     string? ExternalAssemblyName,
-    DeclarationResolutionStatus ResolutionStatus);
+    DeclarationResolutionStatus ResolutionStatus,
+    string? ResolutionReason = null);

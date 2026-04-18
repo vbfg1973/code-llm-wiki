@@ -46,6 +46,31 @@ public sealed class MethodCallsVerticalSliceTests
     }
 
     [Fact]
+    public async Task Query_DoesNotClassifyUnmatchedInternalMethodTargets_AsExternal()
+    {
+        var fixture = await MethodCallsFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var callerType = model.Declarations.Types.Single(x => x.Name == "Caller");
+        var callLocal = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == callerType.Id && x.Name == "CallLocal");
+
+        var outgoingCalls = model.Declarations.Methods.Relations
+            .Where(x => x.Kind == MethodRelationKind.Calls && x.SourceMethodId == callLocal.Id)
+            .ToArray();
+
+        var unresolvedLocalCall = Assert.Single(outgoingCalls);
+        Assert.Null(unresolvedLocalCall.TargetMethodId);
+        Assert.NotNull(unresolvedLocalCall.ExternalTargetType);
+        Assert.Equal(DeclarationResolutionStatus.Unresolved, unresolvedLocalCall.ExternalTargetType!.ResolutionStatus);
+        Assert.Null(unresolvedLocalCall.ExternalAssemblyName);
+        Assert.DoesNotContain(outgoingCalls, x => x.ExternalTargetType?.ResolutionStatus == DeclarationResolutionStatus.ExternalStub);
+
+        Assert.Contains(analysis.Diagnostics, x => x.Code == "method:call:internal-target-unmatched");
+    }
+
+    [Fact]
     public async Task Render_MethodPages_IncludeCallsAndCalledBySections()
     {
         var fixture = await MethodCallsFixture.CreateAsync();
@@ -65,6 +90,13 @@ public sealed class MethodCallsVerticalSliceTests
         Assert.Contains("external", callAllPage.Markdown, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("unresolved", callAllPage.Markdown, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Invoke()", callAllPage.Markdown, StringComparison.Ordinal);
+
+        var callLocalPage = pages.Single(x =>
+            x.RelativePath.StartsWith("methods/Acme/Calls/Caller/", StringComparison.Ordinal)
+            && x.Markdown.Contains("method_signature: Acme.Calls.Caller.CallLocal()", StringComparison.Ordinal));
+
+        Assert.Contains("Local", callLocalPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("internal-target-unmatched", callLocalPage.Markdown, StringComparison.Ordinal);
     }
 
     private sealed class MethodCallsFixture
@@ -134,6 +166,15 @@ public sealed class MethodCallsVerticalSliceTests
                     public void Invoke()
                     {
                         CallAll();
+                    }
+
+                    public void CallLocal()
+                    {
+                        void Local()
+                        {
+                        }
+
+                        Local();
                     }
                 }
                 """);

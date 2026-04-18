@@ -397,6 +397,10 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             {
                 meta.ExternalAssemblyName = value;
             }
+            else if (triple.Predicate == CorePredicates.ResolutionReason)
+            {
+                meta.ResolutionReason = value;
+            }
         }
 
         return byId;
@@ -1117,7 +1121,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                         null,
                         null,
                         null,
-                        resolutionStatus);
+                        resolutionStatus,
+                        null);
                 }
 
                 return new MethodRelationNode(
@@ -1132,7 +1137,10 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     metadataById.TryGetValue(x.Object, out var callTargetMeta) && !string.IsNullOrWhiteSpace(callTargetMeta.ExternalAssemblyName)
                         ? callTargetMeta.ExternalAssemblyName
                         : null,
-                    resolutionStatus);
+                    resolutionStatus,
+                    metadataById.TryGetValue(x.Object, out var unresolvedTargetMeta) && !string.IsNullOrWhiteSpace(unresolvedTargetMeta.ResolutionReason)
+                        ? unresolvedTargetMeta.ResolutionReason
+                        : null);
             }))
             .Concat(methodReadsPropertyEdges.Select(x => new MethodRelationNode(
                 x.Subject,
@@ -1381,6 +1389,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             ParameterName = string.Empty;
             ParameterOrdinal = -1;
             ExternalAssemblyName = string.Empty;
+            ResolutionReason = string.Empty;
         }
 
         public EntityId Id { get; }
@@ -1456,6 +1465,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         public int ParameterOrdinal { get; set; }
 
         public string ExternalAssemblyName { get; set; }
+
+        public string ResolutionReason { get; set; }
 
         public bool IsType(string entityType) => EntityType.Equals(entityType, StringComparison.OrdinalIgnoreCase);
     }

@@ -70,3 +70,4 @@ predicates:
   - id: "core:isExtensionMethod"
   - id: "core:extendsType"
   - id: "core:externalAssemblyName"
+  - id: "core:resolutionReason"

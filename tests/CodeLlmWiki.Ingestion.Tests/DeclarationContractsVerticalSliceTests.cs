@@ -68,6 +68,7 @@ public sealed class DeclarationContractsVerticalSliceTests
         Assert.Contains("core:isExtensionMethod", predicateIds);
         Assert.Contains("core:extendsType", predicateIds);
         Assert.Contains("core:externalAssemblyName", predicateIds);
+        Assert.Contains("core:resolutionReason", predicateIds);
     }
 
     [Fact]

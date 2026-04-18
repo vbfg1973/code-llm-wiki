@@ -827,11 +827,14 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 var assemblySuffix = string.IsNullOrWhiteSpace(relation.ExternalAssemblyName)
                     ? string.Empty
                     : $" ({relation.ExternalAssemblyName})";
+                var unresolvedReasonSuffix = string.IsNullOrWhiteSpace(relation.ResolutionReason)
+                    ? string.Empty
+                    : $": {relation.ResolutionReason}";
                 var statusSuffix = relation.ExternalTargetType.ResolutionStatus switch
                 {
                     DeclarationResolutionStatus.ExternalStub => " (external)",
-                    DeclarationResolutionStatus.SourceTextFallback => " (unresolved)",
-                    DeclarationResolutionStatus.Unresolved => " (unresolved)",
+                    DeclarationResolutionStatus.SourceTextFallback => $" (unresolved{unresolvedReasonSuffix})",
+                    DeclarationResolutionStatus.Unresolved => $" (unresolved{unresolvedReasonSuffix})",
                     _ => string.Empty,
                 };
                 sb.AppendLine($"- {relation.ExternalTargetType.DisplayText}{assemblySuffix}{statusSuffix}");
