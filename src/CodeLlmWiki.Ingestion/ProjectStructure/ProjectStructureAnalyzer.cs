@@ -341,7 +341,11 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             .ToArray();
 
         var typeIdByQualifiedName = new Dictionary<string, EntityId>(StringComparer.Ordinal);
+        var typeQualifiedNameById = new Dictionary<EntityId, string>();
         var declaredTypeNamesBySimpleName = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var methodCandidatesByTypeId = new Dictionary<EntityId, List<MethodRelationshipCandidate>>();
+        var directBaseTypeIdsByTypeId = new Dictionary<EntityId, List<EntityId>>();
+        var directInterfaceTypeIdsByTypeId = new Dictionary<EntityId, List<EntityId>>();
         var pendingMemberTypeLinks = new List<PendingMemberTypeLink>();
         var pendingMethodReturnTypeLinks = new List<PendingMethodReturnTypeLink>();
         var pendingMethodParameterTypeLinks = new List<PendingMethodParameterTypeLink>();
@@ -362,6 +366,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
             var typeId = _stableIdGenerator.Create(new EntityKey("type-declaration", representative.QualifiedName));
             typeIdByQualifiedName[representative.QualifiedName] = typeId;
+            typeQualifiedNameById[typeId] = representative.QualifiedName;
 
             if (!declaredTypeNamesBySimpleName.TryGetValue(representative.TypeName, out var names))
             {
@@ -602,6 +607,20 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     CorePredicates.ContainsMethod,
                     new EntityNode(methodId)));
 
+                if (!methodCandidatesByTypeId.TryGetValue(typeId, out var methodCandidates))
+                {
+                    methodCandidates = new List<MethodRelationshipCandidate>();
+                    methodCandidatesByTypeId[typeId] = methodCandidates;
+                }
+
+                methodCandidates.Add(new MethodRelationshipCandidate(
+                    methodId,
+                    representativeMethod.Kind,
+                    representativeMethod.CanonicalName,
+                    representativeMethod.Arity,
+                    orderedParameterTypeSignatures,
+                    representativeMethod.IsOverride));
+
                 if (!string.IsNullOrWhiteSpace(representativeMethod.ReturnTypeName))
                 {
                     triples.Add(new SemanticTriple(
@@ -701,6 +720,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             var representative = group
                 .OrderBy(x => x.RelativeFilePath, StringComparer.Ordinal)
                 .First();
+            var resolvedInternalBaseTypeIds = new List<EntityId>();
+            var resolvedInternalInterfaceTypeIds = new List<EntityId>();
 
             if (!string.IsNullOrWhiteSpace(representative.DeclaringTypeQualifiedName) &&
                 typeIdByQualifiedName.TryGetValue(representative.DeclaringTypeQualifiedName, out var declaringTypeId))
@@ -720,7 +741,14 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     representative.ImportedAliases,
                     typeIdByQualifiedName,
                     declaredTypeNamesBySimpleName);
-                if (resolvedBaseQualifiedName is null || !typeIdByQualifiedName.TryGetValue(resolvedBaseQualifiedName, out var baseTypeId))
+                EntityId baseTypeId;
+                if (resolvedBaseQualifiedName is not null &&
+                    typeIdByQualifiedName.TryGetValue(resolvedBaseQualifiedName, out var resolvedInternalBaseTypeId))
+                {
+                    baseTypeId = resolvedInternalBaseTypeId;
+                    resolvedInternalBaseTypeIds.Add(baseTypeId);
+                }
+                else
                 {
                     var normalizedBaseType = NormalizeTypeReferenceName(baseType);
                     if (IsExternalStubCandidate(normalizedBaseType))
@@ -751,7 +779,14 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     representative.ImportedAliases,
                     typeIdByQualifiedName,
                     declaredTypeNamesBySimpleName);
-                if (resolvedInterfaceQualifiedName is null || !typeIdByQualifiedName.TryGetValue(resolvedInterfaceQualifiedName, out var interfaceTypeId))
+                EntityId interfaceTypeId;
+                if (resolvedInterfaceQualifiedName is not null &&
+                    typeIdByQualifiedName.TryGetValue(resolvedInterfaceQualifiedName, out var resolvedInternalInterfaceTypeId))
+                {
+                    interfaceTypeId = resolvedInternalInterfaceTypeId;
+                    resolvedInternalInterfaceTypeIds.Add(interfaceTypeId);
+                }
+                else
                 {
                     var normalizedInterfaceType = NormalizeTypeReferenceName(interfaceType);
                     if (IsExternalStubCandidate(normalizedInterfaceType))
@@ -771,6 +806,119 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     new EntityNode(sourceTypeId),
                     CorePredicates.Implements,
                     new EntityNode(interfaceTypeId)));
+            }
+
+            if (resolvedInternalBaseTypeIds.Count > 0)
+            {
+                directBaseTypeIdsByTypeId[sourceTypeId] = resolvedInternalBaseTypeIds;
+            }
+
+            if (resolvedInternalInterfaceTypeIds.Count > 0)
+            {
+                directInterfaceTypeIdsByTypeId[sourceTypeId] = resolvedInternalInterfaceTypeIds;
+            }
+        }
+
+        foreach (var pair in methodCandidatesByTypeId.OrderBy(x => x.Key.Value, StringComparer.Ordinal))
+        {
+            var sourceTypeId = pair.Key;
+            var sourceMethods = pair.Value;
+            var implementedInterfaceTypeIds = GetImplementedInterfaceTypeIds(
+                sourceTypeId,
+                directBaseTypeIdsByTypeId,
+                directInterfaceTypeIdsByTypeId);
+            var baseTypeChain = EnumerateBaseTypeIdsInOrder(sourceTypeId, directBaseTypeIdsByTypeId);
+
+            foreach (var sourceMethod in sourceMethods
+                         .Where(x => string.Equals(x.Kind, "method", StringComparison.Ordinal))
+                         .OrderBy(x => x.CanonicalName, StringComparer.Ordinal)
+                         .ThenBy(x => x.MethodId.Value, StringComparer.Ordinal))
+            {
+                var sourceMethodName = ExtractMethodNameForRelationship(sourceMethod.CanonicalName);
+                var sourceMatchKey = CreateMethodRelationshipMatchKey(
+                    sourceMethodName,
+                    sourceMethod.Arity,
+                    sourceMethod.ParameterTypeSignatures);
+                var explicitInterfaceQualifier = ExtractExplicitInterfaceQualifier(sourceMethod.CanonicalName);
+
+                var implementTargets = new HashSet<EntityId>();
+                foreach (var interfaceTypeId in implementedInterfaceTypeIds)
+                {
+                    if (explicitInterfaceQualifier is not null &&
+                        !InterfaceQualifierMatches(explicitInterfaceQualifier, interfaceTypeId, typeQualifiedNameById))
+                    {
+                        continue;
+                    }
+
+                    if (!methodCandidatesByTypeId.TryGetValue(interfaceTypeId, out var interfaceMethods))
+                    {
+                        continue;
+                    }
+
+                    foreach (var targetMethod in interfaceMethods.Where(x => string.Equals(x.Kind, "method", StringComparison.Ordinal)))
+                    {
+                        var targetMatchKey = CreateMethodRelationshipMatchKey(
+                            ExtractMethodNameForRelationship(targetMethod.CanonicalName),
+                            targetMethod.Arity,
+                            targetMethod.ParameterTypeSignatures);
+                        if (!targetMatchKey.Equals(sourceMatchKey, StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
+                        if (!implementTargets.Add(targetMethod.MethodId))
+                        {
+                            continue;
+                        }
+
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(sourceMethod.MethodId),
+                            CorePredicates.ImplementsMethod,
+                            new EntityNode(targetMethod.MethodId)));
+                    }
+                }
+
+                if (sourceMethod.IsOverride)
+                {
+                    EntityId? overrideTargetId = null;
+                    foreach (var baseTypeId in baseTypeChain)
+                    {
+                        if (!methodCandidatesByTypeId.TryGetValue(baseTypeId, out var baseMethods))
+                        {
+                            continue;
+                        }
+
+                        var target = baseMethods
+                            .Where(x => string.Equals(x.Kind, "method", StringComparison.Ordinal))
+                            .FirstOrDefault(x =>
+                                CreateMethodRelationshipMatchKey(
+                                    ExtractMethodNameForRelationship(x.CanonicalName),
+                                    x.Arity,
+                                    x.ParameterTypeSignatures).Equals(sourceMatchKey, StringComparison.Ordinal));
+
+                        if (target is null)
+                        {
+                            continue;
+                        }
+
+                        overrideTargetId = target.MethodId;
+                        break;
+                    }
+
+                    if (overrideTargetId is not null)
+                    {
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(sourceMethod.MethodId),
+                            CorePredicates.OverridesMethod,
+                            new EntityNode(overrideTargetId.Value)));
+                    }
+                    else
+                    {
+                        diagnostics.Add(new IngestionDiagnostic(
+                            "method:relationship:override:unresolved",
+                            $"Override target could not be resolved for method '{sourceMethod.MethodId.Value}'."));
+                    }
+                }
             }
         }
 
@@ -1075,6 +1223,147 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         return new string(normalized.Where(c => !char.IsWhiteSpace(c)).ToArray());
     }
 
+    private static IReadOnlyList<EntityId> EnumerateBaseTypeIdsInOrder(
+        EntityId sourceTypeId,
+        IReadOnlyDictionary<EntityId, List<EntityId>> directBaseTypeIdsByTypeId)
+    {
+        var ordered = new List<EntityId>();
+        var seen = new HashSet<EntityId>();
+        var pending = new Queue<EntityId>();
+
+        if (directBaseTypeIdsByTypeId.TryGetValue(sourceTypeId, out var directBases))
+        {
+            foreach (var directBase in directBases)
+            {
+                pending.Enqueue(directBase);
+            }
+        }
+
+        while (pending.Count > 0)
+        {
+            var next = pending.Dequeue();
+            if (!seen.Add(next))
+            {
+                continue;
+            }
+
+            ordered.Add(next);
+
+            if (directBaseTypeIdsByTypeId.TryGetValue(next, out var inheritedBases))
+            {
+                foreach (var inheritedBase in inheritedBases)
+                {
+                    pending.Enqueue(inheritedBase);
+                }
+            }
+        }
+
+        return ordered;
+    }
+
+    private static IReadOnlyList<EntityId> GetImplementedInterfaceTypeIds(
+        EntityId sourceTypeId,
+        IReadOnlyDictionary<EntityId, List<EntityId>> directBaseTypeIdsByTypeId,
+        IReadOnlyDictionary<EntityId, List<EntityId>> directInterfaceTypeIdsByTypeId)
+    {
+        var collected = new HashSet<EntityId>();
+        var pendingInterfaces = new Queue<EntityId>();
+
+        if (directInterfaceTypeIdsByTypeId.TryGetValue(sourceTypeId, out var directInterfaces))
+        {
+            foreach (var directInterface in directInterfaces)
+            {
+                pendingInterfaces.Enqueue(directInterface);
+            }
+        }
+
+        foreach (var baseTypeId in EnumerateBaseTypeIdsInOrder(sourceTypeId, directBaseTypeIdsByTypeId))
+        {
+            if (!directInterfaceTypeIdsByTypeId.TryGetValue(baseTypeId, out var baseInterfaces))
+            {
+                continue;
+            }
+
+            foreach (var baseInterface in baseInterfaces)
+            {
+                pendingInterfaces.Enqueue(baseInterface);
+            }
+        }
+
+        while (pendingInterfaces.Count > 0)
+        {
+            var interfaceTypeId = pendingInterfaces.Dequeue();
+            if (!collected.Add(interfaceTypeId))
+            {
+                continue;
+            }
+
+            if (!directBaseTypeIdsByTypeId.TryGetValue(interfaceTypeId, out var parentInterfaces))
+            {
+                continue;
+            }
+
+            foreach (var parentInterface in parentInterfaces)
+            {
+                pendingInterfaces.Enqueue(parentInterface);
+            }
+        }
+
+        return collected
+            .OrderBy(x => x.Value, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string CreateMethodRelationshipMatchKey(
+        string methodName,
+        int arity,
+        IReadOnlyList<string> parameterTypeSignatures)
+    {
+        return $"{methodName}:{arity}:{string.Join("|", parameterTypeSignatures)}";
+    }
+
+    private static string ExtractMethodNameForRelationship(string canonicalName)
+    {
+        var lastDot = canonicalName.LastIndexOf('.');
+        return lastDot >= 0
+            ? canonicalName[(lastDot + 1)..]
+            : canonicalName;
+    }
+
+    private static string? ExtractExplicitInterfaceQualifier(string canonicalName)
+    {
+        var lastDot = canonicalName.LastIndexOf('.');
+        return lastDot > 0
+            ? canonicalName[..lastDot]
+            : null;
+    }
+
+    private static bool InterfaceQualifierMatches(
+        string explicitQualifier,
+        EntityId interfaceTypeId,
+        IReadOnlyDictionary<EntityId, string> typeQualifiedNameById)
+    {
+        if (!typeQualifiedNameById.TryGetValue(interfaceTypeId, out var interfaceQualifiedName))
+        {
+            return false;
+        }
+
+        var trimmedQualifier = explicitQualifier.Trim();
+        if (trimmedQualifier.StartsWith("global::", StringComparison.Ordinal))
+        {
+            trimmedQualifier = trimmedQualifier[8..];
+        }
+
+        if (interfaceQualifiedName.Equals(trimmedQualifier, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var simpleName = interfaceQualifiedName.Split('.', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+        return !string.IsNullOrWhiteSpace(simpleName)
+               && simpleName.Equals(trimmedQualifier, StringComparison.Ordinal);
+    }
+
     private sealed record PendingMemberTypeLink(
         EntityId MemberId,
         string NamespaceName,
@@ -1097,6 +1386,14 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         IReadOnlyDictionary<string, string> ImportedAliases);
 
     private sealed record ProjectAssemblyContext(string RelativeDirectory, string AssemblyName);
+
+    private sealed record MethodRelationshipCandidate(
+        EntityId MethodId,
+        string Kind,
+        string CanonicalName,
+        int Arity,
+        IReadOnlyList<string> ParameterTypeSignatures,
+        bool IsOverride);
 
     private static void AddEntityTriples(
         List<SemanticTriple> triples,
