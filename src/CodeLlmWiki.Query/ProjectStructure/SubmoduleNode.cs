@@ -2,9 +2,8 @@ using CodeLlmWiki.Contracts.Identity;
 
 namespace CodeLlmWiki.Query.ProjectStructure;
 
-public sealed record RepositoryNode(
+public sealed record SubmoduleNode(
     EntityId Id,
     string Name,
     string Path,
-    string HeadBranch,
-    string MainlineBranch);
+    string Url);

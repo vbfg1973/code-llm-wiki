@@ -7,4 +7,8 @@ public sealed record FileNode(
     string Name,
     string Path,
     string Classification,
-    bool IsSolutionMember);
+    bool IsSolutionMember,
+    int EditCount,
+    FileHistoryEntryNode? LastChange,
+    IReadOnlyList<FileHistoryEntryNode> History,
+    IReadOnlyList<FileMergeEventNode> MergeToMainlineEvents);

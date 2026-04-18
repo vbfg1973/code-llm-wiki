@@ -32,6 +32,32 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         var repositoryId = _stableIdGenerator.Create(new EntityKey("repository", fullRepositoryPath));
         AddEntityTriples(triples, repositoryId, "repository", Path.GetFileName(fullRepositoryPath), ".");
 
+        var headBranch = ResolveHeadBranch(fullRepositoryPath, diagnostics);
+        var mainlineBranch = ResolveMainlineBranch(fullRepositoryPath, headBranch, diagnostics);
+
+        triples.Add(new SemanticTriple(new EntityNode(repositoryId), CorePredicates.HeadBranch, new LiteralNode(headBranch)));
+        triples.Add(new SemanticTriple(new EntityNode(repositoryId), CorePredicates.MainlineBranch, new LiteralNode(mainlineBranch)));
+
+        if (IsWorkingTreeDirty(fullRepositoryPath, diagnostics))
+        {
+            diagnostics.Add(new IngestionDiagnostic(
+                "repository:dirty-working-tree",
+                "Repository contains uncommitted changes; snapshot still reflects HEAD."));
+        }
+
+        foreach (var submodule in DiscoverSubmodules(fullRepositoryPath, diagnostics).OrderBy(x => x.Path, StringComparer.Ordinal))
+        {
+            var submoduleId = _stableIdGenerator.Create(new EntityKey("submodule", submodule.Path));
+            AddEntityTriples(triples, submoduleId, "submodule", submodule.Name, submodule.Path);
+
+            if (!string.IsNullOrWhiteSpace(submodule.Url))
+            {
+                triples.Add(new SemanticTriple(new EntityNode(submoduleId), CorePredicates.SubmoduleUrl, new LiteralNode(submodule.Url)));
+            }
+
+            triples.Add(new SemanticTriple(new EntityNode(repositoryId), CorePredicates.HasSubmodule, new EntityNode(submoduleId)));
+        }
+
         var solutions = DiscoverSolutions(fullRepositoryPath, diagnostics);
         var solutionProjectMap = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
@@ -129,6 +155,47 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 new EntityNode(fileId),
                 CorePredicates.IsSolutionMember,
                 new LiteralNode(IsSolutionMember(relativeFilePath, solutionMemberPaths).ToString().ToLowerInvariant())));
+
+            var fileHistory = DiscoverFileHistory(fullRepositoryPath, relativeFilePath, mainlineBranch, diagnostics);
+            triples.Add(new SemanticTriple(new EntityNode(fileId), CorePredicates.EditCount, new LiteralNode(fileHistory.Commits.Count.ToString())));
+
+            var lastChange = fileHistory.Commits.FirstOrDefault();
+            if (lastChange is not null)
+            {
+                triples.Add(new SemanticTriple(new EntityNode(fileId), CorePredicates.LastChangeCommitSha, new LiteralNode(lastChange.CommitSha)));
+                triples.Add(new SemanticTriple(new EntityNode(fileId), CorePredicates.LastChangedAtUtc, new LiteralNode(lastChange.TimestampUtc)));
+                triples.Add(new SemanticTriple(new EntityNode(fileId), CorePredicates.LastChangedBy, new LiteralNode(lastChange.AuthorName)));
+            }
+
+            var mergeByCommitSha = fileHistory.MergeToMainlineEvents.ToDictionary(x => x.MergeCommitSha, x => x, StringComparer.Ordinal);
+
+            foreach (var commit in fileHistory.Commits)
+            {
+                var eventId = _stableIdGenerator.Create(new EntityKey("file-history-event", $"{relativeFilePath}:{commit.CommitSha}"));
+                AddEntityTriples(
+                    triples,
+                    eventId,
+                    "file-history-event",
+                    commit.CommitSha,
+                    relativeFilePath);
+
+                triples.Add(new SemanticTriple(new EntityNode(eventId), CorePredicates.CommitSha, new LiteralNode(commit.CommitSha)));
+                triples.Add(new SemanticTriple(new EntityNode(eventId), CorePredicates.CommittedAtUtc, new LiteralNode(commit.TimestampUtc)));
+                triples.Add(new SemanticTriple(new EntityNode(eventId), CorePredicates.AuthorName, new LiteralNode(commit.AuthorName)));
+                triples.Add(new SemanticTriple(new EntityNode(eventId), CorePredicates.AuthorEmail, new LiteralNode(commit.AuthorEmail)));
+                triples.Add(new SemanticTriple(new EntityNode(fileId), CorePredicates.HasHistoryEvent, new EntityNode(eventId)));
+
+                if (mergeByCommitSha.TryGetValue(commit.CommitSha, out var merge))
+                {
+                    triples.Add(new SemanticTriple(new EntityNode(eventId), CorePredicates.IsMergeToMainline, new LiteralNode("true")));
+                    triples.Add(new SemanticTriple(new EntityNode(eventId), CorePredicates.TargetBranch, new LiteralNode(merge.TargetBranch)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(eventId),
+                        CorePredicates.SourceBranchFileCommitCount,
+                        new LiteralNode(merge.SourceBranchFileCommitCount.ToString())));
+                }
+            }
+
             triples.Add(new SemanticTriple(new EntityNode(repositoryId), CorePredicates.Contains, new EntityNode(fileId)));
         }
 
@@ -348,8 +415,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
     private static string ToRelativePath(string root, string path)
     {
-        var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
-        return relative;
+        return Path.GetRelativePath(root, path).Replace('\\', '/');
     }
 
     private static HashSet<string> BuildSolutionMemberPathSet(
@@ -412,6 +478,347 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     }
 
+    private static GitFileHistoryResult DiscoverFileHistory(
+        string repositoryRoot,
+        string relativeFilePath,
+        string mainlineBranch,
+        List<IngestionDiagnostic> diagnostics)
+    {
+        var historyResult = RunGitText(
+            repositoryRoot,
+            "log",
+            "--follow",
+            "--date=iso-strict",
+            "--format=%H%x1f%aI%x1f%an%x1f%ae%x1f%P",
+            "--",
+            relativeFilePath);
+
+        if (historyResult.ExitCode != 0)
+        {
+            diagnostics.Add(new IngestionDiagnostic(
+                "file:history:failed",
+                $"Failed to discover history for '{relativeFilePath}': {historyResult.Error}"));
+            return new GitFileHistoryResult([], []);
+        }
+
+        var commits = historyResult.Output
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(ParseHistoryLine)
+            .Where(x => x is not null)
+            .Select(x => x!)
+            .ToArray();
+
+        var mergeCommits = DiscoverMainlineMergeCommits(repositoryRoot, mainlineBranch, relativeFilePath, diagnostics);
+
+        var mergeEvents = new List<GitMergeEvent>();
+        foreach (var commit in mergeCommits)
+        {
+            if (commit.Parents.Count < 2 || string.IsNullOrWhiteSpace(commit.CommitSha))
+            {
+                continue;
+            }
+
+            var firstParent = commit.Parents[0];
+            var sourceParent = commit.Parents[1];
+            var sourceBranchCommitCount = CountSourceBranchFileCommits(
+                repositoryRoot,
+                relativeFilePath,
+                firstParent,
+                sourceParent,
+                diagnostics);
+
+            mergeEvents.Add(new GitMergeEvent(
+                commit.CommitSha,
+                commit.TimestampUtc,
+                commit.AuthorName,
+                commit.AuthorEmail,
+                mainlineBranch,
+                sourceBranchCommitCount));
+        }
+
+        var orderedCommits = commits.ToList();
+        var seen = commits
+            .Select(x => x.CommitSha)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var mergeCommit in mergeCommits)
+        {
+            if (seen.Add(mergeCommit.CommitSha))
+            {
+                orderedCommits.Add(mergeCommit);
+            }
+        }
+
+        return new GitFileHistoryResult(orderedCommits, mergeEvents);
+    }
+
+    private static IReadOnlyList<GitHistoryCommit> DiscoverMainlineMergeCommits(
+        string repositoryRoot,
+        string mainlineBranch,
+        string relativeFilePath,
+        List<IngestionDiagnostic> diagnostics)
+    {
+        var reference = $"refs/heads/{mainlineBranch}";
+        var result = RunGitText(
+            repositoryRoot,
+            "log",
+            "--first-parent",
+            "--merges",
+            "--date=iso-strict",
+            "--format=%H%x1f%aI%x1f%an%x1f%ae%x1f%P",
+            reference,
+            "--",
+            relativeFilePath);
+
+        if (result.ExitCode != 0)
+        {
+            result = RunGitText(
+                repositoryRoot,
+                "log",
+                "--first-parent",
+                "--merges",
+                "--date=iso-strict",
+                "--format=%H%x1f%aI%x1f%an%x1f%ae%x1f%P",
+                mainlineBranch,
+                "--",
+                relativeFilePath);
+        }
+
+        if (result.ExitCode != 0)
+        {
+            diagnostics.Add(new IngestionDiagnostic(
+                "file:merge:history:failed",
+                $"Unable to resolve merge history for '{relativeFilePath}' on mainline '{mainlineBranch}': {result.Error}"));
+            return [];
+        }
+
+        return result.Output
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(ParseHistoryLine)
+            .Where(x => x is not null)
+            .Select(x => x!)
+            .ToArray();
+    }
+
+    private static int CountSourceBranchFileCommits(
+        string repositoryRoot,
+        string relativeFilePath,
+        string firstParent,
+        string sourceParent,
+        List<IngestionDiagnostic> diagnostics)
+    {
+        var mergeBaseResult = RunGitText(repositoryRoot, "merge-base", firstParent, sourceParent);
+        if (mergeBaseResult.ExitCode != 0)
+        {
+            diagnostics.Add(new IngestionDiagnostic(
+                "file:merge:source-count:not-available",
+                $"Failed to resolve merge base for file '{relativeFilePath}': {mergeBaseResult.Error}"));
+            return 0;
+        }
+
+        var mergeBase = mergeBaseResult.Output.Trim();
+        if (string.IsNullOrWhiteSpace(mergeBase))
+        {
+            return 0;
+        }
+
+        var range = $"{mergeBase}..{sourceParent}";
+        var result = RunGitText(
+            repositoryRoot,
+            "log",
+            "--follow",
+            "--format=%H",
+            range,
+            "--",
+            relativeFilePath);
+
+        if (result.ExitCode != 0)
+        {
+            diagnostics.Add(new IngestionDiagnostic(
+                "file:merge:source-count:not-available",
+                $"Failed to count source branch commits for '{relativeFilePath}': {result.Error}"));
+            return 0;
+        }
+
+        return result.Output
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+    }
+
+    private static string ResolveHeadBranch(string repositoryRoot, List<IngestionDiagnostic> diagnostics)
+    {
+        var result = RunGitText(repositoryRoot, "rev-parse", "--abbrev-ref", "HEAD");
+        if (result.ExitCode == 0)
+        {
+            var value = result.Output.Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        diagnostics.Add(new IngestionDiagnostic("git:head:branch:not-available", "Unable to resolve HEAD branch; using literal 'HEAD'."));
+        return "HEAD";
+    }
+
+    private static string ResolveMainlineBranch(
+        string repositoryRoot,
+        string headBranch,
+        List<IngestionDiagnostic> diagnostics)
+    {
+        var originHead = RunGitText(repositoryRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD");
+        if (originHead.ExitCode == 0)
+        {
+            var value = originHead.Output.Trim();
+            if (!string.IsNullOrWhiteSpace(value) && value.StartsWith("origin/", StringComparison.Ordinal))
+            {
+                return value["origin/".Length..];
+            }
+        }
+
+        foreach (var fallback in new[] { "main", "master" })
+        {
+            var exists = RunGitText(repositoryRoot, "show-ref", "--verify", "--quiet", $"refs/heads/{fallback}");
+            if (exists.ExitCode == 0)
+            {
+                diagnostics.Add(new IngestionDiagnostic(
+                    "git:mainline:branch:fallback",
+                    $"Mainline branch resolved using fallback '{fallback}'."));
+                return fallback;
+            }
+        }
+
+        diagnostics.Add(new IngestionDiagnostic(
+            "git:mainline:branch:fallback",
+            $"Mainline branch unresolved; using HEAD branch '{headBranch}'."));
+        return headBranch;
+    }
+
+    private static bool IsWorkingTreeDirty(string repositoryRoot, List<IngestionDiagnostic> diagnostics)
+    {
+        var result = RunGitText(repositoryRoot, "status", "--porcelain");
+        if (result.ExitCode != 0)
+        {
+            diagnostics.Add(new IngestionDiagnostic(
+                "git:status:failed",
+                $"Failed to evaluate working tree status: {result.Error}"));
+            return false;
+        }
+
+        return !string.IsNullOrWhiteSpace(result.Output);
+    }
+
+    private static IReadOnlyList<SubmoduleInfo> DiscoverSubmodules(string repositoryRoot, List<IngestionDiagnostic> diagnostics)
+    {
+        var gitModulesPath = Path.Combine(repositoryRoot, ".gitmodules");
+        if (!File.Exists(gitModulesPath))
+        {
+            return [];
+        }
+
+        try
+        {
+            var submodules = new List<SubmoduleInfo>();
+            string currentName = string.Empty;
+            string currentPath = string.Empty;
+            string currentUrl = string.Empty;
+
+            static void Flush(List<SubmoduleInfo> target, string name, string path, string url)
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    return;
+                }
+
+                target.Add(new SubmoduleInfo(
+                    string.IsNullOrWhiteSpace(name) ? path : name,
+                    path.Replace('\\', '/'),
+                    url));
+            }
+
+            foreach (var raw in File.ReadLines(gitModulesPath))
+            {
+                var line = raw.Trim();
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
+                {
+                    continue;
+                }
+
+                if (line.StartsWith("[submodule", StringComparison.OrdinalIgnoreCase))
+                {
+                    Flush(submodules, currentName, currentPath, currentUrl);
+                    currentName = ParseSubmoduleName(line);
+                    currentPath = string.Empty;
+                    currentUrl = string.Empty;
+                    continue;
+                }
+
+                var parts = line.Split('=', 2, StringSplitOptions.TrimEntries);
+                if (parts.Length != 2)
+                {
+                    continue;
+                }
+
+                if (parts[0].Equals("path", StringComparison.OrdinalIgnoreCase))
+                {
+                    currentPath = parts[1];
+                }
+                else if (parts[0].Equals("url", StringComparison.OrdinalIgnoreCase))
+                {
+                    currentUrl = parts[1];
+                }
+            }
+
+            Flush(submodules, currentName, currentPath, currentUrl);
+            return submodules
+                .GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
+                .Select(x => x.First())
+                .OrderBy(x => x.Path, StringComparer.Ordinal)
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            diagnostics.Add(new IngestionDiagnostic(
+                "submodule:parse:failed",
+                $"Failed to parse .gitmodules in '{repositoryRoot}': {ex.Message}"));
+            return [];
+        }
+    }
+
+    private static string ParseSubmoduleName(string sectionLine)
+    {
+        var firstQuote = sectionLine.IndexOf('"');
+        var lastQuote = sectionLine.LastIndexOf('"');
+
+        if (firstQuote >= 0 && lastQuote > firstQuote)
+        {
+            return sectionLine[(firstQuote + 1)..lastQuote];
+        }
+
+        return string.Empty;
+    }
+
+    private static GitHistoryCommit? ParseHistoryLine(string line)
+    {
+        var parts = line.Split('\u001f');
+        if (parts.Length != 5)
+        {
+            return null;
+        }
+
+        var parents = parts[4]
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .ToArray();
+
+        return new GitHistoryCommit(
+            parts[0],
+            parts[1],
+            parts[2],
+            parts[3],
+            parents);
+    }
+
     private static GitCommandResult RunGitWithNulDelimitedOutput(string repositoryRoot, params string[] args)
     {
         var startInfo = new ProcessStartInfo
@@ -458,6 +865,29 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         return new GitCommandResult(process.ExitCode, entries, error);
     }
 
+    private static GitTextResult RunGitText(string repositoryRoot, params string[] args)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = repositoryRoot,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+
+        foreach (var arg in args)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        using var process = Process.Start(startInfo)!;
+        var output = process.StandardOutput.ReadToEnd();
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        return new GitTextResult(process.ExitCode, output, error);
+    }
+
     private static string ClassifyFile(string relativePath)
     {
         var extension = Path.GetExtension(relativePath).ToLowerInvariant();
@@ -490,4 +920,27 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
     private sealed record PackageReferenceInfo(string PackageId, string? DeclaredVersion);
 
     private sealed record GitCommandResult(int ExitCode, HashSet<string> Entries, string Error);
+
+    private sealed record GitTextResult(int ExitCode, string Output, string Error);
+
+    private sealed record GitHistoryCommit(
+        string CommitSha,
+        string TimestampUtc,
+        string AuthorName,
+        string AuthorEmail,
+        IReadOnlyList<string> Parents);
+
+    private sealed record GitMergeEvent(
+        string MergeCommitSha,
+        string TimestampUtc,
+        string AuthorName,
+        string AuthorEmail,
+        string TargetBranch,
+        int SourceBranchFileCommitCount);
+
+    private sealed record GitFileHistoryResult(
+        IReadOnlyList<GitHistoryCommit> Commits,
+        IReadOnlyList<GitMergeEvent> MergeToMainlineEvents);
+
+    private sealed record SubmoduleInfo(string Name, string Path, string Url);
 }

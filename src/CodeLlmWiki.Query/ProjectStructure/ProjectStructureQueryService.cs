@@ -18,6 +18,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         var contains = BuildContainsEdges(_triples);
         var packageReferences = BuildPackageReferences(_triples);
         var versionsByPackage = BuildPackageVersions(_triples);
+        var fileHistoryEdges = BuildFileHistoryEdges(_triples);
+        var submoduleEdges = BuildSubmoduleEdges(_triples);
 
         if (!metadataById.TryGetValue(repositoryId, out var repoMeta) || !repoMeta.IsType("repository"))
         {
@@ -108,17 +110,79 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             .Select(fileId =>
             {
                 var meta = metadataById[fileId];
+                var history = fileHistoryEdges
+                    .Where(x => x.FileId == fileId)
+                    .Select(x => x.EventId)
+                    .Where(id => metadataById.TryGetValue(id, out var eventMeta) && eventMeta.IsType("file-history-event"))
+                    .Select(id => metadataById[id])
+                    .Select(eventMeta => new FileHistoryEntryNode(
+                        eventMeta.CommitSha,
+                        eventMeta.CommittedAtUtc,
+                        eventMeta.AuthorName,
+                        eventMeta.AuthorEmail))
+                    .OrderByDescending(x => ParseTimestamp(x.TimestampUtc))
+                    .ThenBy(x => x.CommitSha, StringComparer.Ordinal)
+                    .ToArray();
+
+                var mergeEvents = fileHistoryEdges
+                    .Where(x => x.FileId == fileId)
+                    .Select(x => x.EventId)
+                    .Where(id => metadataById.TryGetValue(id, out var eventMeta)
+                        && eventMeta.IsType("file-history-event")
+                        && eventMeta.IsMergeToMainline)
+                    .Select(id => metadataById[id])
+                    .Select(eventMeta => new FileMergeEventNode(
+                        eventMeta.CommitSha,
+                        eventMeta.CommittedAtUtc,
+                        eventMeta.AuthorName,
+                        eventMeta.AuthorEmail,
+                        eventMeta.TargetBranch,
+                        eventMeta.SourceBranchFileCommitCount))
+                    .OrderByDescending(x => ParseTimestamp(x.TimestampUtc))
+                    .ThenBy(x => x.MergeCommitSha, StringComparer.Ordinal)
+                    .ToArray();
+
+                var lastChange = history.FirstOrDefault();
+
                 return new FileNode(
                     fileId,
                     meta.Name,
                     meta.Path,
                     meta.FileKind,
-                    meta.IsSolutionMember);
+                    meta.IsSolutionMember,
+                    meta.EditCount > 0 ? meta.EditCount : history.Length,
+                    lastChange,
+                    history,
+                    mergeEvents);
             })
             .ToArray();
 
-        var repository = new RepositoryNode(repositoryId, repoMeta.Name, repoMeta.Path);
-        return new ProjectStructureWikiModel(repository, solutions, projects, packages, files);
+        var submoduleIds = submoduleEdges
+            .Where(x => x.RepositoryId == repositoryId)
+            .Select(x => x.SubmoduleId)
+            .Distinct()
+            .OrderBy(x => metadataById.TryGetValue(x, out var submoduleMeta) ? submoduleMeta.Path : x.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        var submodules = submoduleIds
+            .Select(submoduleId =>
+            {
+                var meta = metadataById.TryGetValue(submoduleId, out var submoduleMeta)
+                    ? submoduleMeta
+                    : new EntityMetadata(submoduleId);
+
+                return new SubmoduleNode(submoduleId, meta.Name, meta.Path, meta.SubmoduleUrl);
+            })
+            .ToArray();
+
+        var repository = new RepositoryNode(
+            repositoryId,
+            repoMeta.Name,
+            repoMeta.Path,
+            repoMeta.HeadBranch,
+            repoMeta.MainlineBranch);
+
+        return new ProjectStructureWikiModel(repository, solutions, projects, packages, files, submodules);
     }
 
     private static Dictionary<EntityId, EntityMetadata> BuildEntityMetadata(IReadOnlyList<SemanticTriple> triples)
@@ -168,6 +232,62 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             else if (triple.Predicate == CorePredicates.IsSolutionMember)
             {
                 meta.IsSolutionMember = bool.TryParse(value, out var parsed) && parsed;
+            }
+            else if (triple.Predicate == CorePredicates.HeadBranch)
+            {
+                meta.HeadBranch = value;
+            }
+            else if (triple.Predicate == CorePredicates.MainlineBranch)
+            {
+                meta.MainlineBranch = value;
+            }
+            else if (triple.Predicate == CorePredicates.EditCount)
+            {
+                meta.EditCount = int.TryParse(value, out var parsed) ? parsed : 0;
+            }
+            else if (triple.Predicate == CorePredicates.LastChangeCommitSha)
+            {
+                meta.LastChangeCommitSha = value;
+            }
+            else if (triple.Predicate == CorePredicates.LastChangedAtUtc)
+            {
+                meta.LastChangedAtUtc = value;
+            }
+            else if (triple.Predicate == CorePredicates.LastChangedBy)
+            {
+                meta.LastChangedBy = value;
+            }
+            else if (triple.Predicate == CorePredicates.CommitSha)
+            {
+                meta.CommitSha = value;
+            }
+            else if (triple.Predicate == CorePredicates.CommittedAtUtc)
+            {
+                meta.CommittedAtUtc = value;
+            }
+            else if (triple.Predicate == CorePredicates.AuthorName)
+            {
+                meta.AuthorName = value;
+            }
+            else if (triple.Predicate == CorePredicates.AuthorEmail)
+            {
+                meta.AuthorEmail = value;
+            }
+            else if (triple.Predicate == CorePredicates.IsMergeToMainline)
+            {
+                meta.IsMergeToMainline = bool.TryParse(value, out var parsed) && parsed;
+            }
+            else if (triple.Predicate == CorePredicates.TargetBranch)
+            {
+                meta.TargetBranch = value;
+            }
+            else if (triple.Predicate == CorePredicates.SourceBranchFileCommitCount)
+            {
+                meta.SourceBranchFileCommitCount = int.TryParse(value, out var parsed) ? parsed : 0;
+            }
+            else if (triple.Predicate == CorePredicates.SubmoduleUrl)
+            {
+                meta.SubmoduleUrl = value;
             }
         }
 
@@ -238,17 +358,58 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         return byPackageId;
     }
 
+    private static IReadOnlyList<FileHistoryEdge> BuildFileHistoryEdges(IReadOnlyList<SemanticTriple> triples)
+    {
+        return triples
+            .Where(x => x.Predicate == CorePredicates.HasHistoryEvent)
+            .Where(x => x.Subject is EntityNode && x.Object is EntityNode)
+            .Select(x => new FileHistoryEdge(((EntityNode)x.Subject).Id, ((EntityNode)x.Object).Id))
+            .Distinct()
+            .ToArray();
+    }
+
+    private static IReadOnlyList<SubmoduleEdge> BuildSubmoduleEdges(IReadOnlyList<SemanticTriple> triples)
+    {
+        return triples
+            .Where(x => x.Predicate == CorePredicates.HasSubmodule)
+            .Where(x => x.Subject is EntityNode && x.Object is EntityNode)
+            .Select(x => new SubmoduleEdge(((EntityNode)x.Subject).Id, ((EntityNode)x.Object).Id))
+            .Distinct()
+            .ToArray();
+    }
+
+    private static DateTimeOffset ParseTimestamp(string value)
+    {
+        return DateTimeOffset.TryParse(value, out var parsed)
+            ? parsed
+            : DateTimeOffset.MinValue;
+    }
+
     private sealed class EntityMetadata
     {
         public EntityMetadata(EntityId id)
         {
             Id = id;
+            EntityType = string.Empty;
             Name = id.Value;
             Path = id.Value;
             DiscoveryMethod = string.Empty;
             FileKind = string.Empty;
             IsSolutionMember = false;
-            EntityType = string.Empty;
+            HeadBranch = string.Empty;
+            MainlineBranch = string.Empty;
+            EditCount = 0;
+            LastChangeCommitSha = string.Empty;
+            LastChangedAtUtc = string.Empty;
+            LastChangedBy = string.Empty;
+            CommitSha = string.Empty;
+            CommittedAtUtc = string.Empty;
+            AuthorName = string.Empty;
+            AuthorEmail = string.Empty;
+            IsMergeToMainline = false;
+            TargetBranch = string.Empty;
+            SourceBranchFileCommitCount = 0;
+            SubmoduleUrl = string.Empty;
         }
 
         public EntityId Id { get; }
@@ -265,11 +426,41 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
 
         public bool IsSolutionMember { get; set; }
 
+        public string HeadBranch { get; set; }
+
+        public string MainlineBranch { get; set; }
+
+        public int EditCount { get; set; }
+
+        public string LastChangeCommitSha { get; set; }
+
+        public string LastChangedAtUtc { get; set; }
+
+        public string LastChangedBy { get; set; }
+
+        public string CommitSha { get; set; }
+
+        public string CommittedAtUtc { get; set; }
+
+        public string AuthorName { get; set; }
+
+        public string AuthorEmail { get; set; }
+
+        public bool IsMergeToMainline { get; set; }
+
+        public string TargetBranch { get; set; }
+
+        public int SourceBranchFileCommitCount { get; set; }
+
+        public string SubmoduleUrl { get; set; }
+
         public bool IsType(string entityType) => EntityType.Equals(entityType, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed record ContainsEdge(EntityId Subject, EntityId Object);
     private sealed record PackageReferenceEdge(EntityId ProjectId, EntityId PackageId);
+    private sealed record FileHistoryEdge(EntityId FileId, EntityId EventId);
+    private sealed record SubmoduleEdge(EntityId RepositoryId, EntityId SubmoduleId);
 
     private sealed record PackageVersionMetadata(
         HashSet<string> DeclaredVersions,
