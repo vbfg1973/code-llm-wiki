@@ -809,6 +809,23 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         }
 
         sb.AppendLine();
+        sb.AppendLine("## Declaration Locations");
+        if (methodDeclaration.DeclarationLocations.Count == 0)
+        {
+            sb.AppendLine("- none");
+        }
+        else
+        {
+            foreach (var location in methodDeclaration.DeclarationLocations
+                         .OrderBy(x => x.FilePath, StringComparer.Ordinal)
+                         .ThenBy(x => x.Line)
+                         .ThenBy(x => x.Column))
+            {
+                sb.AppendLine($"- `{location.FilePath}:{location.Line}:{location.Column}`");
+            }
+        }
+
+        sb.AppendLine();
         sb.AppendLine("## Declaration Files");
         foreach (var declarationFileId in methodDeclaration.DeclarationFileIds)
         {

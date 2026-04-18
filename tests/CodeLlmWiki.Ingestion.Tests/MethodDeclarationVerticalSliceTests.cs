@@ -34,6 +34,9 @@ public sealed class MethodDeclarationVerticalSliceTests
         Assert.Contains(workerMethods, x => x.Kind == MethodDeclarationKind.Method && x.Name == "Work");
         Assert.Contains(workerMethods, x => x.Kind == MethodDeclarationKind.Method && x.Name == "Compute");
         Assert.Contains(workerMethods, x => x.Kind == MethodDeclarationKind.Method && x.Name == "Native");
+        var processOverloads = workerMethods.Where(x => x.Name == "Process").ToArray();
+        Assert.Equal(2, processOverloads.Length);
+        Assert.Equal(2, processOverloads.Select(x => x.Id).Distinct().Count());
         Assert.Contains(interfaceMethods, x => x.Kind == MethodDeclarationKind.Method && x.Name == "Work");
         Assert.Contains(baseMethods, x => x.Kind == MethodDeclarationKind.Method && x.Name == "Compute");
 
@@ -70,6 +73,7 @@ public sealed class MethodDeclarationVerticalSliceTests
         Assert.Contains("declaring_type_name: Worker", methodPage.Markdown, StringComparison.Ordinal);
         Assert.Contains("## Signature", methodPage.Markdown, StringComparison.Ordinal);
         Assert.Contains("## Parameters", methodPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("## Declaration Locations", methodPage.Markdown, StringComparison.Ordinal);
         Assert.Contains("## Declaration Files", methodPage.Markdown, StringComparison.Ordinal);
     }
 
@@ -131,6 +135,10 @@ public sealed class MethodDeclarationVerticalSliceTests
                     public void Work(string input) { }
 
                     public extern void Native();
+
+                    public void Process(System.Collections.Generic.List<int> values) { }
+
+                    public void Process(System.Collections.Generic.List<string> values) { }
                 }
                 """);
 

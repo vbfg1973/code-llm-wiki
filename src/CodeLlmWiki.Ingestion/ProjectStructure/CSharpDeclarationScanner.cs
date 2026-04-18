@@ -522,7 +522,7 @@ internal static class CSharpDeclarationScanner
                         CanonicalName: canonicalName,
                         Accessibility: ParseAccessibility(methodDeclaration.Modifiers),
                         Arity: methodDeclaration.TypeParameterList?.Parameters.Count ?? 0,
-                        ReturnTypeName: NormalizeTypeReference(methodDeclaration.ReturnType.ToString()),
+                        ReturnTypeName: NormalizeMethodTypeReference(methodDeclaration.ReturnType.ToString()),
                         Parameters: ParseMethodParameters(methodDeclaration.ParameterList.Parameters),
                         RelativeFilePath: relativePath,
                         SourceLine: methodLocation.Line,
@@ -577,7 +577,7 @@ internal static class CSharpDeclarationScanner
                 Ordinal: index,
                 DeclaredTypeName: parameter.Type is null
                     ? null
-                    : NormalizeTypeReference(parameter.Type.ToString())));
+                    : NormalizeMethodTypeReference(parameter.Type.ToString())));
         }
 
         return discoveredParameters;
@@ -720,6 +720,17 @@ internal static class CSharpDeclarationScanner
         }
 
         return value.Trim();
+    }
+
+    private static string NormalizeMethodTypeReference(string typeReference)
+    {
+        var value = typeReference.Trim();
+        if (value.StartsWith("global::", StringComparison.Ordinal))
+        {
+            value = value[8..];
+        }
+
+        return value;
     }
 
     private static bool TryParseIntegralConstant(string value, out long parsed)

@@ -565,7 +565,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
                 var orderedParameterTypeSignatures = representativeMethod.Parameters
                     .OrderBy(x => x.Ordinal)
-                    .Select(x => NormalizeTypeReferenceName(x.DeclaredTypeName ?? string.Empty))
+                    .Select(x => NormalizeMethodIdentityTypeSignature(x.DeclaredTypeName ?? string.Empty))
                     .ToArray();
 
                 var methodNaturalKey = DeclarationIdentityRules.CreateMethodNaturalKey(
@@ -1004,7 +1004,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
     {
         var parameterTypes = method.Parameters
             .OrderBy(x => x.Ordinal)
-            .Select(x => NormalizeTypeReferenceName(x.DeclaredTypeName ?? string.Empty))
+            .Select(x => NormalizeMethodIdentityTypeSignature(x.DeclaredTypeName ?? string.Empty))
             .ToArray();
 
         return $"{method.Kind}:{method.CanonicalName}:{method.Arity}:{string.Join("|", parameterTypes)}";
@@ -1014,7 +1014,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
     {
         var parameterTypes = method.Parameters
             .OrderBy(x => x.Ordinal)
-            .Select(x => NormalizeTypeReferenceName(x.DeclaredTypeName ?? string.Empty))
+            .Select(x => NormalizeMethodIdentityTypeSignature(x.DeclaredTypeName ?? string.Empty))
             .ToArray();
 
         var signature = parameterTypes.Length == 0
@@ -1058,6 +1058,17 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         }
 
         return "unknown-assembly";
+    }
+
+    private static string NormalizeMethodIdentityTypeSignature(string typeSignature)
+    {
+        var normalized = typeSignature.Trim();
+        if (normalized.StartsWith("global::", StringComparison.Ordinal))
+        {
+            normalized = normalized[8..];
+        }
+
+        return new string(normalized.Where(c => !char.IsWhiteSpace(c)).ToArray());
     }
 
     private sealed record PendingMemberTypeLink(
