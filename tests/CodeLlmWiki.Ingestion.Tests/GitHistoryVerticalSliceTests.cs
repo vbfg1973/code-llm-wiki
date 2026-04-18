@@ -71,6 +71,7 @@ public sealed class GitHistoryVerticalSliceTests
         var submodule = Assert.Single(model.Submodules);
         Assert.Equal("deps/shared", submodule.Path);
         Assert.Equal("https://example.com/shared.git", submodule.Url);
+        Assert.DoesNotContain(model.Projects, x => x.Path.StartsWith("deps/shared/", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -136,6 +137,26 @@ public sealed class GitHistoryVerticalSliceTests
         {
             var root = Path.Combine(Path.GetTempPath(), $"codellmwiki-githistory-{Guid.NewGuid():N}", "history-repo");
             Directory.CreateDirectory(root);
+            var commitTimestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+            string Commit(string message)
+            {
+                var timestamp = commitTimestamp.ToString("O");
+                commitTimestamp = commitTimestamp.AddMinutes(1);
+
+                RunGit(
+                    root,
+                    new Dictionary<string, string>
+                    {
+                        ["GIT_AUTHOR_DATE"] = timestamp,
+                        ["GIT_COMMITTER_DATE"] = timestamp,
+                    },
+                    "commit",
+                    "-m",
+                    message);
+
+                return RunGit(root, "rev-parse", "HEAD");
+            }
 
             await File.WriteAllTextAsync(Path.Combine(root, "Sample.slnx"),
                 """
@@ -165,40 +186,60 @@ public sealed class GitHistoryVerticalSliceTests
                 url = https://example.com/shared.git
                 """);
 
+            var submoduleDir = Path.Combine(root, "deps", "shared");
+            Directory.CreateDirectory(submoduleDir);
+            await File.WriteAllTextAsync(Path.Combine(submoduleDir, "Injected.csproj"),
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                  </PropertyGroup>
+                </Project>
+                """);
+
             RunGit(root, "init", "-b", "main");
             ConfigureIdentity(root, "Alice", "alice@example.com");
             RunGit(root, "add", ".");
-            RunGit(root, "commit", "-m", "initial");
-            var initialCommit = RunGit(root, "rev-parse", "HEAD");
+            var initialCommit = Commit("initial");
 
             RunGit(root, "checkout", "-b", "feature/rename");
             ConfigureIdentity(root, "Bob", "bob@example.com");
 
             await File.AppendAllTextAsync(Path.Combine(appDir, "Original.cs"), "public void StepOne() { }\n");
             RunGit(root, "add", ".");
-            RunGit(root, "commit", "-m", "feature edit");
-            var featureEditCommit = RunGit(root, "rev-parse", "HEAD");
+            var featureEditCommit = Commit("feature edit");
 
             RunGit(root, "mv", "src/App/Original.cs", "src/App/Renamed.cs");
             await File.AppendAllTextAsync(Path.Combine(appDir, "Renamed.cs"), "public void StepTwo() { }\n");
             RunGit(root, "add", ".");
-            RunGit(root, "commit", "-m", "rename file");
-            var featureRenameCommit = RunGit(root, "rev-parse", "HEAD");
+            var featureRenameCommit = Commit("rename file");
 
             RunGit(root, "checkout", "main");
             ConfigureIdentity(root, "Alice", "alice@example.com");
 
             await File.AppendAllTextAsync(Path.Combine(root, "README.md"), "mainline update\n");
             RunGit(root, "add", "README.md");
-            RunGit(root, "commit", "-m", "mainline docs update");
+            Commit("mainline docs update");
 
-            RunGit(root, "merge", "--no-ff", "feature/rename", "-m", "merge feature rename");
+            var mergeTimestamp = commitTimestamp.ToString("O");
+            commitTimestamp = commitTimestamp.AddMinutes(1);
+            RunGit(
+                root,
+                new Dictionary<string, string>
+                {
+                    ["GIT_AUTHOR_DATE"] = mergeTimestamp,
+                    ["GIT_COMMITTER_DATE"] = mergeTimestamp,
+                },
+                "merge",
+                "--no-ff",
+                "feature/rename",
+                "-m",
+                "merge feature rename");
             var mergeCommit = RunGit(root, "rev-parse", "HEAD");
 
             await File.AppendAllTextAsync(Path.Combine(appDir, "Renamed.cs"), "public void MainlineTouch() { }\n");
             RunGit(root, "add", "src/App/Renamed.cs");
-            RunGit(root, "commit", "-m", "post merge touch");
-            var postMergeTouchCommit = RunGit(root, "rev-parse", "HEAD");
+            var postMergeTouchCommit = Commit("post merge touch");
 
             return new GitHistoryFixture(
                 root,
@@ -217,6 +258,14 @@ public sealed class GitHistoryVerticalSliceTests
 
         private static string RunGit(string workingDirectory, params string[] args)
         {
+            return RunGit(workingDirectory, null, args);
+        }
+
+        private static string RunGit(
+            string workingDirectory,
+            IReadOnlyDictionary<string, string>? environmentVariables,
+            params string[] args)
+        {
             var startInfo = new ProcessStartInfo
             {
                 FileName = "git",
@@ -228,6 +277,14 @@ public sealed class GitHistoryVerticalSliceTests
             foreach (var arg in args)
             {
                 startInfo.ArgumentList.Add(arg);
+            }
+
+            if (environmentVariables is not null)
+            {
+                foreach (var pair in environmentVariables)
+                {
+                    startInfo.Environment[pair.Key] = pair.Value;
+                }
             }
 
             using var process = Process.Start(startInfo)!;

@@ -45,7 +45,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 "Repository contains uncommitted changes; snapshot still reflects HEAD."));
         }
 
-        foreach (var submodule in DiscoverSubmodules(fullRepositoryPath, diagnostics).OrderBy(x => x.Path, StringComparer.Ordinal))
+        var submodules = DiscoverSubmodules(fullRepositoryPath, diagnostics);
+        foreach (var submodule in submodules.OrderBy(x => x.Path, StringComparer.Ordinal))
         {
             var submoduleId = _stableIdGenerator.Create(new EntityKey("submodule", submodule.Path));
             AddEntityTriples(triples, submoduleId, "submodule", submodule.Name, submodule.Path);
@@ -58,7 +59,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             triples.Add(new SemanticTriple(new EntityNode(repositoryId), CorePredicates.HasSubmodule, new EntityNode(submoduleId)));
         }
 
-        var solutions = DiscoverSolutions(fullRepositoryPath, diagnostics);
+        var excludedDirectories = BuildExcludedSubmoduleDirectories(fullRepositoryPath, submodules);
+        var solutions = DiscoverSolutions(fullRepositoryPath, excludedDirectories, diagnostics);
         var solutionProjectMap = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var solutionPath in solutions)
@@ -73,7 +75,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         }
 
         var allProjectPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var project in Directory.EnumerateFiles(fullRepositoryPath, "*.csproj", SearchOption.AllDirectories))
+        foreach (var project in EnumerateFilesExcludingDirectories(fullRepositoryPath, "*.csproj", excludedDirectories))
         {
             allProjectPaths.Add(Path.GetFullPath(project));
         }
@@ -215,10 +217,13 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         triples.Add(new SemanticTriple(subject, CorePredicates.HasPath, new LiteralNode(path)));
     }
 
-    private static IReadOnlyList<string> DiscoverSolutions(string repositoryPath, List<IngestionDiagnostic> diagnostics)
+    private static IReadOnlyList<string> DiscoverSolutions(
+        string repositoryPath,
+        HashSet<string> excludedDirectories,
+        List<IngestionDiagnostic> diagnostics)
     {
-        var solutions = Directory.EnumerateFiles(repositoryPath, "*.sln", SearchOption.AllDirectories)
-            .Concat(Directory.EnumerateFiles(repositoryPath, "*.slnx", SearchOption.AllDirectories))
+        var solutions = EnumerateFilesExcludingDirectories(repositoryPath, "*.sln", excludedDirectories)
+            .Concat(EnumerateFilesExcludingDirectories(repositoryPath, "*.slnx", excludedDirectories))
             .Select(Path.GetFullPath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(x => x, StringComparer.Ordinal)
@@ -416,6 +421,96 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
     private static string ToRelativePath(string root, string path)
     {
         return Path.GetRelativePath(root, path).Replace('\\', '/');
+    }
+
+    private static HashSet<string> BuildExcludedSubmoduleDirectories(
+        string repositoryRoot,
+        IReadOnlyList<SubmoduleInfo> submodules)
+    {
+        return submodules
+            .Where(x => !string.IsNullOrWhiteSpace(x.Path))
+            .Select(x => Path.GetFullPath(Path.Combine(repositoryRoot, x.Path)))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> EnumerateFilesExcludingDirectories(
+        string rootDirectory,
+        string searchPattern,
+        HashSet<string> excludedDirectories)
+    {
+        var root = Path.GetFullPath(rootDirectory);
+        var pending = new Stack<string>();
+        pending.Push(root);
+
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            var normalizedDirectory = Path.GetFullPath(directory);
+
+            if (IsInExcludedDirectory(normalizedDirectory, excludedDirectories))
+            {
+                continue;
+            }
+
+            IEnumerable<string> files;
+            try
+            {
+                files = Directory.EnumerateFiles(normalizedDirectory, searchPattern, SearchOption.TopDirectoryOnly);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var file in files)
+            {
+                yield return file;
+            }
+
+            IEnumerable<string> childDirectories;
+            try
+            {
+                childDirectories = Directory.EnumerateDirectories(normalizedDirectory, "*", SearchOption.TopDirectoryOnly);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var child in childDirectories)
+            {
+                var normalizedChild = Path.GetFullPath(child);
+                if (IsInExcludedDirectory(normalizedChild, excludedDirectories))
+                {
+                    continue;
+                }
+
+                pending.Push(normalizedChild);
+            }
+        }
+    }
+
+    private static bool IsInExcludedDirectory(string candidateDirectory, HashSet<string> excludedDirectories)
+    {
+        if (excludedDirectories.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var excluded in excludedDirectories)
+        {
+            if (candidateDirectory.Equals(excluded, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (candidateDirectory.StartsWith(excluded + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static HashSet<string> BuildSolutionMemberPathSet(
