@@ -130,6 +130,54 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     .Distinct()
                     .OrderBy(v => v.Value, StringComparer.Ordinal)
                     .ToArray());
+        var readMethodIdsByTargetMemberId = model.Declarations.Methods.Relations
+            .Where(x =>
+                (x.Kind == MethodRelationKind.ReadsProperty || x.Kind == MethodRelationKind.ReadsField)
+                && x.TargetMemberId is not null)
+            .GroupBy(x => x.TargetMemberId!.Value)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.SourceMethodId)
+                    .Distinct()
+                    .OrderBy(v => v.Value, StringComparer.Ordinal)
+                    .ToArray());
+        var writeMethodIdsByTargetMemberId = model.Declarations.Methods.Relations
+            .Where(x =>
+                (x.Kind == MethodRelationKind.WritesProperty || x.Kind == MethodRelationKind.WritesField)
+                && x.TargetMemberId is not null)
+            .GroupBy(x => x.TargetMemberId!.Value)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.SourceMethodId)
+                    .Distinct()
+                    .OrderBy(v => v.Value, StringComparer.Ordinal)
+                    .ToArray());
+        var readMemberIdsBySourceMethodId = model.Declarations.Methods.Relations
+            .Where(x =>
+                (x.Kind == MethodRelationKind.ReadsProperty || x.Kind == MethodRelationKind.ReadsField)
+                && x.TargetMemberId is not null)
+            .GroupBy(x => x.SourceMethodId)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.TargetMemberId!.Value)
+                    .Distinct()
+                    .OrderBy(v => v.Value, StringComparer.Ordinal)
+                    .ToArray());
+        var writeMemberIdsBySourceMethodId = model.Declarations.Methods.Relations
+            .Where(x =>
+                (x.Kind == MethodRelationKind.WritesProperty || x.Kind == MethodRelationKind.WritesField)
+                && x.TargetMemberId is not null)
+            .GroupBy(x => x.SourceMethodId)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.TargetMemberId!.Value)
+                    .Distinct()
+                    .OrderBy(v => v.Value, StringComparer.Ordinal)
+                    .ToArray());
         var fileById = model.Files.ToDictionary(x => x.Id, x => x);
         var namespaceBacklinksByFileId = BuildNamespaceBacklinksByFileId(model.Declarations.Namespaces, fileById);
         var typeBacklinksByFileId = BuildTypeBacklinksByFileId(model.Declarations.Types, fileById);
@@ -145,16 +193,31 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         pages.AddRange(orderedProjects.Select(project => RenderProjectPage(model.Repository.Id.Value, project, packageById, resolver)));
         pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, resolver)));
         pages.AddRange(orderedNamespaces.Select(namespaceDeclaration => RenderNamespacePage(model.Repository.Id.Value, namespaceDeclaration, namespaceById, typeById, resolver)));
-        pages.AddRange(orderedTypes.Select(typeDeclaration => RenderTypePage(model.Repository.Id.Value, typeDeclaration, namespaceById, typeById, memberById, methodById, fileById, orderedProjects, resolver)));
+        pages.AddRange(orderedTypes.Select(typeDeclaration =>
+            RenderTypePage(
+                model.Repository.Id.Value,
+                typeDeclaration,
+                namespaceById,
+                typeById,
+                memberById,
+                methodById,
+                readMethodIdsByTargetMemberId,
+                writeMethodIdsByTargetMemberId,
+                fileById,
+                orderedProjects,
+                resolver)));
         pages.AddRange(orderedMethods.Select(method =>
             RenderMethodPage(
                 model.Repository.Id.Value,
                 method,
                 typeById,
                 methodById,
+                memberById,
                 implementedMethodIdsBySourceMethodId,
                 overriddenMethodIdsBySourceMethodId,
                 callRelationsBySourceMethodId,
+                readMemberIdsBySourceMethodId,
+                writeMemberIdsBySourceMethodId,
                 calledByMethodIdsByTargetMethodId,
                 fileById,
                 resolver)));
@@ -567,6 +630,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
         IReadOnlyDictionary<EntityId, MemberDeclarationNode> memberById,
         IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> readMethodIdsByTargetMemberId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> writeMethodIdsByTargetMemberId,
         IReadOnlyDictionary<EntityId, FileNode> fileById,
         IReadOnlyList<ProjectNode> projects,
         WikiPathResolver resolver)
@@ -635,6 +700,29 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine("## Methods");
         AppendMethodSection(sb, typeDeclaration, methodById, resolver);
 
+        sb.AppendLine();
+        sb.AppendLine("## Member Data Flow");
+        AppendMemberDataFlowSection(
+            sb,
+            "Properties",
+            typeDeclaration,
+            memberById,
+            methodById,
+            readMethodIdsByTargetMemberId,
+            writeMethodIdsByTargetMemberId,
+            MemberDeclarationKind.Property,
+            resolver);
+        AppendMemberDataFlowSection(
+            sb,
+            "Fields",
+            typeDeclaration,
+            memberById,
+            methodById,
+            readMethodIdsByTargetMemberId,
+            writeMethodIdsByTargetMemberId,
+            MemberDeclarationKind.Field,
+            resolver);
+
         if (typeDeclaration.GenericParameters.Count > 0 || typeDeclaration.GenericConstraints.Count > 0)
         {
             sb.AppendLine();
@@ -670,6 +758,13 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             KeyValue("type_kind", typeDeclaration.Kind.ToString().ToLowerInvariant()),
             KeyValue("type_path", typeDeclaration.Path),
             KeyValue("accessibility", typeDeclaration.Accessibility.ToString().ToLowerInvariant()),
+            KeyValue("constructor_count", CountMethods(typeDeclaration, methodById, MethodDeclarationKind.Constructor).ToString()),
+            KeyValue("method_count", CountMethods(typeDeclaration, methodById, MethodDeclarationKind.Method).ToString()),
+            KeyValue("property_count", CountMembers(typeDeclaration, memberById, MemberDeclarationKind.Property).ToString()),
+            KeyValue("field_count", CountMembers(typeDeclaration, memberById, MemberDeclarationKind.Field).ToString()),
+            KeyValue("enum_member_count", CountMembers(typeDeclaration, memberById, MemberDeclarationKind.EnumMember).ToString()),
+            KeyValue("record_parameter_count", CountMembers(typeDeclaration, memberById, MemberDeclarationKind.RecordParameter).ToString()),
+            KeyValue("behavioral_method_count", CountMethods(typeDeclaration, methodById, MethodDeclarationKind.Method).ToString()),
         };
 
         if (typeDeclaration.IsNestedType)
@@ -775,6 +870,86 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         }
     }
 
+    private static void AppendMemberDataFlowSection(
+        StringBuilder sb,
+        string sectionName,
+        TypeDeclarationNode typeDeclaration,
+        IReadOnlyDictionary<EntityId, MemberDeclarationNode> memberById,
+        IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> readMethodIdsByTargetMemberId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> writeMethodIdsByTargetMemberId,
+        MemberDeclarationKind expectedKind,
+        WikiPathResolver resolver)
+    {
+        var members = typeDeclaration.MemberIds
+            .Where(memberById.ContainsKey)
+            .Select(id => memberById[id])
+            .Where(member => member.Kind == expectedKind)
+            .OrderBy(member => member.Name, StringComparer.Ordinal)
+            .ThenBy(member => member.Id.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        sb.AppendLine($"### {sectionName}");
+        if (members.Length == 0)
+        {
+            sb.AppendLine("- none");
+            return;
+        }
+
+        sb.AppendLine("| member | read_count | write_count | readers | writers |");
+        sb.AppendLine("| --- | ---: | ---: | --- | --- |");
+
+        foreach (var member in members)
+        {
+            var readers = readMethodIdsByTargetMemberId.TryGetValue(member.Id, out var readMethodIds)
+                ? readMethodIds
+                    .Where(methodById.ContainsKey)
+                    .Select(id => methodById[id])
+                    .OrderBy(x => x.Kind.ToString(), StringComparer.Ordinal)
+                    .ThenBy(x => x.Signature, StringComparer.Ordinal)
+                    .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
+                    .Select(x => resolver.ToWikiLink(x.Id, FormatMethodLinkAlias(x)))
+                    .ToArray()
+                : [];
+            var writers = writeMethodIdsByTargetMemberId.TryGetValue(member.Id, out var writeMethodIds)
+                ? writeMethodIds
+                    .Where(methodById.ContainsKey)
+                    .Select(id => methodById[id])
+                    .OrderBy(x => x.Kind.ToString(), StringComparer.Ordinal)
+                    .ThenBy(x => x.Signature, StringComparer.Ordinal)
+                    .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
+                    .Select(x => resolver.ToWikiLink(x.Id, FormatMethodLinkAlias(x)))
+                    .ToArray()
+                : [];
+
+            var readersCell = readers.Length == 0 ? "none" : string.Join(", ", readers);
+            var writersCell = writers.Length == 0 ? "none" : string.Join(", ", writers);
+            sb.AppendLine($"| {member.Name} | {readers.Length} | {writers.Length} | {readersCell} | {writersCell} |");
+        }
+    }
+
+    private static int CountMethods(
+        TypeDeclarationNode typeDeclaration,
+        IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        MethodDeclarationKind methodKind)
+    {
+        return typeDeclaration.MethodIds
+            .Where(methodById.ContainsKey)
+            .Select(id => methodById[id])
+            .Count(x => x.Kind == methodKind);
+    }
+
+    private static int CountMembers(
+        TypeDeclarationNode typeDeclaration,
+        IReadOnlyDictionary<EntityId, MemberDeclarationNode> memberById,
+        MemberDeclarationKind memberKind)
+    {
+        return typeDeclaration.MemberIds
+            .Where(memberById.ContainsKey)
+            .Select(id => memberById[id])
+            .Count(x => x.Kind == memberKind);
+    }
+
     private static void AppendMethodRelationshipSection(
         StringBuilder sb,
         EntityId sourceMethodId,
@@ -798,6 +973,47 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             {
                 sb.AppendLine("- unresolved target");
             }
+        }
+    }
+
+    private static void AppendMethodMemberAccessSection(
+        StringBuilder sb,
+        EntityId sourceMethodId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> targetMemberIdsBySourceMethodId,
+        IReadOnlyDictionary<EntityId, MemberDeclarationNode> memberById,
+        IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
+        WikiPathResolver resolver)
+    {
+        if (!targetMemberIdsBySourceMethodId.TryGetValue(sourceMethodId, out var targetMemberIds) || targetMemberIds.Count == 0)
+        {
+            sb.AppendLine("- none");
+            return;
+        }
+
+        var members = targetMemberIds
+            .Where(memberById.ContainsKey)
+            .Select(id => memberById[id])
+            .OrderBy(x => x.Kind.ToString(), StringComparer.Ordinal)
+            .ThenBy(x => x.Name, StringComparer.Ordinal)
+            .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        if (members.Length == 0)
+        {
+            sb.AppendLine("- none");
+            return;
+        }
+
+        foreach (var member in members)
+        {
+            var kind = member.Kind.ToString().ToLowerInvariant();
+            if (typeById.TryGetValue(member.DeclaringTypeId, out var declaringType))
+            {
+                sb.AppendLine($"- {kind}: {member.Name} ({resolver.ToWikiLink(declaringType.Id, declaringType.Name)})");
+                continue;
+            }
+
+            sb.AppendLine($"- {kind}: {member.Name}");
         }
     }
 
@@ -889,9 +1105,12 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         MethodDeclarationNode methodDeclaration,
         IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
         IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        IReadOnlyDictionary<EntityId, MemberDeclarationNode> memberById,
         IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> implementedMethodIdsBySourceMethodId,
         IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> overriddenMethodIdsBySourceMethodId,
         IReadOnlyDictionary<EntityId, IReadOnlyList<MethodRelationNode>> callRelationsBySourceMethodId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> readMemberIdsBySourceMethodId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> writeMemberIdsBySourceMethodId,
         IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> calledByMethodIdsByTargetMethodId,
         IReadOnlyDictionary<EntityId, FileNode> fileById,
         WikiPathResolver resolver)
@@ -963,6 +1182,26 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             methodDeclaration.Id,
             callRelationsBySourceMethodId,
             methodById,
+            resolver);
+
+        sb.AppendLine();
+        sb.AppendLine("## Reads");
+        AppendMethodMemberAccessSection(
+            sb,
+            methodDeclaration.Id,
+            readMemberIdsBySourceMethodId,
+            memberById,
+            typeById,
+            resolver);
+
+        sb.AppendLine();
+        sb.AppendLine("## Writes");
+        AppendMethodMemberAccessSection(
+            sb,
+            methodDeclaration.Id,
+            writeMemberIdsBySourceMethodId,
+            memberById,
+            typeById,
             resolver);
 
         sb.AppendLine();

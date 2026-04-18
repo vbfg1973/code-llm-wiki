@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 003](./003-phase-3-dotnet-method-extraction-and-relations.prd.md)
 
 - Issue: [#46](https://github.com/vbfg1973/code-llm-wiki/issues/46)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: complete
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,10 +18,10 @@ Add internal property/field read-write data-flow extraction from methods and pub
 
 ## Acceptance criteria
 
-- [ ] Internal data-flow edges are captured for `reads_property`, `writes_property`, `reads_field`, and `writes_field`.
-- [ ] Type pages render per-property read/write counts with deterministic reader/writer method link lists, including explicit zero counts.
-- [ ] Type front matter publishes approved structural count scalars (`constructor_count`, `method_count`, `property_count`, `field_count`, `enum_member_count`, `record_parameter_count`, `behavioral_method_count`).
-- [ ] Method pages render deterministic `Reads`/`Writes` sections for internal targets.
+- [x] Internal data-flow edges are captured for `reads_property`, `writes_property`, `reads_field`, and `writes_field`.
+- [x] Type pages render per-property read/write counts with deterministic reader/writer method link lists, including explicit zero counts.
+- [x] Type front matter publishes approved structural count scalars (`constructor_count`, `method_count`, `property_count`, `field_count`, `enum_member_count`, `record_parameter_count`, `behavioral_method_count`).
+- [x] Method pages render deterministic `Reads`/`Writes` sections for internal targets.
 
 ## Blocked by
 
