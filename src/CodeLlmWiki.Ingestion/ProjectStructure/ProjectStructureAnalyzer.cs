@@ -412,6 +412,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 var resolvedBaseQualifiedName = ResolveInternalTypeName(
                     representative.NamespaceName,
                     baseType,
+                    representative.ImportedNamespaces,
+                    representative.ImportedAliases,
                     typeIdByQualifiedName,
                     declaredTypeNamesBySimpleName);
                 if (resolvedBaseQualifiedName is null || !typeIdByQualifiedName.TryGetValue(resolvedBaseQualifiedName, out var baseTypeId))
@@ -430,6 +432,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 var resolvedInterfaceQualifiedName = ResolveInternalTypeName(
                     representative.NamespaceName,
                     interfaceType,
+                    representative.ImportedNamespaces,
+                    representative.ImportedAliases,
                     typeIdByQualifiedName,
                     declaredTypeNamesBySimpleName);
                 if (resolvedInterfaceQualifiedName is null || !typeIdByQualifiedName.TryGetValue(resolvedInterfaceQualifiedName, out var interfaceTypeId))
@@ -448,6 +452,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
     private static string? ResolveInternalTypeName(
         string currentNamespace,
         string referenceName,
+        IReadOnlyList<string> importedNamespaces,
+        IReadOnlyDictionary<string, string> importedAliases,
         IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
         IReadOnlyDictionary<string, HashSet<string>> declaredTypeNamesBySimpleName)
     {
@@ -468,6 +474,12 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             normalized = normalized[..genericIndex];
         }
 
+        var aliasSplit = normalized.Split('.', 2, StringSplitOptions.TrimEntries);
+        if (aliasSplit.Length == 2 && importedAliases.TryGetValue(aliasSplit[0], out var aliasTarget))
+        {
+            normalized = $"{aliasTarget}.{aliasSplit[1]}";
+        }
+
         if (typeIdByQualifiedName.ContainsKey(normalized))
         {
             return normalized;
@@ -480,6 +492,15 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         if (typeIdByQualifiedName.ContainsKey(namespaced))
         {
             return namespaced;
+        }
+
+        foreach (var importedNamespace in importedNamespaces)
+        {
+            var importedCandidate = $"{importedNamespace}.{normalized}";
+            if (typeIdByQualifiedName.ContainsKey(importedCandidate))
+            {
+                return importedCandidate;
+            }
         }
 
         if (declaredTypeNamesBySimpleName.TryGetValue(normalized, out var candidates) && candidates.Count == 1)

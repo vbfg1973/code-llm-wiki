@@ -117,6 +117,25 @@ public sealed class TypeSymbolVerticalSliceTests
         Assert.Contains("Outer", innerPage.Markdown, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task AnalyzeAsync_ResolvesDirectRelationships_FromUsingImports()
+    {
+        var fixture = await TypeFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var importedWorker = model.Declarations.Types.Single(x => x.Name == "ImportedWorker");
+        var sharedInterface = model.Declarations.Types.Single(x => x.Name == "ISharedWorker");
+
+        Assert.Contains(analysis.Triples, x =>
+            x.Predicate == CorePredicates.Implements &&
+            x.Subject is EntityNode subject &&
+            subject.Id == importedWorker.Id &&
+            x.Object is EntityNode obj &&
+            obj.Id == sharedInterface.Id);
+    }
+
     private sealed class TypeFixture
     {
         private TypeFixture(string repositoryPath)
@@ -165,6 +184,21 @@ public sealed class TypeSymbolVerticalSliceTests
                 public class Outer
                 {
                     public class Inner : BaseWorker { }
+                }
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(appDir, "CrossNamespace.cs"),
+                """
+                namespace Shared.Contracts
+                {
+                    public interface ISharedWorker { }
+                }
+
+                namespace Acme.Workers
+                {
+                    using Shared.Contracts;
+
+                    public class ImportedWorker : ISharedWorker { }
                 }
                 """);
 

@@ -10,4 +10,6 @@ internal sealed record TypeDiscoveryNode(
     string? DeclaringTypeQualifiedName,
     IReadOnlyList<string> DirectBaseTypeNames,
     IReadOnlyList<string> DirectInterfaceTypeNames,
+    IReadOnlyList<string> ImportedNamespaces,
+    IReadOnlyDictionary<string, string> ImportedAliases,
     string RelativeFilePath);

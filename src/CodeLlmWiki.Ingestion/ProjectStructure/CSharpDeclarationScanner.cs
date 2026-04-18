@@ -32,11 +32,14 @@ internal static class CSharpDeclarationScanner
                 continue;
             }
 
+            var rootImportContext = BuildImportContext(root.Usings);
+
             VisitMembers(
                 root.Members,
                 currentNamespace: null,
                 currentDeclaringTypeQualifiedName: null,
                 relativePath,
+                rootImportContext,
                 declaredNamespaceFiles,
                 discoveredTypes);
         }
@@ -76,6 +79,7 @@ internal static class CSharpDeclarationScanner
         string? currentNamespace,
         string? currentDeclaringTypeQualifiedName,
         string relativePath,
+        TypeImportContext importContext,
         Dictionary<string, HashSet<string>> declaredNamespaceFiles,
         List<TypeDiscoveryNode> discoveredTypes)
     {
@@ -92,17 +96,27 @@ internal static class CSharpDeclarationScanner
                 var namespaceName = CombineNamespace(currentNamespace, declaredName);
                 RegisterDeclarationFile(declaredNamespaceFiles, namespaceName, relativePath);
 
+                var namespaceImportContext = MergeImportContexts(importContext, BuildImportContext(namespaceDeclaration.Usings));
+
                 VisitMembers(
                     namespaceDeclaration.Members,
                     namespaceName,
                     currentDeclaringTypeQualifiedName: null,
                     relativePath,
+                    namespaceImportContext,
                     declaredNamespaceFiles,
                     discoveredTypes);
                 continue;
             }
 
-            AddTypeIfPresent(member, currentNamespace, currentDeclaringTypeQualifiedName, relativePath, declaredNamespaceFiles, discoveredTypes);
+            AddTypeIfPresent(
+                member,
+                currentNamespace,
+                currentDeclaringTypeQualifiedName,
+                relativePath,
+                importContext,
+                declaredNamespaceFiles,
+                discoveredTypes);
         }
     }
 
@@ -111,6 +125,7 @@ internal static class CSharpDeclarationScanner
         string? currentNamespace,
         string? currentDeclaringTypeQualifiedName,
         string relativePath,
+        TypeImportContext importContext,
         Dictionary<string, HashSet<string>> declaredNamespaceFiles,
         List<TypeDiscoveryNode> discoveredTypes)
     {
@@ -129,6 +144,7 @@ internal static class CSharpDeclarationScanner
                     ParseDirectRelationships(classDeclaration),
                     relativePath,
                     classDeclaration.Members,
+                    importContext,
                     declaredNamespaceFiles,
                     discoveredTypes);
                 break;
@@ -143,6 +159,7 @@ internal static class CSharpDeclarationScanner
                     ParseDirectRelationships(interfaceDeclaration),
                     relativePath,
                     interfaceDeclaration.Members,
+                    importContext,
                     declaredNamespaceFiles,
                     discoveredTypes);
                 break;
@@ -157,6 +174,7 @@ internal static class CSharpDeclarationScanner
                     ParseDirectRelationships(structDeclaration),
                     relativePath,
                     structDeclaration.Members,
+                    importContext,
                     declaredNamespaceFiles,
                     discoveredTypes);
                 break;
@@ -171,6 +189,7 @@ internal static class CSharpDeclarationScanner
                     ParseDirectRelationships(recordDeclaration),
                     relativePath,
                     recordDeclaration.Members,
+                    importContext,
                     declaredNamespaceFiles,
                     discoveredTypes);
                 break;
@@ -185,6 +204,7 @@ internal static class CSharpDeclarationScanner
                     ([], []),
                     relativePath,
                     members: default,
+                    importContext,
                     declaredNamespaceFiles,
                     discoveredTypes);
                 break;
@@ -199,6 +219,7 @@ internal static class CSharpDeclarationScanner
                     ([], []),
                     relativePath,
                     members: default,
+                    importContext,
                     declaredNamespaceFiles,
                     discoveredTypes);
                 break;
@@ -215,6 +236,7 @@ internal static class CSharpDeclarationScanner
         (IReadOnlyList<string> Bases, IReadOnlyList<string> Interfaces) relationships,
         string relativePath,
         SyntaxList<MemberDeclarationSyntax> members,
+        TypeImportContext importContext,
         Dictionary<string, HashSet<string>> declaredNamespaceFiles,
         List<TypeDiscoveryNode> discoveredTypes)
     {
@@ -230,6 +252,8 @@ internal static class CSharpDeclarationScanner
             currentDeclaringTypeQualifiedName,
             relationships.Bases,
             relationships.Interfaces,
+            importContext.Namespaces,
+            importContext.Aliases,
             relativePath));
 
         if (namespaceName == GlobalNamespaceName)
@@ -247,6 +271,7 @@ internal static class CSharpDeclarationScanner
             namespaceName,
             qualifiedName,
             relativePath,
+            importContext,
             declaredNamespaceFiles,
             discoveredTypes);
     }
@@ -381,6 +406,70 @@ internal static class CSharpDeclarationScanner
         }
 
         return $"{namespaceName}.{withArity}";
+    }
+
+    private static TypeImportContext BuildImportContext(SyntaxList<UsingDirectiveSyntax> usingDirectives)
+    {
+        if (usingDirectives.Count == 0)
+        {
+            return TypeImportContext.Empty;
+        }
+
+        var namespaces = new HashSet<string>(StringComparer.Ordinal);
+        var aliases = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var usingDirective in usingDirectives)
+        {
+            if (usingDirective.Name is null)
+            {
+                continue;
+            }
+
+            var target = NormalizeTypeReference(usingDirective.Name.ToString());
+            if (string.IsNullOrWhiteSpace(target))
+            {
+                continue;
+            }
+
+            if (usingDirective.Alias is not null)
+            {
+                aliases[usingDirective.Alias.Name.Identifier.ValueText] = target;
+                continue;
+            }
+
+            if (usingDirective.StaticKeyword != default)
+            {
+                continue;
+            }
+
+            namespaces.Add(target);
+        }
+
+        return new TypeImportContext(
+            namespaces.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
+            aliases);
+    }
+
+    private static TypeImportContext MergeImportContexts(TypeImportContext parent, TypeImportContext child)
+    {
+        if (child.Namespaces.Count == 0 && child.Aliases.Count == 0)
+        {
+            return parent;
+        }
+
+        var namespaces = parent.Namespaces
+            .Concat(child.Namespaces)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+
+        var aliases = new Dictionary<string, string>(parent.Aliases, StringComparer.Ordinal);
+        foreach (var pair in child.Aliases)
+        {
+            aliases[pair.Key] = pair.Value;
+        }
+
+        return new TypeImportContext(namespaces, aliases);
     }
 
     private static void RegisterDeclarationFile(
