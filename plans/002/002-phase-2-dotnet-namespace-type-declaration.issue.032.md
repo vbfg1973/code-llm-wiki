@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 002](./002-phase-2-dotnet-namespace-type-declaration.prd.md)
 
 - Issue: [#32](https://github.com/vbfg1973/code-llm-wiki/issues/32)
-- [ ] Status: open
-- [ ] Completion date: 
+- [x] Status: complete
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,10 +18,10 @@ Harden phase-2 publication and validation behavior: enforce scalar front matter 
 
 ## Acceptance criteria
 
-- [ ] Namespace/type/file page front matter validation enforces minimal scalar contracts with conditional fields.
-- [ ] Visible wiki body content remains ID-light/human-readable while IDs remain queryable via front matter/index.
-- [ ] HEAD + git-tracked boundary behavior is preserved, including build-artifact exclusion rules.
-- [ ] Golden and behavioral test suites verify deterministic output, edge cases (partial/nested/generic), and degradation diagnostics.
+- [x] Namespace/type/file page front matter validation enforces minimal scalar contracts with conditional fields.
+- [x] Visible wiki body content remains ID-light/human-readable while IDs remain queryable via front matter/index.
+- [x] HEAD + git-tracked boundary behavior is preserved, including build-artifact exclusion rules.
+- [x] Golden and behavioral test suites verify deterministic output, edge cases (partial/nested/generic), and degradation diagnostics.
 
 ## Blocked by
 
