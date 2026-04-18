@@ -104,6 +104,10 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             AddEntityTriples(triples, projectId, "project", discovery.Name, relativeProjectPath);
             triples.Add(new SemanticTriple(new EntityNode(projectId), CorePredicates.DiscoveryMethod, new LiteralNode(discovery.Method)));
             triples.Add(new SemanticTriple(new EntityNode(repositoryId), CorePredicates.Contains, new EntityNode(projectId)));
+            foreach (var framework in discovery.TargetFrameworks.OrderBy(x => x, StringComparer.Ordinal))
+            {
+                triples.Add(new SemanticTriple(new EntityNode(projectId), CorePredicates.TargetFramework, new LiteralNode(framework)));
+            }
 
             var resolvedByPackage = DiscoverResolvedPackages(projectPath, diagnostics);
 
@@ -322,11 +326,16 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 .Where(x => !string.IsNullOrWhiteSpace(x.PackageId))
                 .ToArray();
 
-            return new ProjectDiscoveryResult(name, "msbuild", declaredPackages);
+            var targetFrameworks = ReadTargetFrameworks(
+                project.GetPropertyValue("TargetFramework"),
+                project.GetPropertyValue("TargetFrameworks"));
+
+            return new ProjectDiscoveryResult(name, "msbuild", targetFrameworks, declaredPackages);
         }
         catch (Exception ex)
         {
             var fallbackName = Path.GetFileNameWithoutExtension(projectPath);
+            IReadOnlyList<string> fallbackTargetFrameworks = Array.Empty<string>();
             var fallbackPackages = Array.Empty<PackageReferenceInfo>();
             try
             {
@@ -336,6 +345,10 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 {
                     fallbackName = assemblyName;
                 }
+
+                var fallbackTargetFramework = document.Descendants("TargetFramework").FirstOrDefault()?.Value;
+                var fallbackTargetFrameworksValue = document.Descendants("TargetFrameworks").FirstOrDefault()?.Value;
+                fallbackTargetFrameworks = ReadTargetFrameworks(fallbackTargetFramework, fallbackTargetFrameworksValue);
 
                 fallbackPackages = document
                     .Descendants("PackageReference")
@@ -359,7 +372,37 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             }
 
             diagnostics.Add(new IngestionDiagnostic("project:discovery:fallback", $"Project '{projectPath}' fell back from MSBuild discovery: {ex.Message}"));
-            return new ProjectDiscoveryResult(fallbackName, "fallback", fallbackPackages);
+            return new ProjectDiscoveryResult(fallbackName, "fallback", fallbackTargetFrameworks, fallbackPackages);
+        }
+    }
+
+    private static IReadOnlyList<string> ReadTargetFrameworks(string? targetFramework, string? targetFrameworks)
+    {
+        var values = new List<string>();
+
+        Add(targetFramework);
+
+        if (!string.IsNullOrWhiteSpace(targetFrameworks))
+        {
+            foreach (var value in targetFrameworks.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            {
+                Add(value);
+            }
+        }
+
+        return values
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+
+        void Add(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            values.Add(value.Trim());
         }
     }
 
@@ -1010,7 +1053,11 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             relativeFilePath.StartsWith(entry, StringComparison.OrdinalIgnoreCase));
     }
 
-    private sealed record ProjectDiscoveryResult(string Name, string Method, IReadOnlyList<PackageReferenceInfo> DeclaredPackages);
+    private sealed record ProjectDiscoveryResult(
+        string Name,
+        string Method,
+        IReadOnlyList<string> TargetFrameworks,
+        IReadOnlyList<PackageReferenceInfo> DeclaredPackages);
 
     private sealed record PackageReferenceInfo(string PackageId, string? DeclaredVersion);
 

@@ -7,4 +7,5 @@ public sealed record ProjectNode(
     string Name,
     string Path,
     string DiscoveryMethod,
+    IReadOnlyList<string> TargetFrameworks,
     IReadOnlyList<EntityId> PackageIds);

@@ -24,6 +24,7 @@ public sealed class ProjectStructureVerticalSliceTests
         Assert.Equal("sample-repo", model.Repository.Name);
         Assert.Single(model.Solutions);
         Assert.Equal(2, model.Projects.Count);
+        Assert.Contains(model.Projects, project => project.TargetFrameworks.Contains("net10.0", StringComparer.Ordinal));
     }
 
     [Fact]

@@ -70,7 +70,13 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     .OrderBy(x => metadataById.TryGetValue(x, out var packageMeta) ? packageMeta.Name : x.Value, StringComparer.Ordinal)
                     .ToArray();
 
-                return new ProjectNode(projectId, meta.Name, meta.Path, meta.DiscoveryMethod, packageIds);
+                return new ProjectNode(
+                    projectId,
+                    meta.Name,
+                    meta.Path,
+                    meta.DiscoveryMethod,
+                    meta.TargetFrameworks.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
+                    packageIds);
             })
             .ToArray();
 
@@ -224,6 +230,13 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             else if (triple.Predicate == CorePredicates.DiscoveryMethod)
             {
                 meta.DiscoveryMethod = value;
+            }
+            else if (triple.Predicate == CorePredicates.TargetFramework)
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    meta.TargetFrameworks.Add(value);
+                }
             }
             else if (triple.Predicate == CorePredicates.FileKind)
             {
@@ -396,6 +409,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             DiscoveryMethod = string.Empty;
             FileKind = string.Empty;
             IsSolutionMember = false;
+            TargetFrameworks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             HeadBranch = string.Empty;
             MainlineBranch = string.Empty;
             EditCount = 0;
@@ -425,6 +439,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         public string FileKind { get; set; }
 
         public bool IsSolutionMember { get; set; }
+
+        public HashSet<string> TargetFrameworks { get; }
 
         public string HeadBranch { get; set; }
 

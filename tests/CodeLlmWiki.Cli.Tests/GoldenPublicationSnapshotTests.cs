@@ -102,11 +102,6 @@ public sealed class GoldenPublicationSnapshotTests
         foreach (var path in Directory.EnumerateFiles(wikiRoot, "*.md", SearchOption.AllDirectories))
         {
             var relative = Path.GetRelativePath(wikiRoot, path).Replace('\\', '/');
-            if (relative.Equals("index/repository-index.md", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
             var content = File.ReadAllText(path);
             Assert.StartsWith("---", content, StringComparison.Ordinal);
 
@@ -126,10 +121,36 @@ public sealed class GoldenPublicationSnapshotTests
             var frontMatter = lines.Take(frontMatterEnd + 1).ToArray();
             Assert.Contains(frontMatter, x => x.StartsWith("entity_id:", StringComparison.Ordinal));
             Assert.Contains(frontMatter, x => x.StartsWith("entity_type:", StringComparison.Ordinal));
+            Assert.Contains(frontMatter, x => x.StartsWith("repository_id:", StringComparison.Ordinal));
 
-            if (path.Contains("/files/", StringComparison.Ordinal) || path.Contains("\\files\\", StringComparison.Ordinal))
+            if (relative.StartsWith("repositories/", StringComparison.Ordinal))
             {
-                Assert.Contains(frontMatter, x => x.StartsWith("repository_id:", StringComparison.Ordinal));
+                Assert.Contains(frontMatter, x => x.StartsWith("repository_name:", StringComparison.Ordinal));
+                Assert.Contains(frontMatter, x => x.StartsWith("repository_path:", StringComparison.Ordinal));
+                Assert.Contains(frontMatter, x => x.StartsWith("head_branch:", StringComparison.Ordinal));
+                Assert.Contains(frontMatter, x => x.StartsWith("mainline_branch:", StringComparison.Ordinal));
+            }
+            else if (relative.StartsWith("solutions/", StringComparison.Ordinal))
+            {
+                Assert.Contains(frontMatter, x => x.StartsWith("solution_name:", StringComparison.Ordinal));
+                Assert.Contains(frontMatter, x => x.StartsWith("solution_path:", StringComparison.Ordinal));
+            }
+            else if (relative.StartsWith("projects/", StringComparison.Ordinal))
+            {
+                Assert.Contains(frontMatter, x => x.StartsWith("project_name:", StringComparison.Ordinal));
+                Assert.Contains(frontMatter, x => x.StartsWith("project_path:", StringComparison.Ordinal));
+                Assert.Contains(frontMatter, x => x.StartsWith("target_frameworks:", StringComparison.Ordinal));
+                Assert.Contains(frontMatter, x => x.StartsWith("discovery_method:", StringComparison.Ordinal));
+            }
+            else if (relative.StartsWith("packages/", StringComparison.Ordinal))
+            {
+                Assert.Contains(frontMatter, x => x.StartsWith("package_id:", StringComparison.Ordinal));
+                Assert.Contains(frontMatter, x => x.StartsWith("package_key:", StringComparison.Ordinal));
+            }
+            else if (relative.StartsWith("files/", StringComparison.Ordinal))
+            {
+                Assert.Contains(frontMatter, x => x.StartsWith("file_name:", StringComparison.Ordinal));
+                Assert.Contains(frontMatter, x => x.StartsWith("file_path:", StringComparison.Ordinal));
             }
         }
     }
