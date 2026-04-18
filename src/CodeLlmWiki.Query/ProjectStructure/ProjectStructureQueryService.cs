@@ -1080,6 +1080,10 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 StringComparer.Ordinal)
             .ToArray();
 
+        var methodIdSet = methods
+            .Select(x => x.Id)
+            .ToHashSet();
+
         var relations = methodImplementsEdges
             .Select(x => new MethodRelationNode(
                 x.Subject,
@@ -1137,7 +1141,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 null,
                 null,
                 GetReferenceResolutionStatus(x.Object, metadataById))))
-            .Where(x => methods.Any(m => m.Id == x.SourceMethodId))
+            .Where(x => methodIdSet.Contains(x.SourceMethodId))
             .Distinct()
             .OrderBy(
                 x => DeclarationOrderingRules.GetDeterministicSortKey(

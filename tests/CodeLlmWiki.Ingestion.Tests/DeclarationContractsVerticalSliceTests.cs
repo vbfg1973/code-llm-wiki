@@ -284,6 +284,92 @@ public sealed class DeclarationContractsVerticalSliceTests
         Assert.Contains(methodId, owningType.MethodIds);
     }
 
+    [Fact]
+    public void Query_ProjectsAllMethodRelationKinds_FromTriples()
+    {
+        var repositoryId = new EntityId("repository:sample");
+        var typeId = new EntityId("type:Sample.OrderService");
+        var sourceMethodId = new EntityId("method:Sample.OrderService.Process()");
+        var implementsTargetId = new EntityId("method:Sample.IOrderService.Process()");
+        var overrideTargetId = new EntityId("method:Sample.BaseService.Process()");
+        var callsTargetId = new EntityId("method:Sample.OrderService.Validate()");
+        var propertyMemberId = new EntityId("member:Sample.OrderService.OrderId");
+        var fieldMemberId = new EntityId("member:Sample.OrderService._state");
+
+        var triples =
+            new[]
+            {
+                Triple(repositoryId, "core:entityType", "repository"),
+                Triple(repositoryId, "core:hasName", "sample"),
+                Triple(repositoryId, "core:hasPath", "."),
+                Triple(repositoryId, "core:headBranch", "main"),
+                Triple(repositoryId, "core:mainlineBranch", "main"),
+
+                Triple(typeId, "core:entityType", "type-declaration"),
+                Triple(typeId, "core:hasName", "OrderService"),
+                Triple(typeId, "core:hasPath", "Sample.OrderService"),
+                Triple(typeId, "core:typeKind", "class"),
+                Triple(typeId, "core:accessibility", "public"),
+                Triple(typeId, "core:arity", "0"),
+
+                Triple(sourceMethodId, "core:entityType", "method-declaration"),
+                Triple(sourceMethodId, "core:hasName", "Process"),
+                Triple(sourceMethodId, "core:hasPath", "Sample.OrderService.Process()"),
+                Triple(sourceMethodId, "core:methodKind", "method"),
+                Triple(sourceMethodId, "core:accessibility", "public"),
+                Triple(sourceMethodId, "core:arity", "0"),
+
+                Triple(implementsTargetId, "core:entityType", "method-declaration"),
+                Triple(implementsTargetId, "core:hasName", "Process"),
+                Triple(implementsTargetId, "core:hasPath", "Sample.IOrderService.Process()"),
+                Triple(implementsTargetId, "core:methodKind", "method"),
+
+                Triple(overrideTargetId, "core:entityType", "method-declaration"),
+                Triple(overrideTargetId, "core:hasName", "Process"),
+                Triple(overrideTargetId, "core:hasPath", "Sample.BaseService.Process()"),
+                Triple(overrideTargetId, "core:methodKind", "method"),
+
+                Triple(callsTargetId, "core:entityType", "method-declaration"),
+                Triple(callsTargetId, "core:hasName", "Validate"),
+                Triple(callsTargetId, "core:hasPath", "Sample.OrderService.Validate()"),
+                Triple(callsTargetId, "core:methodKind", "method"),
+
+                Triple(propertyMemberId, "core:entityType", "member-declaration"),
+                Triple(propertyMemberId, "core:memberKind", "property"),
+                Triple(propertyMemberId, "core:hasName", "OrderId"),
+                Triple(propertyMemberId, "core:hasPath", "Sample.OrderService.OrderId"),
+
+                Triple(fieldMemberId, "core:entityType", "member-declaration"),
+                Triple(fieldMemberId, "core:memberKind", "field"),
+                Triple(fieldMemberId, "core:hasName", "_state"),
+                Triple(fieldMemberId, "core:hasPath", "Sample.OrderService._state"),
+
+                Edge(typeId, "core:containsMethod", sourceMethodId),
+                Edge(sourceMethodId, "core:implementsMethod", implementsTargetId),
+                Edge(sourceMethodId, "core:overridesMethod", overrideTargetId),
+                Edge(sourceMethodId, "core:calls", callsTargetId),
+                Edge(sourceMethodId, "core:readsProperty", propertyMemberId),
+                Edge(sourceMethodId, "core:writesProperty", propertyMemberId),
+                Edge(sourceMethodId, "core:readsField", fieldMemberId),
+                Edge(sourceMethodId, "core:writesField", fieldMemberId),
+            };
+
+        var model = new ProjectStructureQueryService(triples).GetModel(repositoryId);
+
+        var relations = model.Declarations.Methods.Relations
+            .Where(x => x.SourceMethodId == sourceMethodId)
+            .ToArray();
+
+        Assert.Contains(relations, x => x.Kind == MethodRelationKind.ImplementsMethod && x.TargetMethodId == implementsTargetId);
+        Assert.Contains(relations, x => x.Kind == MethodRelationKind.OverridesMethod && x.TargetMethodId == overrideTargetId);
+        Assert.Contains(relations, x => x.Kind == MethodRelationKind.Calls && x.TargetMethodId == callsTargetId);
+        Assert.Contains(relations, x => x.Kind == MethodRelationKind.ReadsProperty && x.TargetMemberId == propertyMemberId);
+        Assert.Contains(relations, x => x.Kind == MethodRelationKind.WritesProperty && x.TargetMemberId == propertyMemberId);
+        Assert.Contains(relations, x => x.Kind == MethodRelationKind.ReadsField && x.TargetMemberId == fieldMemberId);
+        Assert.Contains(relations, x => x.Kind == MethodRelationKind.WritesField && x.TargetMemberId == fieldMemberId);
+        Assert.All(relations, x => Assert.Equal(DeclarationResolutionStatus.Resolved, x.ResolutionStatus));
+    }
+
     private static SemanticTriple Triple(EntityId subjectId, string predicate, string value)
     {
         return new SemanticTriple(
