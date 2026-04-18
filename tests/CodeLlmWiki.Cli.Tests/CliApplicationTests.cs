@@ -1,4 +1,6 @@
 using CodeLlmWiki.Cli;
+using CodeLlmWiki.Cli.Features.Ingest;
+using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Ingestion;
 
 namespace CodeLlmWiki.Cli.Tests;
@@ -42,6 +44,7 @@ public sealed class CliApplicationTests
                 IngestionRunStatus.SucceededWithDiagnostics,
                 2,
                 [new IngestionDiagnostic("warn:0001", "warning")],
+                new StableIdGenerator().Create(new EntityKey("repository", ".")),
                 []),
         };
 
@@ -52,6 +55,35 @@ public sealed class CliApplicationTests
 
         Assert.Equal(2, first);
         Assert.Equal(2, second);
+    }
+
+    [Fact]
+    public async Task RunAsync_PassesOutputRootOptionOverrideToPublisher()
+    {
+        var configPath = WriteTempFile(
+            """
+            {
+              "ontologyPath": "./ontology/ontology.v1.yaml",
+              "outputRoot": "./from-config"
+            }
+            """);
+
+        var runner = new CapturingRunner();
+        var publisher = new CapturingPublisher();
+        var app = new CliApplication(runner, publisher);
+
+        var exitCode = await app.RunAsync(
+            [
+                "ingest",
+                "--path", ".",
+                "--config", configPath,
+                "--output-root", "./from-option",
+            ],
+            CancellationToken.None);
+
+        Assert.Equal(0, exitCode);
+        Assert.NotNull(publisher.LastRequest);
+        Assert.Equal("./from-option", publisher.LastRequest!.OutputRootPath);
     }
 
     private static string WriteTempFile(string content)
@@ -69,12 +101,32 @@ public sealed class CliApplicationTests
             IngestionRunStatus.Succeeded,
             0,
             [],
+            new StableIdGenerator().Create(new EntityKey("repository", ".")),
             []);
 
         public Task<IngestionRunResult> RunAsync(IngestionRunRequest request, CancellationToken cancellationToken)
         {
             LastRequest = request;
             return Task.FromResult(NextResult);
+        }
+    }
+
+    private sealed class CapturingPublisher : IIngestionArtifactPublisher
+    {
+        public IngestionArtifactPublishRequest? LastRequest { get; private set; }
+
+        public Task<IngestionArtifactPublishResult> PublishAsync(IngestionArtifactPublishRequest request, CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+            return Task.FromResult(new IngestionArtifactPublishResult(
+                Succeeded: true,
+                LatestPromoted: false,
+                RunId: "run",
+                RunDirectory: "run",
+                ManifestPath: "manifest",
+                WikiDirectory: null,
+                GraphMlPath: null,
+                FailureReason: null));
         }
     }
 }

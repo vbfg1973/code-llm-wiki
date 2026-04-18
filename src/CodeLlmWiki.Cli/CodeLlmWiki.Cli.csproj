@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CodeLlmWiki.Ingestion\CodeLlmWiki.Ingestion.csproj" />
+    <ProjectReference Include="..\CodeLlmWiki.Query\CodeLlmWiki.Query.csproj" />
+    <ProjectReference Include="..\CodeLlmWiki.Wiki\CodeLlmWiki.Wiki.csproj" />
   </ItemGroup>
 
   <ItemGroup>
