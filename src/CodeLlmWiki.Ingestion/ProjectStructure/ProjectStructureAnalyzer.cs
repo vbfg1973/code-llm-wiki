@@ -6,6 +6,7 @@ using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Query.ProjectStructure;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Operations;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.Build.Construction;
@@ -353,6 +354,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         var pendingMethodReturnTypeLinks = new List<PendingMethodReturnTypeLink>();
         var pendingMethodExtendedTypeLinks = new List<PendingMethodExtendedTypeLink>();
         var pendingMethodParameterTypeLinks = new List<PendingMethodParameterTypeLink>();
+        var memberIdByDeclarationLocation = new Dictionary<MemberDeclarationLocationKey, EntityId>();
         var methodIdByDeclarationLocation = new Dictionary<MethodDeclarationLocationKey, EntityId>();
         var externalStubIdByReference = new Dictionary<string, EntityId>(StringComparer.Ordinal);
         var unresolvedReferenceIdByText = new Dictionary<string, EntityId>(StringComparer.Ordinal);
@@ -544,6 +546,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                              .ThenBy(x => x.Line)
                              .ThenBy(x => x.Column))
                 {
+                    memberIdByDeclarationLocation[new MemberDeclarationLocationKey(location.RelativeFilePath, location.Line, location.Column)] = memberId;
                     triples.Add(new SemanticTriple(
                         new EntityNode(memberId),
                         CorePredicates.DeclarationSourceLocation,
@@ -952,6 +955,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             sourceFiles,
             typeIdByQualifiedName,
             methodCandidatesByTypeId,
+            memberIdByDeclarationLocation,
             methodIdByDeclarationLocation,
             externalStubIdByReference,
             unresolvedCallTargetIdByText,
@@ -1091,6 +1095,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         IReadOnlyList<string> sourceFiles,
         IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
         IReadOnlyDictionary<EntityId, List<MethodRelationshipCandidate>> methodCandidatesByTypeId,
+        IReadOnlyDictionary<MemberDeclarationLocationKey, EntityId> memberIdByDeclarationLocation,
         IReadOnlyDictionary<MethodDeclarationLocationKey, EntityId> methodIdByDeclarationLocation,
         Dictionary<string, EntityId> externalStubIdByReference,
         Dictionary<string, EntityId> unresolvedCallTargetIdByText,
@@ -1160,6 +1165,13 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     unresolvedCallTargetIdByText,
                     triples,
                     diagnostics);
+
+                AddMemberReadWriteEdges(
+                    methodDeclaration,
+                    sourceMethodId,
+                    semanticModel,
+                    memberIdByDeclarationLocation,
+                    triples);
             }
 
             foreach (var constructorDeclaration in root.DescendantNodes().OfType<ConstructorDeclarationSyntax>())
@@ -1185,6 +1197,13 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     unresolvedCallTargetIdByText,
                     triples,
                     diagnostics);
+
+                AddMemberReadWriteEdges(
+                    constructorDeclaration,
+                    sourceMethodId,
+                    semanticModel,
+                    memberIdByDeclarationLocation,
+                    triples);
             }
         }
     }
@@ -1310,6 +1329,214 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 CorePredicates.Calls,
                 new EntityNode(externalTypeId)));
         }
+    }
+
+    private static void AddMemberReadWriteEdges(
+        MemberDeclarationSyntax declaration,
+        EntityId sourceMethodId,
+        SemanticModel semanticModel,
+        IReadOnlyDictionary<MemberDeclarationLocationKey, EntityId> memberIdByDeclarationLocation,
+        List<SemanticTriple> triples)
+    {
+        var operationRoot = GetOperationRootForBody(declaration, semanticModel);
+        if (operationRoot is null)
+        {
+            return;
+        }
+
+        var emitted = new HashSet<(PredicateId Predicate, EntityId TargetMember)>();
+
+        foreach (var operation in EnumerateOperations(operationRoot))
+        {
+            switch (operation)
+            {
+                case IPropertyReferenceOperation propertyReference:
+                    EmitMemberReadWriteTriples(
+                        propertyReference,
+                        propertyReference.Property,
+                        isField: false,
+                        sourceMethodId,
+                        memberIdByDeclarationLocation,
+                        emitted,
+                        triples);
+                    break;
+                case IFieldReferenceOperation fieldReference when !fieldReference.Field.IsImplicitlyDeclared:
+                    EmitMemberReadWriteTriples(
+                        fieldReference,
+                        fieldReference.Field,
+                        isField: true,
+                        sourceMethodId,
+                        memberIdByDeclarationLocation,
+                        emitted,
+                        triples);
+                    break;
+            }
+        }
+    }
+
+    private static void EmitMemberReadWriteTriples(
+        IOperation memberReference,
+        ISymbol symbol,
+        bool isField,
+        EntityId sourceMethodId,
+        IReadOnlyDictionary<MemberDeclarationLocationKey, EntityId> memberIdByDeclarationLocation,
+        HashSet<(PredicateId Predicate, EntityId TargetMember)> emitted,
+        List<SemanticTriple> triples)
+    {
+        var targetMemberId = ResolveInternalMemberId(symbol, memberIdByDeclarationLocation);
+        if (targetMemberId is null)
+        {
+            return;
+        }
+
+        var (isRead, isWrite) = DetermineReferenceAccess(memberReference);
+
+        if (isRead)
+        {
+            var predicate = isField ? CorePredicates.ReadsField : CorePredicates.ReadsProperty;
+            if (emitted.Add((predicate, targetMemberId.Value)))
+            {
+                triples.Add(new SemanticTriple(
+                    new EntityNode(sourceMethodId),
+                    predicate,
+                    new EntityNode(targetMemberId.Value)));
+            }
+        }
+
+        if (isWrite)
+        {
+            var predicate = isField ? CorePredicates.WritesField : CorePredicates.WritesProperty;
+            if (emitted.Add((predicate, targetMemberId.Value)))
+            {
+                triples.Add(new SemanticTriple(
+                    new EntityNode(sourceMethodId),
+                    predicate,
+                    new EntityNode(targetMemberId.Value)));
+            }
+        }
+    }
+
+    private static IOperation? GetOperationRootForBody(
+        MemberDeclarationSyntax declaration,
+        SemanticModel semanticModel)
+    {
+        return declaration switch
+        {
+            MethodDeclarationSyntax method when method.Body is not null => semanticModel.GetOperation(method.Body),
+            MethodDeclarationSyntax method when method.ExpressionBody is not null => semanticModel.GetOperation(method.ExpressionBody.Expression),
+            ConstructorDeclarationSyntax ctor when ctor.Body is not null => semanticModel.GetOperation(ctor.Body),
+            ConstructorDeclarationSyntax ctor when ctor.ExpressionBody is not null => semanticModel.GetOperation(ctor.ExpressionBody.Expression),
+            _ => null,
+        };
+    }
+
+    private static IEnumerable<IOperation> EnumerateOperations(IOperation root)
+    {
+        var stack = new Stack<IOperation>();
+        stack.Push(root);
+
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            yield return current;
+
+            foreach (var child in current.ChildOperations.Reverse())
+            {
+                stack.Push(child);
+            }
+        }
+    }
+
+    private static (bool IsRead, bool IsWrite) DetermineReferenceAccess(IOperation memberReference)
+    {
+        var current = memberReference;
+        var parent = memberReference.Parent;
+
+        while (parent is IConversionOperation or IParenthesizedOperation)
+        {
+            current = parent;
+            parent = parent.Parent;
+        }
+
+        if (parent is INameOfOperation)
+        {
+            return (false, false);
+        }
+
+        if (parent is ISimpleAssignmentOperation simpleAssignment && IsTargetOperation(simpleAssignment.Target, current))
+        {
+            return (false, true);
+        }
+
+        if (parent is ICompoundAssignmentOperation compoundAssignment && IsTargetOperation(compoundAssignment.Target, current))
+        {
+            return (true, true);
+        }
+
+        if (parent is IIncrementOrDecrementOperation incrementOrDecrement && IsTargetOperation(incrementOrDecrement.Target, current))
+        {
+            return (true, true);
+        }
+
+        if (parent is IArgumentOperation argument && IsTargetOperation(argument.Value, current))
+        {
+            return argument.Parameter?.RefKind switch
+            {
+                RefKind.Out => (false, true),
+                RefKind.Ref => (true, true),
+                _ => (true, false),
+            };
+        }
+
+        return (true, false);
+    }
+
+    private static bool IsTargetOperation(IOperation target, IOperation candidate)
+    {
+        var unwrappedTarget = UnwrapNonSemanticOperation(target);
+        var unwrappedCandidate = UnwrapNonSemanticOperation(candidate);
+
+        return ReferenceEquals(unwrappedTarget, unwrappedCandidate)
+               || (
+                   ReferenceEquals(unwrappedTarget.Syntax.SyntaxTree, unwrappedCandidate.Syntax.SyntaxTree)
+                   && unwrappedTarget.Syntax.Span.Equals(unwrappedCandidate.Syntax.Span));
+    }
+
+    private static IOperation UnwrapNonSemanticOperation(IOperation operation)
+    {
+        var current = operation;
+        while (current is IConversionOperation or IParenthesizedOperation)
+        {
+            var previous = current;
+            current = current.ChildOperations.FirstOrDefault() ?? current;
+            if (ReferenceEquals(current, previous))
+            {
+                break;
+            }
+        }
+
+        return current;
+    }
+
+    private static EntityId? ResolveInternalMemberId(
+        ISymbol symbol,
+        IReadOnlyDictionary<MemberDeclarationLocationKey, EntityId> memberIdByDeclarationLocation)
+    {
+        foreach (var location in symbol.Locations.Where(static x => x.IsInSource))
+        {
+            var lineSpan = location.GetLineSpan();
+            var key = new MemberDeclarationLocationKey(
+                location.SourceTree?.FilePath ?? string.Empty,
+                lineSpan.StartLinePosition.Line + 1,
+                lineSpan.StartLinePosition.Character + 1);
+
+            if (memberIdByDeclarationLocation.TryGetValue(key, out var memberId))
+            {
+                return memberId;
+            }
+        }
+
+        return null;
     }
 
     private static IReadOnlyList<MetadataReference> BuildCompilationReferences(List<IngestionDiagnostic> diagnostics)
@@ -1807,6 +2034,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         string DeclaredTypeName,
         IReadOnlyList<string> ImportedNamespaces,
         IReadOnlyDictionary<string, string> ImportedAliases);
+
+    private sealed record MemberDeclarationLocationKey(string RelativeFilePath, int Line, int Column);
 
     private sealed record MethodDeclarationLocationKey(string RelativeFilePath, int Line, int Column);
 
