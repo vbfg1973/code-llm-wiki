@@ -81,6 +81,7 @@ public sealed class PackageDependencyVerticalSliceTests
         Assert.Contains("core:referencesPackage", predicateIds);
         Assert.Contains("core:hasDeclaredVersion", predicateIds);
         Assert.Contains("core:hasResolvedVersion", predicateIds);
+        Assert.Contains("core:targetFramework", predicateIds);
     }
 
     private sealed class PackageDependencyFixture

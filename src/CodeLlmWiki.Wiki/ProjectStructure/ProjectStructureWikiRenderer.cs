@@ -44,9 +44,9 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             RenderRepositoryPage(model, resolver),
         };
 
-        pages.AddRange(orderedSolutions.Select(solution => RenderSolutionPage(solution, projectById, resolver)));
-        pages.AddRange(orderedProjects.Select(project => RenderProjectPage(project, packageById, resolver)));
-        pages.AddRange(orderedPackages.Select(package => RenderPackagePage(package, resolver)));
+        pages.AddRange(orderedSolutions.Select(solution => RenderSolutionPage(model.Repository.Id.Value, solution, projectById, resolver)));
+        pages.AddRange(orderedProjects.Select(project => RenderProjectPage(model.Repository.Id.Value, project, packageById, resolver)));
+        pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, resolver)));
         pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, resolver)));
 
         pages.Add(RenderIndexPage(model, resolver, indexPath));
@@ -89,10 +89,21 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         return new WikiPage(
             RelativePath: resolver.GetPath(model.Repository.Id),
             Title: model.Repository.Name,
-            Markdown: WithFrontMatter(model.Repository.Id.Value, "repository", model.Repository.Id.Value, sb.ToString().TrimEnd()));
+            Markdown: WithFrontMatter(
+                [
+                    KeyValue("entity_id", model.Repository.Id.Value),
+                    KeyValue("entity_type", "repository"),
+                    KeyValue("repository_id", model.Repository.Id.Value),
+                    KeyValue("repository_name", model.Repository.Name),
+                    KeyValue("repository_path", model.Repository.Path),
+                    KeyValue("head_branch", model.Repository.HeadBranch),
+                    KeyValue("mainline_branch", model.Repository.MainlineBranch),
+                ],
+                sb.ToString().TrimEnd()));
     }
 
     private static WikiPage RenderSolutionPage(
+        string repositoryId,
         SolutionNode solution,
         IReadOnlyDictionary<EntityId, ProjectNode> projectById,
         WikiPathResolver resolver)
@@ -116,10 +127,19 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         return new WikiPage(
             RelativePath: resolver.GetPath(solution.Id),
             Title: solution.Name,
-            Markdown: WithFrontMatter(solution.Id.Value, "solution", string.Empty, sb.ToString().TrimEnd()));
+            Markdown: WithFrontMatter(
+                [
+                    KeyValue("entity_id", solution.Id.Value),
+                    KeyValue("entity_type", "solution"),
+                    KeyValue("repository_id", repositoryId),
+                    KeyValue("solution_name", solution.Name),
+                    KeyValue("solution_path", solution.Path),
+                ],
+                sb.ToString().TrimEnd()));
     }
 
     private static WikiPage RenderProjectPage(
+        string repositoryId,
         ProjectNode project,
         IReadOnlyDictionary<EntityId, PackageNode> packageById,
         WikiPathResolver resolver)
@@ -129,6 +149,12 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine();
         sb.AppendLine($"- Path: `{project.Path}`");
         sb.AppendLine($"- Discovery: `{project.DiscoveryMethod}`");
+
+        if (project.TargetFrameworks.Count > 0)
+        {
+            sb.AppendLine($"- Target Frameworks: `{string.Join(", ", project.TargetFrameworks)}`");
+        }
+
         sb.AppendLine();
         sb.AppendLine("## Packages");
 
@@ -145,10 +171,23 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         return new WikiPage(
             RelativePath: resolver.GetPath(project.Id),
             Title: project.Name,
-            Markdown: WithFrontMatter(project.Id.Value, "project", string.Empty, sb.ToString().TrimEnd()));
+            Markdown: WithFrontMatter(
+                [
+                    KeyValue("entity_id", project.Id.Value),
+                    KeyValue("entity_type", "project"),
+                    KeyValue("repository_id", repositoryId),
+                    KeyValue("project_name", project.Name),
+                    KeyValue("project_path", project.Path),
+                    KeyValue("target_frameworks", ToInlineList(project.TargetFrameworks)),
+                    KeyValue("discovery_method", project.DiscoveryMethod),
+                ],
+                sb.ToString().TrimEnd()));
     }
 
-    private static WikiPage RenderPackagePage(PackageNode package, WikiPathResolver resolver)
+    private static WikiPage RenderPackagePage(
+        string repositoryId,
+        PackageNode package,
+        WikiPathResolver resolver)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# Package: {package.Name}");
@@ -170,7 +209,15 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         return new WikiPage(
             RelativePath: resolver.GetPath(package.Id),
             Title: package.Name,
-            Markdown: WithFrontMatter(package.Id.Value, "package", string.Empty, sb.ToString().TrimEnd()));
+            Markdown: WithFrontMatter(
+                [
+                    KeyValue("entity_id", package.Id.Value),
+                    KeyValue("entity_type", "package"),
+                    KeyValue("repository_id", repositoryId),
+                    KeyValue("package_id", package.Name),
+                    KeyValue("package_key", package.Name.ToLowerInvariant()),
+                ],
+                sb.ToString().TrimEnd()));
     }
 
     private static WikiPage RenderFilePage(
@@ -212,7 +259,15 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         return new WikiPage(
             RelativePath: resolver.GetPath(file.Id),
             Title: file.Name,
-            Markdown: WithFrontMatter(file.Id.Value, "file", repository.Id.Value, sb.ToString().TrimEnd()));
+            Markdown: WithFrontMatter(
+                [
+                    KeyValue("entity_id", file.Id.Value),
+                    KeyValue("entity_type", "file"),
+                    KeyValue("repository_id", repository.Id.Value),
+                    KeyValue("file_name", file.Name),
+                    KeyValue("file_path", file.Path),
+                ],
+                sb.ToString().TrimEnd()));
     }
 
     private static WikiPage RenderIndexPage(
@@ -264,7 +319,13 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         return new WikiPage(
             RelativePath: indexPath,
             Title: "Repository Index",
-            Markdown: sb.ToString().TrimEnd());
+            Markdown: WithFrontMatter(
+                [
+                    KeyValue("entity_id", $"index:{model.Repository.Id.Value}"),
+                    KeyValue("entity_type", "index"),
+                    KeyValue("repository_id", model.Repository.Id.Value),
+                ],
+                sb.ToString().TrimEnd()));
     }
 
     private static void AppendTable(StringBuilder sb, string title, IReadOnlyList<IndexRow> rows)
@@ -291,16 +352,25 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         return $"[[{target}|{alias}]]";
     }
 
-    private static string WithFrontMatter(string entityId, string entityType, string repositoryId, string body)
+    private static KeyValuePair<string, string> KeyValue(string key, string value) => new(key, value);
+
+    private static string ToInlineList(IReadOnlyList<string> values)
+    {
+        if (values.Count == 0)
+        {
+            return "[]";
+        }
+
+        return $"[{string.Join(", ", values)}]";
+    }
+
+    private static string WithFrontMatter(IReadOnlyList<KeyValuePair<string, string>> values, string body)
     {
         var sb = new StringBuilder();
         sb.AppendLine("---");
-        sb.AppendLine($"entity_id: {entityId}");
-        sb.AppendLine($"entity_type: {entityType}");
-
-        if (!string.IsNullOrWhiteSpace(repositoryId))
+        foreach (var pair in values)
         {
-            sb.AppendLine($"repository_id: {repositoryId}");
+            sb.AppendLine($"{pair.Key}: {pair.Value}");
         }
 
         sb.AppendLine("---");

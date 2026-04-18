@@ -93,6 +93,26 @@ public sealed class FileInventoryVerticalSliceTests
         Assert.Contains("[[projects/", indexPage.Markdown, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Render_EmitsRepositoryIdInFrontMatterForAllPages()
+    {
+        var fixture = await FileInventoryFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var query = new ProjectStructureQueryService(analysis.Triples);
+        var model = query.GetModel(analysis.RepositoryId);
+
+        var renderer = new ProjectStructureWikiRenderer();
+        var pages = renderer.Render(model);
+
+        Assert.All(
+            pages,
+            page => Assert.Contains(
+                $"repository_id: {analysis.RepositoryId.Value}",
+                page.Markdown,
+                StringComparison.Ordinal));
+    }
+
     private sealed class FileInventoryFixture
     {
         private FileInventoryFixture(string repositoryPath)
