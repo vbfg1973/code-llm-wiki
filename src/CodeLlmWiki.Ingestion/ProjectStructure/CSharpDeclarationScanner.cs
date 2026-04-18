@@ -6,6 +6,8 @@ namespace CodeLlmWiki.Ingestion.ProjectStructure;
 
 internal static class CSharpDeclarationScanner
 {
+    private const string GlobalNamespaceName = "<global>";
+
     public static NamespaceDiscoveryResult Discover(
         string repositoryRoot,
         IReadOnlyList<string> relativeSourcePaths,
@@ -82,31 +84,57 @@ internal static class CSharpDeclarationScanner
                 continue;
             }
 
-            if (string.IsNullOrWhiteSpace(currentNamespace))
-            {
-                continue;
-            }
-
             switch (member)
             {
                 case ClassDeclarationSyntax classDeclaration:
-                    discoveredTypes.Add(new TypeDiscoveryNode(currentNamespace, classDeclaration.Identifier.Text, "class", relativePath));
+                    discoveredTypes.Add(new TypeDiscoveryNode(
+                        ResolveNamespace(currentNamespace),
+                        classDeclaration.Identifier.Text,
+                        "class",
+                        relativePath));
                     break;
                 case InterfaceDeclarationSyntax interfaceDeclaration:
-                    discoveredTypes.Add(new TypeDiscoveryNode(currentNamespace, interfaceDeclaration.Identifier.Text, "interface", relativePath));
+                    discoveredTypes.Add(new TypeDiscoveryNode(
+                        ResolveNamespace(currentNamespace),
+                        interfaceDeclaration.Identifier.Text,
+                        "interface",
+                        relativePath));
                     break;
                 case StructDeclarationSyntax structDeclaration:
-                    discoveredTypes.Add(new TypeDiscoveryNode(currentNamespace, structDeclaration.Identifier.Text, "struct", relativePath));
+                    discoveredTypes.Add(new TypeDiscoveryNode(
+                        ResolveNamespace(currentNamespace),
+                        structDeclaration.Identifier.Text,
+                        "struct",
+                        relativePath));
                     break;
                 case EnumDeclarationSyntax enumDeclaration:
-                    discoveredTypes.Add(new TypeDiscoveryNode(currentNamespace, enumDeclaration.Identifier.Text, "enum", relativePath));
+                    discoveredTypes.Add(new TypeDiscoveryNode(
+                        ResolveNamespace(currentNamespace),
+                        enumDeclaration.Identifier.Text,
+                        "enum",
+                        relativePath));
                     break;
                 case RecordDeclarationSyntax recordDeclaration:
-                    discoveredTypes.Add(new TypeDiscoveryNode(currentNamespace, recordDeclaration.Identifier.Text, "record", relativePath));
+                    discoveredTypes.Add(new TypeDiscoveryNode(
+                        ResolveNamespace(currentNamespace),
+                        recordDeclaration.Identifier.Text,
+                        "record",
+                        relativePath));
                     break;
                 case DelegateDeclarationSyntax delegateDeclaration:
-                    discoveredTypes.Add(new TypeDiscoveryNode(currentNamespace, delegateDeclaration.Identifier.Text, "delegate", relativePath));
+                    discoveredTypes.Add(new TypeDiscoveryNode(
+                        ResolveNamespace(currentNamespace),
+                        delegateDeclaration.Identifier.Text,
+                        "delegate",
+                        relativePath));
                     break;
+                default:
+                    continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(currentNamespace))
+            {
+                RegisterDeclarationFile(declaredNamespaceFiles, GlobalNamespaceName, relativePath);
             }
         }
     }
@@ -157,5 +185,12 @@ internal static class CSharpDeclarationScanner
         return declaredName.StartsWith(currentNamespace + ".", StringComparison.Ordinal)
             ? declaredName
             : $"{currentNamespace}.{declaredName}";
+    }
+
+    private static string ResolveNamespace(string? currentNamespace)
+    {
+        return string.IsNullOrWhiteSpace(currentNamespace)
+            ? GlobalNamespaceName
+            : currentNamespace;
     }
 }
