@@ -49,6 +49,31 @@ public sealed class PackageDependencyVerticalSliceTests
     }
 
     [Fact]
+    public async Task AnalyzeAsync_PackageMembershipIncludesPerProjectVersionContext()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+
+        var query = new ProjectStructureQueryService(analysis.Triples);
+        var model = query.GetModel(analysis.RepositoryId);
+
+        var package = model.Packages.Single(x => x.Name == "Newtonsoft.Json");
+        Assert.Equal("newtonsoft.json", package.CanonicalKey);
+        Assert.Equal(2, package.ProjectMemberships.Count);
+
+        var noAssets = package.ProjectMemberships.Single(x => x.ProjectName == "NoAssets");
+        Assert.Equal("src/NoAssets/NoAssets.csproj", noAssets.ProjectPath);
+        Assert.Equal("12.0.1", noAssets.DeclaredVersion);
+        Assert.Null(noAssets.ResolvedVersion);
+
+        var withAssets = package.ProjectMemberships.Single(x => x.ProjectName == "WithAssets");
+        Assert.Equal("src/WithAssets/WithAssets.csproj", withAssets.ProjectPath);
+        Assert.Equal("13.0.3", withAssets.DeclaredVersion);
+        Assert.Equal("13.0.3", withAssets.ResolvedVersion);
+    }
+
+    [Fact]
     public async Task Render_GeneratesPackagePagesAndProjectLinks()
     {
         var fixture = await PackageDependencyFixture.CreateAsync();
@@ -65,6 +90,17 @@ public sealed class PackageDependencyVerticalSliceTests
         Assert.Equal(2, pages.Count(x => x.RelativePath.StartsWith("packages/", StringComparison.Ordinal)));
         Assert.Contains(pages, page => page.RelativePath.StartsWith("projects/", StringComparison.Ordinal) && page.Markdown.Contains("[[packages/", StringComparison.Ordinal));
         Assert.Contains(pages, page => page.RelativePath == "index/repository-index.md");
+
+        var packagePage = pages.Single(page => page.RelativePath.StartsWith("packages/", StringComparison.Ordinal)
+            && page.Markdown.Contains("# Package: Newtonsoft.Json", StringComparison.Ordinal));
+
+        Assert.Contains("| project | project_path | declared_version | resolved_version |", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("|NoAssets]] | `src/NoAssets/NoAssets.csproj` | `12.0.1` | `-` |", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("|WithAssets]] | `src/WithAssets/WithAssets.csproj` | `13.0.3` | `13.0.3` |", packagePage.Markdown, StringComparison.Ordinal);
+
+        var noAssetsIndex = packagePage.Markdown.IndexOf("NoAssets", StringComparison.Ordinal);
+        var withAssetsIndex = packagePage.Markdown.IndexOf("WithAssets", StringComparison.Ordinal);
+        Assert.True(noAssetsIndex >= 0 && withAssetsIndex >= 0 && noAssetsIndex < withAssetsIndex);
     }
 
     [Fact]
@@ -79,6 +115,7 @@ public sealed class PackageDependencyVerticalSliceTests
 
         var predicateIds = result.Definition!.Predicates.Select(x => x.Id).ToHashSet(StringComparer.Ordinal);
         Assert.Contains("core:referencesPackage", predicateIds);
+        Assert.Contains("core:hasPackageReference", predicateIds);
         Assert.Contains("core:hasDeclaredVersion", predicateIds);
         Assert.Contains("core:hasResolvedVersion", predicateIds);
         Assert.Contains("core:targetFramework", predicateIds);
@@ -142,6 +179,7 @@ public sealed class PackageDependencyVerticalSliceTests
                                      <TargetFramework>net10.0</TargetFramework>
                                    </PropertyGroup>
                                    <ItemGroup>
+                                     <PackageReference Include="Newtonsoft.Json" Version="12.0.1" />
                                      <PackageReference Include="Serilog" Version="3.1.0" />
                                    </ItemGroup>
                                  </Project>

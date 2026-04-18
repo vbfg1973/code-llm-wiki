@@ -114,17 +114,30 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
             foreach (var package in discovery.DeclaredPackages.OrderBy(x => x.PackageId, StringComparer.OrdinalIgnoreCase))
             {
-                var packageId = _stableIdGenerator.Create(new EntityKey("package", package.PackageId.ToLowerInvariant()));
+                var packageKey = package.PackageId.ToLowerInvariant();
+                var packageId = _stableIdGenerator.Create(new EntityKey("package", packageKey));
                 AddEntityTriples(triples, packageId, "package", package.PackageId, package.PackageId);
                 triples.Add(new SemanticTriple(new EntityNode(projectId), CorePredicates.ReferencesPackage, new EntityNode(packageId)));
 
+                var packageReferenceId = _stableIdGenerator.Create(new EntityKey("package-reference", $"{relativeProjectPath}:{packageKey}"));
+                AddEntityTriples(
+                    triples,
+                    packageReferenceId,
+                    "package-reference",
+                    package.PackageId,
+                    $"{relativeProjectPath}::{package.PackageId}");
+                triples.Add(new SemanticTriple(new EntityNode(projectId), CorePredicates.HasPackageReference, new EntityNode(packageReferenceId)));
+                triples.Add(new SemanticTriple(new EntityNode(packageReferenceId), CorePredicates.ReferencesPackage, new EntityNode(packageId)));
+
                 if (!string.IsNullOrWhiteSpace(package.DeclaredVersion))
                 {
+                    triples.Add(new SemanticTriple(new EntityNode(packageReferenceId), CorePredicates.HasDeclaredVersion, new LiteralNode(package.DeclaredVersion)));
                     triples.Add(new SemanticTriple(new EntityNode(packageId), CorePredicates.HasDeclaredVersion, new LiteralNode(package.DeclaredVersion)));
                 }
 
                 if (resolvedByPackage.TryGetValue(package.PackageId, out var resolvedVersion) && !string.IsNullOrWhiteSpace(resolvedVersion))
                 {
+                    triples.Add(new SemanticTriple(new EntityNode(packageReferenceId), CorePredicates.HasResolvedVersion, new LiteralNode(resolvedVersion)));
                     triples.Add(new SemanticTriple(new EntityNode(packageId), CorePredicates.HasResolvedVersion, new LiteralNode(resolvedVersion)));
                 }
             }

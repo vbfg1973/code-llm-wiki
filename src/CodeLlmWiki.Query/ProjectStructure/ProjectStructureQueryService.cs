@@ -16,7 +16,10 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
     {
         var metadataById = BuildEntityMetadata(_triples);
         var contains = BuildContainsEdges(_triples);
-        var packageReferences = BuildPackageReferences(_triples);
+        var packageReferences = BuildPackageReferences(_triples, metadataById);
+        var projectPackageReferences = BuildProjectPackageReferences(_triples, metadataById);
+        var packageReferenceTargets = BuildPackageReferenceTargets(_triples, metadataById);
+        var packageReferenceVersions = BuildPackageReferenceVersions(_triples, metadataById);
         var versionsByPackage = BuildPackageVersions(_triples);
         var fileHistoryEdges = BuildFileHistoryEdges(_triples);
         var submoduleEdges = BuildSubmoduleEdges(_triples);
@@ -96,11 +99,32 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 versionsByPackage.TryGetValue(packageId, out var versions);
                 versions ??= new PackageVersionMetadata([], []);
 
+                var projectMemberships = projectPackageReferences
+                    .Where(x => packageReferenceTargets.TryGetValue(x.PackageReferenceId, out var targetPackageId) && targetPackageId == packageId)
+                    .Select(x =>
+                    {
+                        var projectMeta = metadataById[x.ProjectId];
+                        packageReferenceVersions.TryGetValue(x.PackageReferenceId, out var versionMeta);
+
+                        return new PackageProjectMembershipNode(
+                            x.ProjectId,
+                            projectMeta.Name,
+                            projectMeta.Path,
+                            versionMeta?.DeclaredVersion,
+                            versionMeta?.ResolvedVersion);
+                    })
+                    .OrderBy(x => x.ProjectPath, StringComparer.Ordinal)
+                    .ThenBy(x => x.ProjectName, StringComparer.Ordinal)
+                    .ThenBy(x => x.ProjectId.Value, StringComparer.Ordinal)
+                    .ToArray();
+
                 return new PackageNode(
                     packageId,
                     meta.Name,
+                    meta.Name.ToLowerInvariant(),
                     versions.DeclaredVersions.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
-                    versions.ResolvedVersions.OrderBy(x => x, StringComparer.Ordinal).ToArray());
+                    versions.ResolvedVersions.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
+                    projectMemberships);
             })
             .ToArray();
 
@@ -317,14 +341,100 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             .ToArray();
     }
 
-    private static IReadOnlyList<PackageReferenceEdge> BuildPackageReferences(IReadOnlyList<SemanticTriple> triples)
+    private static IReadOnlyList<PackageReferenceEdge> BuildPackageReferences(
+        IReadOnlyList<SemanticTriple> triples,
+        IReadOnlyDictionary<EntityId, EntityMetadata> metadataById)
     {
         return triples
             .Where(x => x.Predicate == CorePredicates.ReferencesPackage)
             .Where(x => x.Subject is EntityNode && x.Object is EntityNode)
             .Select(x => new PackageReferenceEdge(((EntityNode)x.Subject).Id, ((EntityNode)x.Object).Id))
+            .Where(x => metadataById.TryGetValue(x.ProjectId, out var subjectMeta) && subjectMeta.IsType("project"))
             .Distinct()
             .ToArray();
+    }
+
+    private static IReadOnlyList<ProjectPackageReferenceEdge> BuildProjectPackageReferences(
+        IReadOnlyList<SemanticTriple> triples,
+        IReadOnlyDictionary<EntityId, EntityMetadata> metadataById)
+    {
+        return triples
+            .Where(x => x.Predicate == CorePredicates.HasPackageReference)
+            .Where(x => x.Subject is EntityNode && x.Object is EntityNode)
+            .Select(x => new ProjectPackageReferenceEdge(((EntityNode)x.Subject).Id, ((EntityNode)x.Object).Id))
+            .Where(x =>
+                metadataById.TryGetValue(x.ProjectId, out var projectMeta)
+                && projectMeta.IsType("project")
+                && metadataById.TryGetValue(x.PackageReferenceId, out var packageReferenceMeta)
+                && packageReferenceMeta.IsType("package-reference"))
+            .Distinct()
+            .ToArray();
+    }
+
+    private static Dictionary<EntityId, EntityId> BuildPackageReferenceTargets(
+        IReadOnlyList<SemanticTriple> triples,
+        IReadOnlyDictionary<EntityId, EntityMetadata> metadataById)
+    {
+        return triples
+            .Where(x => x.Predicate == CorePredicates.ReferencesPackage)
+            .Where(x => x.Subject is EntityNode && x.Object is EntityNode)
+            .Select(x => new PackageReferenceTargetEdge(((EntityNode)x.Subject).Id, ((EntityNode)x.Object).Id))
+            .Where(x =>
+                metadataById.TryGetValue(x.PackageReferenceId, out var subjectMeta)
+                && subjectMeta.IsType("package-reference")
+                && metadataById.TryGetValue(x.PackageId, out var packageMeta)
+                && packageMeta.IsType("package"))
+            .GroupBy(x => x.PackageReferenceId)
+            .ToDictionary(x => x.Key, x => x.First().PackageId);
+    }
+
+    private static Dictionary<EntityId, PackageReferenceVersionMetadata> BuildPackageReferenceVersions(
+        IReadOnlyList<SemanticTriple> triples,
+        IReadOnlyDictionary<EntityId, EntityMetadata> metadataById)
+    {
+        var byReferenceId = new Dictionary<EntityId, PackageReferenceVersionMetadata>();
+
+        foreach (var triple in triples)
+        {
+            if (triple.Subject is not EntityNode subject || triple.Object is not LiteralNode literal)
+            {
+                continue;
+            }
+
+            if (!metadataById.TryGetValue(subject.Id, out var subjectMeta) || !subjectMeta.IsType("package-reference"))
+            {
+                continue;
+            }
+
+            if (triple.Predicate != CorePredicates.HasDeclaredVersion &&
+                triple.Predicate != CorePredicates.HasResolvedVersion)
+            {
+                continue;
+            }
+
+            if (!byReferenceId.TryGetValue(subject.Id, out var version))
+            {
+                version = new PackageReferenceVersionMetadata(null, null);
+                byReferenceId[subject.Id] = version;
+            }
+
+            var value = literal.Value?.ToString();
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            if (triple.Predicate == CorePredicates.HasDeclaredVersion)
+            {
+                version.DeclaredVersion ??= value;
+            }
+            else
+            {
+                version.ResolvedVersion ??= value;
+            }
+        }
+
+        return byReferenceId;
     }
 
     private static Dictionary<EntityId, PackageVersionMetadata> BuildPackageVersions(IReadOnlyList<SemanticTriple> triples)
@@ -475,10 +585,25 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
 
     private sealed record ContainsEdge(EntityId Subject, EntityId Object);
     private sealed record PackageReferenceEdge(EntityId ProjectId, EntityId PackageId);
+    private sealed record ProjectPackageReferenceEdge(EntityId ProjectId, EntityId PackageReferenceId);
+    private sealed record PackageReferenceTargetEdge(EntityId PackageReferenceId, EntityId PackageId);
     private sealed record FileHistoryEdge(EntityId FileId, EntityId EventId);
     private sealed record SubmoduleEdge(EntityId RepositoryId, EntityId SubmoduleId);
 
     private sealed record PackageVersionMetadata(
         HashSet<string> DeclaredVersions,
         HashSet<string> ResolvedVersions);
+
+    private sealed class PackageReferenceVersionMetadata
+    {
+        public PackageReferenceVersionMetadata(string? declaredVersion, string? resolvedVersion)
+        {
+            DeclaredVersion = declaredVersion;
+            ResolvedVersion = resolvedVersion;
+        }
+
+        public string? DeclaredVersion { get; set; }
+
+        public string? ResolvedVersion { get; set; }
+    }
 }

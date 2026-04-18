@@ -206,6 +206,19 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             sb.AppendLine($"- `{resolved}`");
         }
 
+        sb.AppendLine();
+        sb.AppendLine("## Project Membership");
+        sb.AppendLine("| project | project_path | declared_version | resolved_version |");
+        sb.AppendLine("| --- | --- | --- | --- |");
+
+        foreach (var membership in package.ProjectMemberships)
+        {
+            var declaredVersion = string.IsNullOrWhiteSpace(membership.DeclaredVersion) ? "-" : membership.DeclaredVersion;
+            var resolvedVersion = string.IsNullOrWhiteSpace(membership.ResolvedVersion) ? "-" : membership.ResolvedVersion;
+            sb.AppendLine(
+                $"| {resolver.ToWikiLink(membership.ProjectId, membership.ProjectName)} | `{membership.ProjectPath}` | `{declaredVersion}` | `{resolvedVersion}` |");
+        }
+
         return new WikiPage(
             RelativePath: resolver.GetPath(package.Id),
             Title: package.Name,
@@ -215,7 +228,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     KeyValue("entity_type", "package"),
                     KeyValue("repository_id", repositoryId),
                     KeyValue("package_id", package.Name),
-                    KeyValue("package_key", package.Name.ToLowerInvariant()),
+                    KeyValue("package_key", package.CanonicalKey),
                 ],
                 sb.ToString().TrimEnd()));
     }
