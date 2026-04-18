@@ -25,6 +25,8 @@ public sealed class GitHistoryVerticalSliceTests
         Assert.Equal(5, file.EditCount);
         Assert.Equal(fixture.PostMergeTouchCommit, file.LastChange?.CommitSha);
         Assert.Equal("Alice", file.LastChange?.AuthorName);
+        Assert.NotNull(file.LastChange);
+        Assert.EndsWith("Z", file.LastChange!.TimestampUtc, StringComparison.Ordinal);
 
         var historyShas = file.History.Select(x => x.CommitSha).ToHashSet(StringComparer.Ordinal);
         Assert.Contains(fixture.InitialCommit, historyShas);
@@ -48,6 +50,7 @@ public sealed class GitHistoryVerticalSliceTests
         Assert.Equal(fixture.MergeCommit, merge.MergeCommitSha);
         Assert.Equal("main", merge.TargetBranch);
         Assert.Equal(2, merge.SourceBranchFileCommitCount);
+        Assert.EndsWith("Z", merge.TimestampUtc, StringComparison.Ordinal);
 
         var renderer = new ProjectStructureWikiRenderer();
         var pages = renderer.Render(model);

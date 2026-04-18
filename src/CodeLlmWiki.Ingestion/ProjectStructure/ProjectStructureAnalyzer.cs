@@ -1,6 +1,7 @@
 using System.Xml.Linq;
 using System.Text.Json;
 using System.Diagnostics;
+using System.Globalization;
 using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
 using Microsoft.Build.Construction;
@@ -945,16 +946,32 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             return null;
         }
 
+        var normalizedTimestamp = NormalizeUtcTimestamp(parts[1]);
+
         var parents = parts[4]
             .Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .ToArray();
 
         return new GitHistoryCommit(
             parts[0],
-            parts[1],
+            normalizedTimestamp,
             parts[2],
             parts[3],
             parents);
+    }
+
+    private static string NormalizeUtcTimestamp(string rawTimestamp)
+    {
+        if (!DateTimeOffset.TryParse(
+                rawTimestamp,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var parsed))
+        {
+            return rawTimestamp;
+        }
+
+        return parsed.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
     }
 
     private static GitCommandResult RunGitWithNulDelimitedOutput(string repositoryRoot, params string[] args)

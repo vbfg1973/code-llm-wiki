@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using CodeLlmWiki.Cli.Features.Ingest;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Ingestion;
@@ -11,6 +12,11 @@ namespace CodeLlmWiki.Cli.Tests;
 
 public sealed class GoldenPublicationSnapshotTests
 {
+    private static readonly Regex SnakeCaseKeyPattern = new("^[a-z][a-z0-9_]*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex UtcIso8601Pattern = new(
+        "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,7})?Z$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     [Fact]
     public async Task PublicationSnapshot_MatchesGolden_ForWikiGraphMlAndManifest()
     {
@@ -79,6 +85,50 @@ public sealed class GoldenPublicationSnapshotTests
         }
     }
 
+    [Fact]
+    public void FrontMatterValidation_Fails_OnInvalidEntityType()
+    {
+        var markdown =
+            """
+            ---
+            entity_id: abc
+            entity_type: Project
+            repository_id: repo-1
+            project_name: App
+            project_path: src/App/App.csproj
+            target_frameworks: [net10.0]
+            discovery_method: msbuild
+            ---
+
+            # Project: App
+            """;
+
+        Assert.ThrowsAny<Exception>(() => ValidateFrontMatterDocument("projects/app.md", markdown));
+    }
+
+    [Fact]
+    public void FrontMatterValidation_Fails_OnNonUtcTimestamp()
+    {
+        var markdown =
+            """
+            ---
+            entity_id: file-1
+            entity_type: file
+            repository_id: repo-1
+            file_name: Program.cs
+            file_path: src/App/Program.cs
+            ---
+
+            # File: Program.cs
+
+            ## Merge To Mainline
+            - merge_commit: `abc123`
+              merged_at_utc: `2026-01-01T00:00:00+01:00`
+            """;
+
+        Assert.ThrowsAny<Exception>(() => ValidateFrontMatterDocument("files/src/App/Program.cs.md", markdown));
+    }
+
     private static PublicationSnapshot BuildSnapshot(string wikiRoot, string graphMlPath, string manifestPath)
     {
         var wikiHashes = Directory
@@ -103,55 +153,108 @@ public sealed class GoldenPublicationSnapshotTests
         {
             var relative = Path.GetRelativePath(wikiRoot, path).Replace('\\', '/');
             var content = File.ReadAllText(path);
-            Assert.StartsWith("---", content, StringComparison.Ordinal);
+            ValidateFrontMatterDocument(relative, content);
+        }
+    }
 
-            var lines = content.Split('\n');
-            var frontMatterEnd = -1;
-            for (var i = 1; i < lines.Length; i++)
+    private static void ValidateFrontMatterDocument(string relativePath, string content)
+    {
+        Assert.StartsWith("---", content, StringComparison.Ordinal);
+
+        var lines = content.Split('\n');
+        var frontMatterEnd = -1;
+        for (var i = 1; i < lines.Length; i++)
+        {
+            if (lines[i].Trim() == "---")
             {
-                if (lines[i].Trim() == "---")
-                {
-                    frontMatterEnd = i;
-                    break;
-                }
+                frontMatterEnd = i;
+                break;
+            }
+        }
+
+        Assert.True(frontMatterEnd > 1, $"Invalid front matter in {relativePath}");
+        var frontMatter = ParseFrontMatter(lines, frontMatterEnd, relativePath);
+
+        ValidateRequiredFields(frontMatter, "common", "entity_id", "entity_type", "repository_id");
+        Assert.True(
+            frontMatter["entity_type"] is "repository" or "solution" or "project" or "package" or "file" or "index",
+            $"Invalid entity_type '{frontMatter["entity_type"]}' in {relativePath}");
+
+        if (relativePath.StartsWith("repositories/", StringComparison.Ordinal))
+        {
+            ValidateRequiredFields(frontMatter, "repository", "repository_name", "repository_path", "head_branch", "mainline_branch");
+        }
+        else if (relativePath.StartsWith("solutions/", StringComparison.Ordinal))
+        {
+            ValidateRequiredFields(frontMatter, "solution", "solution_name", "solution_path");
+        }
+        else if (relativePath.StartsWith("projects/", StringComparison.Ordinal))
+        {
+            ValidateRequiredFields(frontMatter, "project", "project_name", "project_path", "target_frameworks", "discovery_method");
+        }
+        else if (relativePath.StartsWith("packages/", StringComparison.Ordinal))
+        {
+            ValidateRequiredFields(frontMatter, "package", "package_id", "package_key");
+        }
+        else if (relativePath.StartsWith("files/", StringComparison.Ordinal))
+        {
+            ValidateRequiredFields(frontMatter, "file", "file_name", "file_path");
+        }
+
+        ValidateTimestampLines(lines, relativePath);
+    }
+
+    private static Dictionary<string, string> ParseFrontMatter(string[] lines, int frontMatterEnd, string relativePath)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (var i = 1; i < frontMatterEnd; i++)
+        {
+            var line = lines[i].TrimEnd('\r');
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
             }
 
-            Assert.True(frontMatterEnd > 1, $"Invalid front matter in {path}");
+            var separatorIndex = line.IndexOf(':');
+            Assert.True(separatorIndex > 0, $"Invalid front matter line in {relativePath}: '{line}'");
 
-            var frontMatter = lines.Take(frontMatterEnd + 1).ToArray();
-            Assert.Contains(frontMatter, x => x.StartsWith("entity_id:", StringComparison.Ordinal));
-            Assert.Contains(frontMatter, x => x.StartsWith("entity_type:", StringComparison.Ordinal));
-            Assert.Contains(frontMatter, x => x.StartsWith("repository_id:", StringComparison.Ordinal));
+            var key = line[..separatorIndex].Trim();
+            var value = line[(separatorIndex + 1)..].Trim();
 
-            if (relative.StartsWith("repositories/", StringComparison.Ordinal))
+            Assert.Matches(SnakeCaseKeyPattern, key);
+            Assert.False(values.ContainsKey(key), $"Duplicate front matter key '{key}' in {relativePath}");
+
+            values[key] = value;
+        }
+
+        return values;
+    }
+
+    private static void ValidateRequiredFields(IReadOnlyDictionary<string, string> frontMatter, string groupName, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            Assert.True(frontMatter.TryGetValue(key, out var value), $"Missing required {groupName} key '{key}'");
+            Assert.False(string.IsNullOrWhiteSpace(value), $"Required {groupName} key '{key}' must be non-empty");
+        }
+    }
+
+    private static void ValidateTimestampLines(IEnumerable<string> lines, string relativePath)
+    {
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+            if (!trimmed.Contains("_at_utc:", StringComparison.Ordinal))
             {
-                Assert.Contains(frontMatter, x => x.StartsWith("repository_name:", StringComparison.Ordinal));
-                Assert.Contains(frontMatter, x => x.StartsWith("repository_path:", StringComparison.Ordinal));
-                Assert.Contains(frontMatter, x => x.StartsWith("head_branch:", StringComparison.Ordinal));
-                Assert.Contains(frontMatter, x => x.StartsWith("mainline_branch:", StringComparison.Ordinal));
+                continue;
             }
-            else if (relative.StartsWith("solutions/", StringComparison.Ordinal))
-            {
-                Assert.Contains(frontMatter, x => x.StartsWith("solution_name:", StringComparison.Ordinal));
-                Assert.Contains(frontMatter, x => x.StartsWith("solution_path:", StringComparison.Ordinal));
-            }
-            else if (relative.StartsWith("projects/", StringComparison.Ordinal))
-            {
-                Assert.Contains(frontMatter, x => x.StartsWith("project_name:", StringComparison.Ordinal));
-                Assert.Contains(frontMatter, x => x.StartsWith("project_path:", StringComparison.Ordinal));
-                Assert.Contains(frontMatter, x => x.StartsWith("target_frameworks:", StringComparison.Ordinal));
-                Assert.Contains(frontMatter, x => x.StartsWith("discovery_method:", StringComparison.Ordinal));
-            }
-            else if (relative.StartsWith("packages/", StringComparison.Ordinal))
-            {
-                Assert.Contains(frontMatter, x => x.StartsWith("package_id:", StringComparison.Ordinal));
-                Assert.Contains(frontMatter, x => x.StartsWith("package_key:", StringComparison.Ordinal));
-            }
-            else if (relative.StartsWith("files/", StringComparison.Ordinal))
-            {
-                Assert.Contains(frontMatter, x => x.StartsWith("file_name:", StringComparison.Ordinal));
-                Assert.Contains(frontMatter, x => x.StartsWith("file_path:", StringComparison.Ordinal));
-            }
+
+            var firstBacktick = trimmed.IndexOf('`');
+            var lastBacktick = trimmed.LastIndexOf('`');
+            Assert.True(firstBacktick >= 0 && lastBacktick > firstBacktick, $"Missing timestamp value delimiters in {relativePath}: '{trimmed}'");
+
+            var timestamp = trimmed[(firstBacktick + 1)..lastBacktick];
+            Assert.Matches(UtcIso8601Pattern, timestamp);
         }
     }
 
