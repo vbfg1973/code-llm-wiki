@@ -343,6 +343,24 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             {
                 meta.Arity = int.TryParse(value, out var parsed) ? parsed : 0;
             }
+            else if (triple.Predicate == CorePredicates.IsPartialType)
+            {
+                meta.IsPartialType = bool.TryParse(value, out var parsed) && parsed;
+            }
+            else if (triple.Predicate == CorePredicates.GenericParameter)
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    meta.GenericParameters.Add(value);
+                }
+            }
+            else if (triple.Predicate == CorePredicates.GenericConstraint)
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    meta.GenericConstraints.Add(value);
+                }
+            }
         }
 
         return byId;
@@ -690,12 +708,12 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     meta.Path,
                     namespaceId == default ? null : namespaceId,
                     declaringTypeId == default ? null : declaringTypeId,
-                    false,
+                    meta.IsPartialType,
                     declaringTypeId != default,
                     ParseAccessibility(meta.Accessibility),
                     meta.Arity,
-                    [],
-                    [],
+                    meta.GenericParameters.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
+                    meta.GenericConstraints.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
                     directBaseIds.Select(id => new TypeReferenceNode(
                             id,
                             metadataById.TryGetValue(id, out var targetMeta) ? targetMeta.Name : id.Value,
@@ -797,6 +815,9 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             TypeKind = string.Empty;
             Accessibility = string.Empty;
             Arity = 0;
+            IsPartialType = false;
+            GenericParameters = new HashSet<string>(StringComparer.Ordinal);
+            GenericConstraints = new HashSet<string>(StringComparer.Ordinal);
         }
 
         public EntityId Id { get; }
@@ -848,6 +869,12 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         public string Accessibility { get; set; }
 
         public int Arity { get; set; }
+
+        public bool IsPartialType { get; set; }
+
+        public HashSet<string> GenericParameters { get; }
+
+        public HashSet<string> GenericConstraints { get; }
 
         public bool IsType(string entityType) => EntityType.Equals(entityType, StringComparison.OrdinalIgnoreCase);
     }

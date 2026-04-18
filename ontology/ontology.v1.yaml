@@ -44,6 +44,7 @@ predicates:
   - id: "core:hasDeclaredType"
   - id: "core:hasDeclaredTypeText"
   - id: "core:resolutionStatus"
+  - id: "core:isPartialType"
   - id: "core:arity"
   - id: "core:genericParameter"
   - id: "core:genericConstraint"

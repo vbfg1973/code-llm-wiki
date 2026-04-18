@@ -141,6 +141,9 @@ internal static class CSharpDeclarationScanner
                     classDeclaration.TypeParameterList?.Parameters.Count ?? 0,
                     "class",
                     ParseAccessibility(classDeclaration.Modifiers),
+                    IsPartial(classDeclaration.Modifiers),
+                    ParseGenericParameters(classDeclaration.TypeParameterList),
+                    ParseGenericConstraints(classDeclaration.ConstraintClauses),
                     ParseDirectRelationships(classDeclaration),
                     relativePath,
                     classDeclaration.Members,
@@ -156,6 +159,9 @@ internal static class CSharpDeclarationScanner
                     interfaceDeclaration.TypeParameterList?.Parameters.Count ?? 0,
                     "interface",
                     ParseAccessibility(interfaceDeclaration.Modifiers),
+                    IsPartial(interfaceDeclaration.Modifiers),
+                    ParseGenericParameters(interfaceDeclaration.TypeParameterList),
+                    ParseGenericConstraints(interfaceDeclaration.ConstraintClauses),
                     ParseDirectRelationships(interfaceDeclaration),
                     relativePath,
                     interfaceDeclaration.Members,
@@ -171,6 +177,9 @@ internal static class CSharpDeclarationScanner
                     structDeclaration.TypeParameterList?.Parameters.Count ?? 0,
                     "struct",
                     ParseAccessibility(structDeclaration.Modifiers),
+                    IsPartial(structDeclaration.Modifiers),
+                    ParseGenericParameters(structDeclaration.TypeParameterList),
+                    ParseGenericConstraints(structDeclaration.ConstraintClauses),
                     ParseDirectRelationships(structDeclaration),
                     relativePath,
                     structDeclaration.Members,
@@ -186,6 +195,9 @@ internal static class CSharpDeclarationScanner
                     recordDeclaration.TypeParameterList?.Parameters.Count ?? 0,
                     "record",
                     ParseAccessibility(recordDeclaration.Modifiers),
+                    IsPartial(recordDeclaration.Modifiers),
+                    ParseGenericParameters(recordDeclaration.TypeParameterList),
+                    ParseGenericConstraints(recordDeclaration.ConstraintClauses),
                     ParseDirectRelationships(recordDeclaration),
                     relativePath,
                     recordDeclaration.Members,
@@ -201,6 +213,9 @@ internal static class CSharpDeclarationScanner
                     0,
                     "enum",
                     ParseAccessibility(enumDeclaration.Modifiers),
+                    false,
+                    [],
+                    [],
                     ([], []),
                     relativePath,
                     members: default,
@@ -216,6 +231,9 @@ internal static class CSharpDeclarationScanner
                     delegateDeclaration.TypeParameterList?.Parameters.Count ?? 0,
                     "delegate",
                     ParseAccessibility(delegateDeclaration.Modifiers),
+                    false,
+                    ParseGenericParameters(delegateDeclaration.TypeParameterList),
+                    ParseGenericConstraints(delegateDeclaration.ConstraintClauses),
                     ([], []),
                     relativePath,
                     members: default,
@@ -233,6 +251,9 @@ internal static class CSharpDeclarationScanner
         int arity,
         string kind,
         string accessibility,
+        bool isPartialDeclaration,
+        IReadOnlyList<string> genericParameters,
+        IReadOnlyList<string> genericConstraints,
         (IReadOnlyList<string> Bases, IReadOnlyList<string> Interfaces) relationships,
         string relativePath,
         SyntaxList<MemberDeclarationSyntax> members,
@@ -248,7 +269,10 @@ internal static class CSharpDeclarationScanner
             typeName,
             kind,
             accessibility,
+            isPartialDeclaration,
             arity,
+            genericParameters,
+            genericConstraints,
             currentDeclaringTypeQualifiedName,
             relationships.Bases,
             relationships.Interfaces,
@@ -361,6 +385,51 @@ internal static class CSharpDeclarationScanner
         }
 
         return "internal";
+    }
+
+    private static bool IsPartial(SyntaxTokenList modifiers)
+    {
+        return modifiers.Any(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.PartialKeyword));
+    }
+
+    private static IReadOnlyList<string> ParseGenericParameters(TypeParameterListSyntax? typeParameterList)
+    {
+        if (typeParameterList is null)
+        {
+            return [];
+        }
+
+        return typeParameterList.Parameters
+            .Select(x => x.Identifier.ValueText)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> ParseGenericConstraints(SyntaxList<TypeParameterConstraintClauseSyntax> clauses)
+    {
+        if (clauses.Count == 0)
+        {
+            return [];
+        }
+
+        return clauses
+            .Select(clause =>
+            {
+                var parameterName = clause.Name.Identifier.ValueText;
+                var constraints = clause.Constraints
+                    .Select(x => x.ToString().Trim())
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .OrderBy(x => x, StringComparer.Ordinal)
+                    .ToArray();
+
+                return constraints.Length == 0
+                    ? parameterName
+                    : $"{parameterName}:{string.Join("&", constraints)}";
+            })
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
     }
 
     private static string NormalizeTypeReference(string typeReference)

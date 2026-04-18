@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 002](./002-phase-2-dotnet-namespace-type-declaration.prd.md)
 
 - Issue: [#28](https://github.com/vbfg1973/code-llm-wiki/issues/28)
-- [ ] Status: open
-- [ ] Completion date: 
+- [x] Status: complete
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,10 +18,10 @@ Harden symbol identity behavior for partial declarations, nested declarations, a
 
 ## Acceptance criteria
 
-- [ ] Partial declarations resolve to one canonical type entity/page with multiple declaration locations.
-- [ ] Nested types expose conditional scalar metadata (`is_nested_type`, conditional declaring type ID).
-- [ ] Generic identity includes deterministic arity/parameter/constraint metadata without path ambiguity.
-- [ ] Path/title output stays human-readable with deterministic suffixing only when required.
+- [x] Partial declarations resolve to one canonical type entity/page with multiple declaration locations.
+- [x] Nested types expose conditional scalar metadata (`is_nested_type`, conditional declaring type ID).
+- [x] Generic identity includes deterministic arity/parameter/constraint metadata without path ambiguity.
+- [x] Path/title output stays human-readable with deterministic suffixing only when required.
 
 ## Blocked by
 
