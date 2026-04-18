@@ -26,6 +26,7 @@ public sealed class ReadWriteDataFlowVerticalSliceTests
         var readName = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == workerType.Id && x.Name == "ReadName");
         var updateName = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == workerType.Id && x.Name == "UpdateName");
         var bumpCounter = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == workerType.Id && x.Name == "BumpCounter");
+        var readExternalLength = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == workerType.Id && x.Name == "ReadExternalLength");
 
         Assert.Contains(model.Declarations.Methods.Relations, x =>
             x.Kind == MethodRelationKind.ReadsProperty
@@ -48,6 +49,7 @@ public sealed class ReadWriteDataFlowVerticalSliceTests
             && x.TargetMemberId == counterMember.Id);
 
         Assert.DoesNotContain(model.Declarations.Methods.Relations, x => x.TargetMemberId == unusedMember.Id);
+        Assert.DoesNotContain(model.Declarations.Methods.Relations, x => x.SourceMethodId == readExternalLength.Id && x.TargetMemberId is not null);
     }
 
     [Fact]
@@ -147,6 +149,11 @@ public sealed class ReadWriteDataFlowVerticalSliceTests
                     public void BumpCounter()
                     {
                         _model.Counter++;
+                    }
+
+                    public int ReadExternalLength()
+                    {
+                        return string.Empty.Length;
                     }
                 }
                 """);
