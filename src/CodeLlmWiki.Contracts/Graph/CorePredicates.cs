@@ -9,6 +9,7 @@ public static class CorePredicates
     public static readonly PredicateId HasPath = new("core:hasPath");
     public static readonly PredicateId DiscoveryMethod = new("core:discoveryMethod");
     public static readonly PredicateId TargetFramework = new("core:targetFramework");
+    public static readonly PredicateId HasPackageReference = new("core:hasPackageReference");
     public static readonly PredicateId HasDeclaredVersion = new("core:hasDeclaredVersion");
     public static readonly PredicateId HasResolvedVersion = new("core:hasResolvedVersion");
     public static readonly PredicateId FileKind = new("core:fileKind");

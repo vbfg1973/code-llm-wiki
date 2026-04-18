@@ -7,6 +7,7 @@ predicates:
   - id: "core:hasPath"
   - id: "core:discoveryMethod"
   - id: "core:targetFramework"
+  - id: "core:hasPackageReference"
   - id: "core:referencesPackage"
   - id: "core:hasDeclaredVersion"
   - id: "core:hasResolvedVersion"
