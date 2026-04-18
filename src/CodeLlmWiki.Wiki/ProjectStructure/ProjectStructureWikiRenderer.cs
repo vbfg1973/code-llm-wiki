@@ -29,6 +29,21 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             resolver.RegisterPackage(package);
         }
 
+        var orderedNamespaces = model.Declarations.Namespaces
+            .OrderBy(
+                x => DeclarationOrderingRules.GetDeterministicSortKey(
+                    x.Name,
+                    x.Name,
+                    x.Path,
+                    x.Id.Value),
+                StringComparer.Ordinal)
+            .ToArray();
+
+        foreach (var namespaceDeclaration in orderedNamespaces)
+        {
+            resolver.RegisterNamespace(namespaceDeclaration);
+        }
+
         var orderedFiles = model.Files.OrderBy(x => x.Path, StringComparer.Ordinal).ToArray();
         foreach (var file in orderedFiles)
         {
@@ -38,6 +53,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         var indexPath = resolver.RegisterIndex();
         var packageById = model.Packages.ToDictionary(x => x.Id, x => x);
         var projectById = model.Projects.ToDictionary(x => x.Id, x => x);
+        var namespaceById = model.Declarations.Namespaces.ToDictionary(x => x.Id, x => x);
+        var typeById = model.Declarations.Types.ToDictionary(x => x.Id, x => x);
 
         var pages = new List<WikiPage>
         {
@@ -47,6 +64,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         pages.AddRange(orderedSolutions.Select(solution => RenderSolutionPage(model.Repository.Id.Value, solution, projectById, resolver)));
         pages.AddRange(orderedProjects.Select(project => RenderProjectPage(model.Repository.Id.Value, project, packageById, resolver)));
         pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, resolver)));
+        pages.AddRange(orderedNamespaces.Select(namespaceDeclaration => RenderNamespacePage(model.Repository.Id.Value, namespaceDeclaration, namespaceById, typeById, resolver)));
         pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, resolver, maxMergeEntriesPerFile)));
 
         pages.Add(RenderIndexPage(model, resolver, indexPath));
@@ -67,6 +85,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine($"- Solutions: {model.Solutions.Count}");
         sb.AppendLine($"- Projects: {model.Projects.Count}");
         sb.AppendLine($"- Packages: {model.Packages.Count}");
+        sb.AppendLine($"- Namespaces: {model.Declarations.Namespaces.Count}");
         sb.AppendLine($"- Files: {model.Files.Count}");
         sb.AppendLine($"- Submodules: {model.Submodules.Count}");
         sb.AppendLine($"- Index: {ToWikiLink("index/repository-index", "Repository Index")}");
@@ -76,6 +95,16 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         foreach (var solution in model.Solutions.OrderBy(x => x.Path, StringComparer.Ordinal))
         {
             sb.AppendLine($"- {resolver.ToWikiLink(solution.Id, solution.Name)}");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Namespaces");
+
+        foreach (var namespaceDeclaration in model.Declarations.Namespaces
+                     .OrderBy(x => x.Path, StringComparer.Ordinal)
+                     .ThenBy(x => x.Name, StringComparer.Ordinal))
+        {
+            sb.AppendLine($"- {resolver.ToWikiLink(namespaceDeclaration.Id, namespaceDeclaration.Name)}");
         }
 
         sb.AppendLine();
@@ -233,6 +262,70 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 sb.ToString().TrimEnd()));
     }
 
+    private static WikiPage RenderNamespacePage(
+        string repositoryId,
+        NamespaceDeclarationNode namespaceDeclaration,
+        IReadOnlyDictionary<EntityId, NamespaceDeclarationNode> namespaceById,
+        IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
+        WikiPathResolver resolver)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"# Namespace: {namespaceDeclaration.Name}");
+        sb.AppendLine();
+        sb.AppendLine($"- Path: `{namespaceDeclaration.Path}`");
+
+        if (namespaceDeclaration.ParentNamespaceId is { } parentNamespaceId && namespaceById.TryGetValue(parentNamespaceId, out var parentNamespace))
+        {
+            sb.AppendLine($"- Parent: {resolver.ToWikiLink(parentNamespace.Id, parentNamespace.Name)}");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Child Namespaces");
+
+        foreach (var childNamespaceId in namespaceDeclaration.ChildNamespaceIds)
+        {
+            if (!namespaceById.TryGetValue(childNamespaceId, out var childNamespace))
+            {
+                continue;
+            }
+
+            sb.AppendLine($"- {resolver.ToWikiLink(childNamespace.Id, childNamespace.Name)}");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Contained Types");
+
+        foreach (var containedTypeId in namespaceDeclaration.ContainedTypeIds)
+        {
+            if (!typeById.TryGetValue(containedTypeId, out var typeDeclaration))
+            {
+                continue;
+            }
+
+            sb.AppendLine($"- {typeDeclaration.Name} ({typeDeclaration.Kind.ToString().ToLowerInvariant()})");
+        }
+
+        var frontMatter = new List<KeyValuePair<string, string>>
+        {
+            KeyValue("entity_id", namespaceDeclaration.Id.Value),
+            KeyValue("entity_type", "namespace"),
+            KeyValue("repository_id", repositoryId),
+            KeyValue("namespace_name", namespaceDeclaration.Name),
+            KeyValue("namespace_path", namespaceDeclaration.Path),
+        };
+
+        if (namespaceDeclaration.ParentNamespaceId is { } parentId && namespaceById.TryGetValue(parentId, out var parent))
+        {
+            frontMatter.Add(KeyValue("parent_namespace_id", parentId.Value));
+            frontMatter.Add(KeyValue("parent_namespace_name", parent.Name));
+        }
+
+        return new WikiPage(
+            RelativePath: resolver.GetPath(namespaceDeclaration.Id),
+            Title: namespaceDeclaration.Name,
+            Markdown: WithFrontMatter(frontMatter, sb.ToString().TrimEnd()));
+    }
+
     private static WikiPage RenderFilePage(
         RepositoryNode repository,
         FileNode file,
@@ -336,6 +429,15 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             model.Packages
                 .OrderBy(x => x.Name, StringComparer.Ordinal)
                 .Select(x => new IndexRow(x.Name, x.Name, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .ToArray());
+
+        AppendTable(
+            sb,
+            "Namespaces",
+            model.Declarations.Namespaces
+                .OrderBy(x => x.Path, StringComparer.Ordinal)
+                .ThenBy(x => x.Name, StringComparer.Ordinal)
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
                 .ToArray());
 
         AppendTable(
