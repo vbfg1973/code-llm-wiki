@@ -113,6 +113,7 @@ public sealed class IngestionArtifactPublisherTests
         Assert.False(result.LatestPromoted);
         Assert.True(File.Exists(markerPath));
         Assert.True(File.Exists(result.ManifestPath));
+        Assert.True(File.Exists(Path.Combine(result.RunDirectory, "graph", "graph.graphml")));
     }
 
     private static int CountOccurrences(string value, string token)

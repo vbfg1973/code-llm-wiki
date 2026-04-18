@@ -50,16 +50,13 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
                 WriteWikiPages(wikiDirectory, pages);
             }
 
-            if (request.RunResult.Triples.Count > 0)
-            {
-                var graph = GraphMlSerializer.Serialize(request.RunResult.Triples);
-                graphNodeCount = graph.NodeCount;
-                graphEdgeCount = graph.EdgeCount;
+            var graph = GraphMlSerializer.Serialize(request.RunResult.Triples);
+            graphNodeCount = graph.NodeCount;
+            graphEdgeCount = graph.EdgeCount;
 
-                graphMlPath = Path.Combine(runDirectory, "graph", "graph.graphml");
-                Directory.CreateDirectory(Path.GetDirectoryName(graphMlPath)!);
-                await File.WriteAllTextAsync(graphMlPath, graph.GraphMl, cancellationToken);
-            }
+            graphMlPath = Path.Combine(runDirectory, "graph", "graph.graphml");
+            Directory.CreateDirectory(Path.GetDirectoryName(graphMlPath)!);
+            await File.WriteAllTextAsync(graphMlPath, graph.GraphMl, cancellationToken);
 
             var shouldPromoteLatest = request.RunResult.Status != IngestionRunStatus.Failed;
             var manifest = BuildManifest(
