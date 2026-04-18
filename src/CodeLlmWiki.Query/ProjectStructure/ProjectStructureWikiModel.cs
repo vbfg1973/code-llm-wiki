@@ -5,4 +5,5 @@ public sealed record ProjectStructureWikiModel(
     IReadOnlyList<SolutionNode> Solutions,
     IReadOnlyList<ProjectNode> Projects,
     IReadOnlyList<PackageNode> Packages,
-    IReadOnlyList<FileNode> Files);
+    IReadOnlyList<FileNode> Files,
+    IReadOnlyList<SubmoduleNode> Submodules);
