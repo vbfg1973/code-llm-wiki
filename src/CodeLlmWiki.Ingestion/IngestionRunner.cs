@@ -25,7 +25,7 @@ public sealed class IngestionRunner : IIngestionRunner
         if (!ontology.IsValid || ontology.Definition is null)
         {
             var errors = ontology.Issues.Select(x => new IngestionDiagnostic(x.Code, x.Message)).ToArray();
-            return new IngestionRunResult(IngestionRunStatus.Failed, 1, errors, []);
+            return new IngestionRunResult(IngestionRunStatus.Failed, 1, errors, default, []);
         }
 
         var fullRepositoryPath = Path.GetFullPath(request.RepositoryPath);
@@ -47,6 +47,6 @@ public sealed class IngestionRunner : IIngestionRunner
             _ => 1,
         };
 
-        return new IngestionRunResult(status, exitCode, diagnostics, pipelineResult.Triples);
+        return new IngestionRunResult(status, exitCode, diagnostics, repositoryId, pipelineResult.Triples);
     }
 }

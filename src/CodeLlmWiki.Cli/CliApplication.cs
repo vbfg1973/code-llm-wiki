@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CodeLlmWiki.Cli.Commands;
 using CodeLlmWiki.Cli.Config;
+using CodeLlmWiki.Cli.Features.Ingest;
 using CodeLlmWiki.Ingestion;
 using CommandLine;
 
@@ -9,11 +10,17 @@ namespace CodeLlmWiki.Cli;
 public sealed class CliApplication
 {
     private const string DefaultOntologyPath = "ontology/ontology.v1.yaml";
-    private readonly IIngestionRunner _runner;
+    private const string DefaultOutputRoot = "artifacts";
 
-    public CliApplication(IIngestionRunner runner)
+    private readonly IIngestionRunner _runner;
+    private readonly IIngestionArtifactPublisher _artifactPublisher;
+
+    public CliApplication(
+        IIngestionRunner runner,
+        IIngestionArtifactPublisher? artifactPublisher = null)
     {
         _runner = runner;
+        _artifactPublisher = artifactPublisher ?? NoOpIngestionArtifactPublisher.Instance;
     }
 
     public Task<int> RunAsync(string[] args, CancellationToken cancellationToken)
@@ -42,13 +49,33 @@ public sealed class CliApplication
             ?? config.OntologyPath
             ?? DefaultOntologyPath;
 
+        var outputRoot = options.OutputRoot
+            ?? config.OutputRoot
+            ?? DefaultOutputRoot;
+
         var request = new IngestionRunRequest(
             RepositoryPath: options.RepositoryPath,
             ConfigPath: options.ConfigPath,
             OntologyPath: ontologyPath,
             AllowPartialSuccess: allowPartial);
 
+        var startedAtUtc = DateTimeOffset.UtcNow;
         var result = await _runner.RunAsync(request, cancellationToken);
+        var completedAtUtc = DateTimeOffset.UtcNow;
+
+        var publication = await _artifactPublisher.PublishAsync(
+            new IngestionArtifactPublishRequest(
+                RepositoryPath: options.RepositoryPath,
+                OutputRootPath: outputRoot,
+                StartedAtUtc: startedAtUtc,
+                CompletedAtUtc: completedAtUtc,
+                RunResult: result),
+            cancellationToken);
+
+        if (!publication.Succeeded)
+        {
+            return 1;
+        }
 
         return result.ExitCode;
     }

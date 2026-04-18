@@ -14,6 +14,9 @@ public sealed class IngestOptions
     [Option('o', "ontology", Required = false, HelpText = "Path to ontology yaml file.")]
     public string? OntologyPath { get; init; }
 
+    [Option('r', "output-root", Required = false, HelpText = "Directory for run-scoped generated artifacts.")]
+    public string? OutputRoot { get; init; }
+
     [Option('a', "allow-partial-success", Required = false, HelpText = "Overrides partial-success exit policy.")]
     public string? AllowPartialSuccess { get; init; }
 }
