@@ -365,13 +365,25 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             {
                 meta.MemberKind = value;
             }
+            else if (triple.Predicate == CorePredicates.MethodKind)
+            {
+                meta.MethodKind = value;
+            }
             else if (triple.Predicate == CorePredicates.HasDeclaredTypeText)
             {
                 meta.DeclaredTypeText = value;
             }
+            else if (triple.Predicate == CorePredicates.HasReturnTypeText)
+            {
+                meta.ReturnTypeText = value;
+            }
             else if (triple.Predicate == CorePredicates.ConstantValue)
             {
                 meta.ConstantValue = value;
+            }
+            else if (triple.Predicate == CorePredicates.IsExtensionMethod)
+            {
+                meta.IsExtensionMethod = bool.TryParse(value, out var parsed) && parsed;
             }
         }
 
@@ -561,8 +573,19 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         var implementsEdges = BuildEntityEdges(triples, CorePredicates.Implements);
         var declaringTypeEdges = BuildEntityEdges(triples, CorePredicates.HasDeclaringType);
         var containsMemberEdges = BuildEntityEdges(triples, CorePredicates.ContainsMember);
+        var containsMethodEdges = BuildEntityEdges(triples, CorePredicates.ContainsMethod);
         var memberDeclaredTypeEdges = BuildEntityEdges(triples, CorePredicates.HasDeclaredType);
+        var methodReturnTypeEdges = BuildEntityEdges(triples, CorePredicates.HasReturnType);
         var fileDeclaresMember = BuildEntityEdges(triples, CorePredicates.DeclaresMember);
+        var fileDeclaresMethod = BuildEntityEdges(triples, CorePredicates.DeclaresMethod);
+        var methodImplementsEdges = BuildEntityEdges(triples, CorePredicates.ImplementsMethod);
+        var methodOverridesEdges = BuildEntityEdges(triples, CorePredicates.OverridesMethod);
+        var methodCallsEdges = BuildEntityEdges(triples, CorePredicates.Calls);
+        var methodReadsPropertyEdges = BuildEntityEdges(triples, CorePredicates.ReadsProperty);
+        var methodWritesPropertyEdges = BuildEntityEdges(triples, CorePredicates.WritesProperty);
+        var methodReadsFieldEdges = BuildEntityEdges(triples, CorePredicates.ReadsField);
+        var methodWritesFieldEdges = BuildEntityEdges(triples, CorePredicates.WritesField);
+        var methodExtendsTypeEdges = BuildEntityEdges(triples, CorePredicates.ExtendsType);
         var declarationLocationsByEntityId = BuildDeclarationLocationsByEntityId(triples);
 
         var namespaceIds = metadataById
@@ -665,7 +688,38 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
                     .ToArray());
 
+        var methodIdsByType = containsMethodEdges
+            .GroupBy(x => x.Subject)
+            .ToDictionary(
+                x => x.Key,
+                x => x.Select(v => v.Object)
+                    .Distinct()
+                    .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Name : id.Value, StringComparer.Ordinal)
+                    .ThenBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
+                    .ToArray());
+
+        var declaringTypeByMethod = containsMethodEdges
+            .GroupBy(x => x.Object)
+            .ToDictionary(x => x.Key, x => x.First().Subject);
+
+        var declarationFilesByMethod = fileDeclaresMethod
+            .GroupBy(x => x.Object)
+            .ToDictionary(
+                x => x.Key,
+                x => x.Select(v => v.Subject)
+                    .Distinct()
+                    .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
+                    .ToArray());
+
         var declaredTypeByMember = memberDeclaredTypeEdges
+            .GroupBy(x => x.Subject)
+            .ToDictionary(x => x.Key, x => x.First().Object);
+
+        var returnTypeByMethod = methodReturnTypeEdges
+            .GroupBy(x => x.Subject)
+            .ToDictionary(x => x.Key, x => x.First().Object);
+
+        var extendedTypeByMethod = methodExtendsTypeEdges
             .GroupBy(x => x.Subject)
             .ToDictionary(x => x.Key, x => x.First().Object);
 
@@ -753,6 +807,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 directInterfaceIds ??= [];
                 memberIdsByType.TryGetValue(typeId, out var memberIds);
                 memberIds ??= [];
+                methodIdsByType.TryGetValue(typeId, out var methodIds);
+                methodIds ??= [];
 
                 var typeNode = new TypeDeclarationNode(
                     typeId,
@@ -786,6 +842,14 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     typeNode = typeNode with
                     {
                         DeclarationLocations = declarationLocations,
+                        MethodIds = methodIds,
+                    };
+                }
+                else
+                {
+                    typeNode = typeNode with
+                    {
+                        MethodIds = methodIds,
                     };
                 }
 
@@ -865,7 +929,167 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 StringComparer.Ordinal)
             .ToArray();
 
-        return new DeclarationCatalog(namespaces, types, members);
+        var methodIds = containsMethodEdges
+            .Select(x => x.Object)
+            .Concat(metadataById.Where(x => x.Value.IsType("method-declaration")).Select(x => x.Key))
+            .Distinct()
+            .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        var methods = methodIds
+            .Select(methodId =>
+            {
+                var meta = metadataById.TryGetValue(methodId, out var methodMeta)
+                    ? methodMeta
+                    : new EntityMetadata(methodId);
+
+                declaringTypeByMethod.TryGetValue(methodId, out var declaringTypeId);
+                declarationFilesByMethod.TryGetValue(methodId, out var declarationFileIds);
+                declarationFileIds ??= [];
+                returnTypeByMethod.TryGetValue(methodId, out var returnTypeId);
+                extendedTypeByMethod.TryGetValue(methodId, out var extendedTypeId);
+
+                TypeReferenceNode? returnType = null;
+                if (returnTypeId != default)
+                {
+                    returnType = new TypeReferenceNode(
+                        returnTypeId,
+                        metadataById.TryGetValue(returnTypeId, out var returnTypeMeta)
+                            ? returnTypeMeta.Name
+                            : returnTypeId.Value,
+                        GetReferenceResolutionStatus(returnTypeId, metadataById));
+                }
+                else if (!string.IsNullOrWhiteSpace(meta.ReturnTypeText))
+                {
+                    returnType = new TypeReferenceNode(
+                        null,
+                        meta.ReturnTypeText,
+                        DeclarationResolutionStatus.SourceTextFallback);
+                }
+
+                TypeReferenceNode? extendedType = null;
+                if (extendedTypeId != default)
+                {
+                    extendedType = new TypeReferenceNode(
+                        extendedTypeId,
+                        metadataById.TryGetValue(extendedTypeId, out var extendedTypeMeta)
+                            ? extendedTypeMeta.Name
+                            : extendedTypeId.Value,
+                        GetReferenceResolutionStatus(extendedTypeId, metadataById));
+                }
+
+                var methodNode = new MethodDeclarationNode(
+                    methodId,
+                    ParseMethodKind(meta.MethodKind),
+                    meta.Name,
+                    meta.Name,
+                    meta.Path,
+                    declaringTypeId == default ? default : declaringTypeId,
+                    ParseAccessibility(meta.Accessibility),
+                    meta.Arity,
+                    [],
+                    returnType,
+                    IsStatic: false,
+                    IsAbstract: false,
+                    IsVirtual: false,
+                    IsOverride: false,
+                    IsExtern: false,
+                    meta.IsExtensionMethod,
+                    extendedType,
+                    declarationFileIds);
+
+                if (declarationLocationsByEntityId.TryGetValue(methodId, out var declarationLocations))
+                {
+                    methodNode = methodNode with
+                    {
+                        DeclarationLocations = declarationLocations,
+                    };
+                }
+
+                return methodNode;
+            })
+            .Where(x => x.DeclaringTypeId != default)
+            .OrderBy(
+                x => DeclarationOrderingRules.GetDeterministicSortKey(
+                    x.Kind.ToString(),
+                    x.Name,
+                    x.Signature,
+                    x.Id.Value),
+                StringComparer.Ordinal)
+            .ToArray();
+
+        var relations = methodImplementsEdges
+            .Select(x => new MethodRelationNode(
+                x.Subject,
+                MethodRelationKind.ImplementsMethod,
+                x.Object,
+                null,
+                null,
+                null,
+                GetReferenceResolutionStatus(x.Object, metadataById)))
+            .Concat(methodOverridesEdges.Select(x => new MethodRelationNode(
+                x.Subject,
+                MethodRelationKind.OverridesMethod,
+                x.Object,
+                null,
+                null,
+                null,
+                GetReferenceResolutionStatus(x.Object, metadataById))))
+            .Concat(methodCallsEdges.Select(x => new MethodRelationNode(
+                x.Subject,
+                MethodRelationKind.Calls,
+                x.Object,
+                null,
+                null,
+                null,
+                GetReferenceResolutionStatus(x.Object, metadataById))))
+            .Concat(methodReadsPropertyEdges.Select(x => new MethodRelationNode(
+                x.Subject,
+                MethodRelationKind.ReadsProperty,
+                null,
+                x.Object,
+                null,
+                null,
+                GetReferenceResolutionStatus(x.Object, metadataById))))
+            .Concat(methodWritesPropertyEdges.Select(x => new MethodRelationNode(
+                x.Subject,
+                MethodRelationKind.WritesProperty,
+                null,
+                x.Object,
+                null,
+                null,
+                GetReferenceResolutionStatus(x.Object, metadataById))))
+            .Concat(methodReadsFieldEdges.Select(x => new MethodRelationNode(
+                x.Subject,
+                MethodRelationKind.ReadsField,
+                null,
+                x.Object,
+                null,
+                null,
+                GetReferenceResolutionStatus(x.Object, metadataById))))
+            .Concat(methodWritesFieldEdges.Select(x => new MethodRelationNode(
+                x.Subject,
+                MethodRelationKind.WritesField,
+                null,
+                x.Object,
+                null,
+                null,
+                GetReferenceResolutionStatus(x.Object, metadataById))))
+            .Where(x => methods.Any(m => m.Id == x.SourceMethodId))
+            .Distinct()
+            .OrderBy(
+                x => DeclarationOrderingRules.GetDeterministicSortKey(
+                    x.Kind.ToString(),
+                    x.SourceMethodId.Value,
+                    x.TargetMethodId?.Value ?? x.TargetMemberId?.Value ?? string.Empty,
+                    x.TargetMethodId?.Value ?? x.TargetMemberId?.Value ?? string.Empty),
+                StringComparer.Ordinal)
+            .ToArray();
+
+        return new DeclarationCatalog(namespaces, types, members)
+        {
+            Methods = new MethodCatalog(methods, relations),
+        };
     }
 
     private static DeclarationAccessibility ParseAccessibility(string accessibility)
@@ -905,6 +1129,16 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             "enum-member" => MemberDeclarationKind.EnumMember,
             "record-parameter" => MemberDeclarationKind.RecordParameter,
             _ => MemberDeclarationKind.Unknown,
+        };
+    }
+
+    private static MethodDeclarationKind ParseMethodKind(string kind)
+    {
+        return kind.ToLowerInvariant() switch
+        {
+            "method" => MethodDeclarationKind.Method,
+            "constructor" => MethodDeclarationKind.Constructor,
+            _ => MethodDeclarationKind.Unknown,
         };
     }
 
@@ -1038,8 +1272,11 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             GenericParameters = new HashSet<string>(StringComparer.Ordinal);
             GenericConstraints = new HashSet<string>(StringComparer.Ordinal);
             MemberKind = string.Empty;
+            MethodKind = string.Empty;
             DeclaredTypeText = string.Empty;
+            ReturnTypeText = string.Empty;
             ConstantValue = string.Empty;
+            IsExtensionMethod = false;
         }
 
         public EntityId Id { get; }
@@ -1100,9 +1337,15 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
 
         public string MemberKind { get; set; }
 
+        public string MethodKind { get; set; }
+
         public string DeclaredTypeText { get; set; }
 
+        public string ReturnTypeText { get; set; }
+
         public string ConstantValue { get; set; }
+
+        public bool IsExtensionMethod { get; set; }
 
         public bool IsType(string entityType) => EntityType.Equals(entityType, StringComparison.OrdinalIgnoreCase);
     }

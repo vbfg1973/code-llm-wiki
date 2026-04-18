@@ -20,6 +20,20 @@ public static class DeclarationIdentityRules
         return $"member::{Normalize(typeNaturalKey)}::{memberKind.ToString().ToLowerInvariant()}::{Normalize(memberSignature)}";
     }
 
+    public static string CreateMethodNaturalKey(
+        string assemblyName,
+        string declaringTypeNaturalKey,
+        string methodName,
+        IReadOnlyList<string> orderedParameterTypeSignatures,
+        int genericArity)
+    {
+        var normalizedParameters = orderedParameterTypeSignatures
+            .Select(Normalize)
+            .ToArray();
+
+        return $"method::{Normalize(assemblyName)}::{Normalize(declaringTypeNaturalKey)}::{Normalize(methodName)}::{genericArity}::{string.Join("|", normalizedParameters)}";
+    }
+
     private static string Normalize(string value)
     {
         return (value ?? string.Empty).Trim();

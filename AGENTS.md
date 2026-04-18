@@ -20,7 +20,9 @@ Use this file to rehydrate project context quickly for any new agent/session.
 
 - `PRD 001`: complete
 - `PRD 002`: complete
-- Next major capability focus: method declarations and method relationships (planned as `PRD 003`)
+- `PRD 003`: drafted, pending plan/issues
+  - Local PRD: `/plans/003/003-phase-3-dotnet-method-extraction-and-relations.prd.md`
+  - GitHub issue: `#41`
 
 Canonical feature backlog:
 - `/plans/BACKLOG.md`

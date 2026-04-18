@@ -1,4 +1,5 @@
 using CodeLlmWiki.Contracts.Identity;
+using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Ontology;
 using CodeLlmWiki.Query.ProjectStructure;
 using CodeLlmWiki.Wiki.ProjectStructure;
@@ -49,6 +50,23 @@ public sealed class DeclarationContractsVerticalSliceTests
         Assert.Contains("core:genericConstraint", predicateIds);
         Assert.Contains("core:inherits", predicateIds);
         Assert.Contains("core:implements", predicateIds);
+        Assert.Contains("core:containsMethod", predicateIds);
+        Assert.Contains("core:declaresMethod", predicateIds);
+        Assert.Contains("core:methodKind", predicateIds);
+        Assert.Contains("core:hasReturnType", predicateIds);
+        Assert.Contains("core:hasReturnTypeText", predicateIds);
+        Assert.Contains("core:hasMethodParameter", predicateIds);
+        Assert.Contains("core:parameterOrdinal", predicateIds);
+        Assert.Contains("core:parameterName", predicateIds);
+        Assert.Contains("core:implementsMethod", predicateIds);
+        Assert.Contains("core:overridesMethod", predicateIds);
+        Assert.Contains("core:calls", predicateIds);
+        Assert.Contains("core:readsProperty", predicateIds);
+        Assert.Contains("core:writesProperty", predicateIds);
+        Assert.Contains("core:readsField", predicateIds);
+        Assert.Contains("core:writesField", predicateIds);
+        Assert.Contains("core:isExtensionMethod", predicateIds);
+        Assert.Contains("core:extendsType", predicateIds);
     }
 
     [Fact]
@@ -66,6 +84,8 @@ public sealed class DeclarationContractsVerticalSliceTests
         Assert.Empty(model.Declarations.Namespaces);
         Assert.Empty(model.Declarations.Types);
         Assert.Empty(model.Declarations.Members);
+        Assert.Empty(model.Declarations.Methods.Declarations);
+        Assert.Empty(model.Declarations.Methods.Relations);
     }
 
     [Fact]
@@ -88,6 +108,34 @@ public sealed class DeclarationContractsVerticalSliceTests
 
         Assert.Equal(typeNaturalKey, equivalentTypeNaturalKey);
         Assert.NotEqual(typeNaturalKey, differentTypeNaturalKey);
+    }
+
+    [Fact]
+    public void MethodIdentityRules_AreDeterministic()
+    {
+        var methodNaturalKey = DeclarationIdentityRules.CreateMethodNaturalKey(
+            "Sample.Assembly",
+            "type::Sample.Assembly::Sample.Domain::OrderService",
+            "Save",
+            ["System.String", "System.Threading.CancellationToken"],
+            0);
+
+        var equivalentMethodNaturalKey = DeclarationIdentityRules.CreateMethodNaturalKey(
+            "Sample.Assembly",
+            "type::Sample.Assembly::Sample.Domain::OrderService",
+            "Save",
+            ["System.String", "System.Threading.CancellationToken"],
+            0);
+
+        var differentMethodNaturalKey = DeclarationIdentityRules.CreateMethodNaturalKey(
+            "Sample.Assembly",
+            "type::Sample.Assembly::Sample.Domain::OrderService",
+            "Save",
+            ["System.String"],
+            0);
+
+        Assert.Equal(methodNaturalKey, equivalentMethodNaturalKey);
+        Assert.NotEqual(methodNaturalKey, differentMethodNaturalKey);
     }
 
     [Fact]
@@ -161,6 +209,82 @@ public sealed class DeclarationContractsVerticalSliceTests
 
         Assert.NotEmpty(pages);
         Assert.Contains(pages, x => x.RelativePath == "repositories/sample.md");
+    }
+
+    [Fact]
+    public void Query_ProjectsMethodContracts_FromTriples()
+    {
+        var repositoryId = new EntityId("repository:sample");
+        var typeId = new EntityId("type:Sample.OrderService");
+        var methodId = new EntityId("method:Sample.OrderService.Save(System.String)");
+        var methodInterfaceId = new EntityId("method:Sample.IOrderService.Save(System.String)");
+
+        var triples =
+            new[]
+            {
+                Triple(repositoryId, "core:entityType", "repository"),
+                Triple(repositoryId, "core:hasName", "sample"),
+                Triple(repositoryId, "core:hasPath", "."),
+                Triple(repositoryId, "core:headBranch", "main"),
+                Triple(repositoryId, "core:mainlineBranch", "main"),
+
+                Triple(typeId, "core:entityType", "type-declaration"),
+                Triple(typeId, "core:hasName", "OrderService"),
+                Triple(typeId, "core:hasPath", "Sample.OrderService"),
+                Triple(typeId, "core:typeKind", "class"),
+                Triple(typeId, "core:accessibility", "public"),
+                Triple(typeId, "core:arity", "0"),
+
+                Triple(methodId, "core:entityType", "method-declaration"),
+                Triple(methodId, "core:hasName", "Save"),
+                Triple(methodId, "core:hasPath", "Sample.OrderService.Save(System.String)"),
+                Triple(methodId, "core:methodKind", "method"),
+                Triple(methodId, "core:accessibility", "public"),
+                Triple(methodId, "core:arity", "0"),
+                Triple(methodId, "core:hasReturnTypeText", "void"),
+
+                Triple(methodInterfaceId, "core:entityType", "method-declaration"),
+                Triple(methodInterfaceId, "core:hasName", "Save"),
+                Triple(methodInterfaceId, "core:hasPath", "Sample.IOrderService.Save(System.String)"),
+                Triple(methodInterfaceId, "core:methodKind", "method"),
+                Triple(methodInterfaceId, "core:accessibility", "public"),
+                Triple(methodInterfaceId, "core:arity", "0"),
+                Triple(methodInterfaceId, "core:hasReturnTypeText", "void"),
+
+                Edge(typeId, "core:containsMethod", methodId),
+                Edge(methodId, "core:implementsMethod", methodInterfaceId),
+            };
+
+        var model = new ProjectStructureQueryService(triples).GetModel(repositoryId);
+
+        var method = Assert.Single(model.Declarations.Methods.Declarations, x => x.Id == methodId);
+        Assert.Equal(MethodDeclarationKind.Method, method.Kind);
+        Assert.Equal("Save", method.Name);
+        Assert.Equal("void", method.ReturnType?.DisplayText);
+
+        var relation = Assert.Single(model.Declarations.Methods.Relations);
+        Assert.Equal(MethodRelationKind.ImplementsMethod, relation.Kind);
+        Assert.Equal(methodId, relation.SourceMethodId);
+        Assert.Equal(methodInterfaceId, relation.TargetMethodId);
+
+        var owningType = Assert.Single(model.Declarations.Types, x => x.Id == typeId);
+        Assert.Contains(methodId, owningType.MethodIds);
+    }
+
+    private static SemanticTriple Triple(EntityId subjectId, string predicate, string value)
+    {
+        return new SemanticTriple(
+            new EntityNode(subjectId),
+            new PredicateId(predicate),
+            new LiteralNode(value));
+    }
+
+    private static SemanticTriple Edge(EntityId subjectId, string predicate, EntityId objectId)
+    {
+        return new SemanticTriple(
+            new EntityNode(subjectId),
+            new PredicateId(predicate),
+            new EntityNode(objectId));
     }
 
     private sealed record DeclarationOrderingSample(
