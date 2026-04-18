@@ -355,6 +355,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 representative.TypeName,
                 representative.QualifiedName);
 
+            var isPartialType = group.Count() > 1 || group.Any(x => x.IsPartialDeclaration);
+
             triples.Add(new SemanticTriple(
                 new EntityNode(typeId),
                 CorePredicates.TypeKind,
@@ -365,8 +367,34 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 new LiteralNode(representative.Accessibility)));
             triples.Add(new SemanticTriple(
                 new EntityNode(typeId),
+                CorePredicates.IsPartialType,
+                new LiteralNode(isPartialType.ToString().ToLowerInvariant())));
+            triples.Add(new SemanticTriple(
+                new EntityNode(typeId),
                 CorePredicates.Arity,
                 new LiteralNode(representative.Arity.ToString())));
+
+            foreach (var genericParameter in group
+                         .SelectMany(x => x.GenericParameters)
+                         .Distinct(StringComparer.Ordinal)
+                         .OrderBy(x => x, StringComparer.Ordinal))
+            {
+                triples.Add(new SemanticTriple(
+                    new EntityNode(typeId),
+                    CorePredicates.GenericParameter,
+                    new LiteralNode(genericParameter)));
+            }
+
+            foreach (var genericConstraint in group
+                         .SelectMany(x => x.GenericConstraints)
+                         .Distinct(StringComparer.Ordinal)
+                         .OrderBy(x => x, StringComparer.Ordinal))
+            {
+                triples.Add(new SemanticTriple(
+                    new EntityNode(typeId),
+                    CorePredicates.GenericConstraint,
+                    new LiteralNode(genericConstraint)));
+            }
 
             triples.Add(new SemanticTriple(
                 new EntityNode(namespaceId),

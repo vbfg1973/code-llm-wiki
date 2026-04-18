@@ -72,6 +72,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         var projectById = model.Projects.ToDictionary(x => x.Id, x => x);
         var namespaceById = model.Declarations.Namespaces.ToDictionary(x => x.Id, x => x);
         var typeById = model.Declarations.Types.ToDictionary(x => x.Id, x => x);
+        var fileById = model.Files.ToDictionary(x => x.Id, x => x);
 
         var pages = new List<WikiPage>
         {
@@ -82,7 +83,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         pages.AddRange(orderedProjects.Select(project => RenderProjectPage(model.Repository.Id.Value, project, packageById, resolver)));
         pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, resolver)));
         pages.AddRange(orderedNamespaces.Select(namespaceDeclaration => RenderNamespacePage(model.Repository.Id.Value, namespaceDeclaration, namespaceById, typeById, resolver)));
-        pages.AddRange(orderedTypes.Select(typeDeclaration => RenderTypePage(model.Repository.Id.Value, typeDeclaration, namespaceById, typeById, resolver)));
+        pages.AddRange(orderedTypes.Select(typeDeclaration => RenderTypePage(model.Repository.Id.Value, typeDeclaration, namespaceById, typeById, fileById, resolver)));
         pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, resolver, maxMergeEntriesPerFile)));
 
         pages.Add(RenderIndexPage(model, resolver, indexPath));
@@ -360,6 +361,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         TypeDeclarationNode typeDeclaration,
         IReadOnlyDictionary<EntityId, NamespaceDeclarationNode> namespaceById,
         IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
+        IReadOnlyDictionary<EntityId, FileNode> fileById,
         WikiPathResolver resolver)
     {
         var sb = new StringBuilder();
@@ -369,6 +371,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine($"- Accessibility: {typeDeclaration.Accessibility.ToString().ToLowerInvariant()}");
         sb.AppendLine($"- Canonical Path: `{typeDeclaration.Path}`");
         sb.AppendLine($"- Arity: {typeDeclaration.Arity}");
+        sb.AppendLine($"- Is Partial: {typeDeclaration.IsPartialType.ToString().ToLowerInvariant()}");
 
         if (typeDeclaration.NamespaceId is { } namespaceId && namespaceById.TryGetValue(namespaceId, out var namespaceDeclaration))
         {
@@ -414,6 +417,32 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             }
         }
 
+        if (typeDeclaration.GenericParameters.Count > 0 || typeDeclaration.GenericConstraints.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Generic Signature");
+
+            if (typeDeclaration.GenericParameters.Count > 0)
+            {
+                sb.AppendLine($"- Parameters: `{string.Join(", ", typeDeclaration.GenericParameters)}`");
+            }
+
+            foreach (var constraint in typeDeclaration.GenericConstraints)
+            {
+                sb.AppendLine($"- Constraint: `{constraint}`");
+            }
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Declaration Files");
+        foreach (var declarationFileId in typeDeclaration.DeclarationFileIds)
+        {
+            if (fileById.TryGetValue(declarationFileId, out var file))
+            {
+                sb.AppendLine($"- {resolver.ToWikiLink(file.Id, file.Path)}");
+            }
+        }
+
         var frontMatter = new List<KeyValuePair<string, string>>
         {
             KeyValue("entity_id", typeDeclaration.Id.Value),
@@ -428,6 +457,11 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         if (typeDeclaration.IsNestedType)
         {
             frontMatter.Add(KeyValue("is_nested_type", "true"));
+        }
+
+        if (typeDeclaration.IsPartialType)
+        {
+            frontMatter.Add(KeyValue("is_partial_type", "true"));
         }
 
         if (typeDeclaration.NamespaceId is { } typeNamespaceId && namespaceById.TryGetValue(typeNamespaceId, out var typeNamespace))
