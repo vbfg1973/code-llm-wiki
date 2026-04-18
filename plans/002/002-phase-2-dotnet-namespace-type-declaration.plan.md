@@ -9,7 +9,7 @@
 - [x] Phase 3: Internal Type Symbol Vertical Slice — completion date: 2026-04-18
 - [x] Phase 4: Partial, Nested, and Generic Identity Hardening — completion date: 2026-04-18
 - [x] Phase 5: Member Declaration Topology Vertical Slice — completion date: 2026-04-18
-- [ ] Phase 6: Type Resolution Fallback and External Stub References — completion date: 
+- [x] Phase 6: Type Resolution Fallback and External Stub References — completion date: 2026-04-18
 - [ ] Phase 7: File Backlink and Traceability Vertical Slice — completion date: 
 - [ ] Phase 8: Publication Determinism, Front Matter Validation, and CI Gates — completion date: 
 

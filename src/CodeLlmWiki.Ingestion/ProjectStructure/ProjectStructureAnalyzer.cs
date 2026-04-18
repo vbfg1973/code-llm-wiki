@@ -326,6 +326,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         var typeIdByQualifiedName = new Dictionary<string, EntityId>(StringComparer.Ordinal);
         var declaredTypeNamesBySimpleName = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var pendingMemberTypeLinks = new List<PendingMemberTypeLink>();
+        var externalStubIdByReference = new Dictionary<string, EntityId>(StringComparer.Ordinal);
+        var unresolvedReferenceIdByText = new Dictionary<string, EntityId>(StringComparer.Ordinal);
 
         foreach (var group in typeGroups)
         {
@@ -524,7 +526,18 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     declaredTypeNamesBySimpleName);
                 if (resolvedBaseQualifiedName is null || !typeIdByQualifiedName.TryGetValue(resolvedBaseQualifiedName, out var baseTypeId))
                 {
-                    continue;
+                    var normalizedBaseType = NormalizeTypeReferenceName(baseType);
+                    if (IsExternalStubCandidate(normalizedBaseType))
+                    {
+                        baseTypeId = GetOrCreateExternalStubId(normalizedBaseType, externalStubIdByReference, triples);
+                    }
+                    else
+                    {
+                        baseTypeId = GetOrCreateUnresolvedReferenceId(normalizedBaseType, unresolvedReferenceIdByText, triples);
+                        diagnostics.Add(new IngestionDiagnostic(
+                            "type:resolution:fallback",
+                            $"Unresolved base type '{baseType}' for '{representative.QualifiedName}'."));
+                    }
                 }
 
                 triples.Add(new SemanticTriple(
@@ -544,7 +557,18 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     declaredTypeNamesBySimpleName);
                 if (resolvedInterfaceQualifiedName is null || !typeIdByQualifiedName.TryGetValue(resolvedInterfaceQualifiedName, out var interfaceTypeId))
                 {
-                    continue;
+                    var normalizedInterfaceType = NormalizeTypeReferenceName(interfaceType);
+                    if (IsExternalStubCandidate(normalizedInterfaceType))
+                    {
+                        interfaceTypeId = GetOrCreateExternalStubId(normalizedInterfaceType, externalStubIdByReference, triples);
+                    }
+                    else
+                    {
+                        interfaceTypeId = GetOrCreateUnresolvedReferenceId(normalizedInterfaceType, unresolvedReferenceIdByText, triples);
+                        diagnostics.Add(new IngestionDiagnostic(
+                            "type:resolution:fallback",
+                            $"Unresolved interface type '{interfaceType}' for '{representative.QualifiedName}'."));
+                    }
                 }
 
                 triples.Add(new SemanticTriple(
@@ -565,7 +589,18 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 declaredTypeNamesBySimpleName);
             if (resolvedMemberTypeName is null || !typeIdByQualifiedName.TryGetValue(resolvedMemberTypeName, out var resolvedMemberTypeId))
             {
-                continue;
+                var normalizedMemberType = NormalizeTypeReferenceName(pendingMemberTypeLink.DeclaredTypeName);
+                if (IsExternalStubCandidate(normalizedMemberType))
+                {
+                    resolvedMemberTypeId = GetOrCreateExternalStubId(normalizedMemberType, externalStubIdByReference, triples);
+                }
+                else
+                {
+                    diagnostics.Add(new IngestionDiagnostic(
+                        "type:resolution:fallback",
+                        $"Unresolved declared member type '{pendingMemberTypeLink.DeclaredTypeName}' for member '{pendingMemberTypeLink.MemberId.Value}'."));
+                    continue;
+                }
             }
 
             triples.Add(new SemanticTriple(
@@ -588,17 +623,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             return null;
         }
 
-        var normalized = referenceName.Trim();
-        if (normalized.StartsWith("global::", StringComparison.Ordinal))
-        {
-            normalized = normalized[8..];
-        }
-
-        var genericIndex = normalized.IndexOf('<');
-        if (genericIndex >= 0)
-        {
-            normalized = normalized[..genericIndex];
-        }
+        var normalized = NormalizeTypeReferenceName(referenceName);
 
         var aliasSplit = normalized.Split('.', 2, StringSplitOptions.TrimEntries);
         if (aliasSplit.Length == 2 && importedAliases.TryGetValue(aliasSplit[0], out var aliasTarget))
@@ -635,6 +660,79 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         }
 
         return null;
+    }
+
+    private EntityId GetOrCreateExternalStubId(
+        string referenceName,
+        Dictionary<string, EntityId> externalStubIdByReference,
+        List<SemanticTriple> triples)
+    {
+        if (externalStubIdByReference.TryGetValue(referenceName, out var existing))
+        {
+            return existing;
+        }
+
+        var stubId = _stableIdGenerator.Create(new EntityKey("external-type-stub", referenceName));
+        externalStubIdByReference[referenceName] = stubId;
+
+        AddEntityTriples(
+            triples,
+            stubId,
+            "external-type-stub",
+            referenceName,
+            $"external/{referenceName}");
+
+        return stubId;
+    }
+
+    private EntityId GetOrCreateUnresolvedReferenceId(
+        string referenceName,
+        Dictionary<string, EntityId> unresolvedReferenceIdByText,
+        List<SemanticTriple> triples)
+    {
+        if (unresolvedReferenceIdByText.TryGetValue(referenceName, out var existing))
+        {
+            return existing;
+        }
+
+        var unresolvedId = _stableIdGenerator.Create(new EntityKey("unresolved-type-reference", referenceName));
+        unresolvedReferenceIdByText[referenceName] = unresolvedId;
+
+        AddEntityTriples(
+            triples,
+            unresolvedId,
+            "unresolved-type-reference",
+            referenceName,
+            $"unresolved/{referenceName}");
+
+        return unresolvedId;
+    }
+
+    private static bool IsExternalStubCandidate(string normalizedReferenceName)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedReferenceName))
+        {
+            return false;
+        }
+
+        return normalizedReferenceName.All(c => char.IsLetterOrDigit(c) || c is '_' or '.');
+    }
+
+    private static string NormalizeTypeReferenceName(string referenceName)
+    {
+        var normalized = referenceName.Trim();
+        if (normalized.StartsWith("global::", StringComparison.Ordinal))
+        {
+            normalized = normalized[8..];
+        }
+
+        var genericIndex = normalized.IndexOf('<');
+        if (genericIndex >= 0)
+        {
+            normalized = normalized[..genericIndex];
+        }
+
+        return normalized.Trim();
     }
 
     private sealed record PendingMemberTypeLink(
