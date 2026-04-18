@@ -146,6 +146,48 @@ public sealed class PackageDependencyVerticalSliceTests
     }
 
     [Fact]
+    public async Task Query_ProjectsPackageMethodBodyDependencyUsage_ByNamespaceTypeAndMethod_ExcludingNameof()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+
+        var query = new ProjectStructureQueryService(analysis.Triples);
+        var model = query.GetModel(analysis.RepositoryId);
+
+        Assert.Contains(analysis.Triples, x => x.Predicate == CorePredicates.DependsOnTypeInMethodBody);
+
+        var package = model.Packages.Single(x => x.Name == "Newtonsoft.Json");
+        Assert.True(package.MethodBodyDependencyUsage.UsageCount > 0);
+        Assert.NotEmpty(package.MethodBodyDependencyUsage.Namespaces);
+
+        var namespaceUsage = package.MethodBodyDependencyUsage.Namespaces.Single(x => x.NamespaceName == "App.WithAssets");
+        var typeUsage = namespaceUsage.Types.Single(x => x.TypeName == "BodyUsageFacade");
+
+        Assert.Contains(typeUsage.Methods, x => x.MethodSignature.Contains("Serialize(", StringComparison.Ordinal));
+        Assert.DoesNotContain(typeUsage.Methods, x => x.MethodSignature.Contains("TokenName(", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Render_PackagePage_IncludesMethodBodyDependencyUsageSection_WhenUsageExists()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var pages = new ProjectStructureWikiRenderer().Render(model);
+        var packagePage = pages.Single(page => page.RelativePath.StartsWith("packages/", StringComparison.Ordinal)
+            && page.Markdown.Contains("# Package: Newtonsoft.Json", StringComparison.Ordinal));
+
+        Assert.Contains("## Method Body Dependency Usage", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("BodyUsageFacade", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("- [[methods/", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("Serialize(", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("TokenName(", packagePage.Markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Ontology_ContainsPackagePredicates_AndStillValidates()
     {
         var ontologyPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "ontology", "ontology.v1.yaml"));
@@ -208,6 +250,24 @@ public sealed class PackageDependencyVerticalSliceTests
                 public sealed class SerializerFacade
                 {
                     public Newtonsoft.Json.Linq.JToken Normalize(Newtonsoft.Json.Linq.JObject payload) => payload;
+                }
+                """);
+            await File.WriteAllTextAsync(Path.Combine(withAssetsDir, "BodyUsage.cs"),
+                """
+                namespace App.WithAssets;
+
+                public sealed class BodyUsageFacade
+                {
+                    public string Serialize(object payload)
+                    {
+                        var token = Newtonsoft.Json.Linq.JToken.FromObject(payload);
+                        return token.ToString();
+                    }
+
+                    public string TokenName()
+                    {
+                        return nameof(Newtonsoft.Json.Linq.JToken);
+                    }
                 }
                 """);
 

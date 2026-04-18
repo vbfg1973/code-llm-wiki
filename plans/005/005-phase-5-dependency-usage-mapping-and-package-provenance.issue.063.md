@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 005](./005-phase-5-dependency-usage-mapping-and-package-provenance.prd.md)
 
 - Issue: [#63](https://github.com/vbfg1973/code-llm-wiki/issues/63)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: completed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,11 +18,11 @@ Implement the second end-to-end dependency vertical slice for method-body proven
 
 ## Acceptance criteria
 
-- [ ] Method-body provenance dependency predicate(s) are emitted from ingestion for approved operation forms.
-- [ ] `nameof` is excluded from method-body dependency evidence in v1.
-- [ ] Query projections expose method-body dependency usage grouped as `package -> namespace -> type -> method` with deterministic counts/order.
-- [ ] Package wiki output includes method-body dependency usage sections with navigable links and deterministic ordering.
-- [ ] Tests verify method-body extraction/projection/render behavior through public boundaries.
+- [x] Method-body provenance dependency predicate(s) are emitted from ingestion for approved operation forms.
+- [x] `nameof` is excluded from method-body dependency evidence in v1.
+- [x] Query projections expose method-body dependency usage grouped as `package -> namespace -> type -> method` with deterministic counts/order.
+- [x] Package wiki output includes method-body dependency usage sections with navigable links and deterministic ordering.
+- [x] Tests verify method-body extraction/projection/render behavior through public boundaries.
 
 ## Blocked by
 

@@ -1197,6 +1197,14 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     semanticModel,
                     memberIdByDeclarationLocation,
                     triples);
+
+                AddMethodBodyDependencyEdges(
+                    methodDeclaration,
+                    sourceMethodId,
+                    semanticModel,
+                    typeIdByQualifiedName,
+                    externalStubIdByReference,
+                    triples);
             }
 
             foreach (var constructorDeclaration in root.DescendantNodes().OfType<ConstructorDeclarationSyntax>())
@@ -1228,6 +1236,14 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     sourceMethodId,
                     semanticModel,
                     memberIdByDeclarationLocation,
+                    triples);
+
+                AddMethodBodyDependencyEdges(
+                    constructorDeclaration,
+                    sourceMethodId,
+                    semanticModel,
+                    typeIdByQualifiedName,
+                    externalStubIdByReference,
                     triples);
             }
         }
@@ -1397,6 +1413,208 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     break;
             }
         }
+    }
+
+    private void AddMethodBodyDependencyEdges(
+        MemberDeclarationSyntax declaration,
+        EntityId sourceMethodId,
+        SemanticModel semanticModel,
+        IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
+        Dictionary<string, EntityId> externalStubIdByReference,
+        List<SemanticTriple> triples)
+    {
+        var operationRoot = GetOperationRootForBody(declaration, semanticModel);
+        if (operationRoot is null)
+        {
+            return;
+        }
+
+        var emittedDependencyTargetIds = new HashSet<EntityId>();
+        foreach (var operation in EnumerateOperations(operationRoot))
+        {
+            if (IsWithinNameof(operation))
+            {
+                continue;
+            }
+
+            var candidateType = TryGetMethodBodyDependencyType(operation);
+            if (candidateType is null)
+            {
+                continue;
+            }
+
+            if (!TryResolveMethodBodyDependencyTargetId(
+                    candidateType,
+                    typeIdByQualifiedName,
+                    externalStubIdByReference,
+                    triples,
+                    out var dependencyTargetId))
+            {
+                continue;
+            }
+
+            if (emittedDependencyTargetIds.Add(dependencyTargetId))
+            {
+                triples.Add(new SemanticTriple(
+                    new EntityNode(sourceMethodId),
+                    CorePredicates.DependsOnTypeInMethodBody,
+                    new EntityNode(dependencyTargetId)));
+            }
+        }
+
+        foreach (var typeSyntax in EnumerateMethodBodyDependencyTypeSyntax(declaration))
+        {
+            if (IsWithinNameof(typeSyntax))
+            {
+                continue;
+            }
+
+            var typeInfo = semanticModel.GetTypeInfo(typeSyntax);
+            var candidateType = typeInfo.Type;
+            if (candidateType is null)
+            {
+                continue;
+            }
+
+            if (!TryResolveMethodBodyDependencyTargetId(
+                    candidateType,
+                    typeIdByQualifiedName,
+                    externalStubIdByReference,
+                    triples,
+                    out var dependencyTargetId))
+            {
+                continue;
+            }
+
+            if (emittedDependencyTargetIds.Add(dependencyTargetId))
+            {
+                triples.Add(new SemanticTriple(
+                    new EntityNode(sourceMethodId),
+                    CorePredicates.DependsOnTypeInMethodBody,
+                    new EntityNode(dependencyTargetId)));
+            }
+        }
+    }
+
+    private static IEnumerable<TypeSyntax> EnumerateMethodBodyDependencyTypeSyntax(MemberDeclarationSyntax declaration)
+    {
+        foreach (var castExpression in declaration.DescendantNodes().OfType<CastExpressionSyntax>())
+        {
+            yield return castExpression.Type;
+        }
+
+        foreach (var binaryExpression in declaration.DescendantNodes().OfType<BinaryExpressionSyntax>())
+        {
+            if (binaryExpression.IsKind(SyntaxKind.IsExpression)
+                || binaryExpression.IsKind(SyntaxKind.AsExpression))
+            {
+                if (binaryExpression.Right is TypeSyntax typeSyntax)
+                {
+                    yield return typeSyntax;
+                }
+            }
+        }
+
+        foreach (var typeOfExpression in declaration.DescendantNodes().OfType<TypeOfExpressionSyntax>())
+        {
+            yield return typeOfExpression.Type;
+        }
+    }
+
+    private static bool IsWithinNameof(SyntaxNode node)
+    {
+        return node.AncestorsAndSelf()
+            .OfType<InvocationExpressionSyntax>()
+            .Any(static invocation =>
+                invocation.Expression is IdentifierNameSyntax identifier
+                && string.Equals(identifier.Identifier.ValueText, "nameof", StringComparison.Ordinal));
+    }
+
+    private static bool IsWithinNameof(IOperation operation)
+    {
+        var current = operation;
+        while (current is not null)
+        {
+            if (current is INameOfOperation)
+            {
+                return true;
+            }
+
+            current = current.Parent;
+        }
+
+        return false;
+    }
+
+    private static ITypeSymbol? TryGetMethodBodyDependencyType(IOperation operation)
+    {
+        return operation switch
+        {
+            IInvocationOperation invocation => invocation.TargetMethod?.ContainingType,
+            IObjectCreationOperation creation => creation.Type,
+            IPropertyReferenceOperation propertyReference => propertyReference.Property?.ContainingType,
+            IFieldReferenceOperation fieldReference when !fieldReference.Field.IsImplicitlyDeclared => fieldReference.Field.ContainingType,
+            IMethodReferenceOperation methodReference => methodReference.Method?.ContainingType,
+            ITypeOfOperation typeOfOperation => typeOfOperation.TypeOperand,
+            _ => null,
+        };
+    }
+
+    private bool TryResolveMethodBodyDependencyTargetId(
+        ITypeSymbol candidateType,
+        IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
+        Dictionary<string, EntityId> externalStubIdByReference,
+        List<SemanticTriple> triples,
+        out EntityId targetId)
+    {
+        var normalizedSymbol = NormalizeMethodBodyDependencyTypeSymbol(candidateType);
+        if (normalizedSymbol is null)
+        {
+            targetId = default;
+            return false;
+        }
+
+        var qualifiedTypeName = GetTypeQualifiedName(normalizedSymbol);
+        if (typeIdByQualifiedName.TryGetValue(qualifiedTypeName, out var internalTypeId))
+        {
+            targetId = internalTypeId;
+            return true;
+        }
+
+        var normalizedReferenceName = NormalizeTypeReferenceName(
+            normalizedSymbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat));
+        if (!IsExternalStubCandidate(normalizedReferenceName))
+        {
+            targetId = default;
+            return false;
+        }
+
+        targetId = GetOrCreateExternalStubId(normalizedReferenceName, externalStubIdByReference, triples);
+        return true;
+    }
+
+    private static ITypeSymbol? NormalizeMethodBodyDependencyTypeSymbol(ITypeSymbol? typeSymbol)
+    {
+        while (typeSymbol is not null)
+        {
+            switch (typeSymbol)
+            {
+                case IArrayTypeSymbol arrayType:
+                    typeSymbol = arrayType.ElementType;
+                    continue;
+                case IPointerTypeSymbol pointerType:
+                    typeSymbol = pointerType.PointedAtType;
+                    continue;
+                case IDynamicTypeSymbol:
+                    return null;
+                case INamedTypeSymbol namedType when namedType.IsGenericType:
+                    return namedType.ConstructedFrom;
+                default:
+                    return typeSymbol;
+            }
+        }
+
+        return null;
     }
 
     private static void EmitMemberReadWriteTriples(
