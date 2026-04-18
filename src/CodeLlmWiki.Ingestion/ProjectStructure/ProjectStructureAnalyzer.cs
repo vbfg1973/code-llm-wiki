@@ -327,6 +327,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         var declaredTypeNamesBySimpleName = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var pendingMemberTypeLinks = new List<PendingMemberTypeLink>();
         var externalStubIdByReference = new Dictionary<string, EntityId>(StringComparer.Ordinal);
+        var unresolvedReferenceIdByText = new Dictionary<string, EntityId>(StringComparer.Ordinal);
 
         foreach (var group in typeGroups)
         {
@@ -532,10 +533,10 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     }
                     else
                     {
+                        baseTypeId = GetOrCreateUnresolvedReferenceId(normalizedBaseType, unresolvedReferenceIdByText, triples);
                         diagnostics.Add(new IngestionDiagnostic(
                             "type:resolution:fallback",
                             $"Unresolved base type '{baseType}' for '{representative.QualifiedName}'."));
-                        continue;
                     }
                 }
 
@@ -563,10 +564,10 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     }
                     else
                     {
+                        interfaceTypeId = GetOrCreateUnresolvedReferenceId(normalizedInterfaceType, unresolvedReferenceIdByText, triples);
                         diagnostics.Add(new IngestionDiagnostic(
                             "type:resolution:fallback",
                             $"Unresolved interface type '{interfaceType}' for '{representative.QualifiedName}'."));
-                        continue;
                     }
                 }
 
@@ -682,6 +683,29 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             $"external/{referenceName}");
 
         return stubId;
+    }
+
+    private EntityId GetOrCreateUnresolvedReferenceId(
+        string referenceName,
+        Dictionary<string, EntityId> unresolvedReferenceIdByText,
+        List<SemanticTriple> triples)
+    {
+        if (unresolvedReferenceIdByText.TryGetValue(referenceName, out var existing))
+        {
+            return existing;
+        }
+
+        var unresolvedId = _stableIdGenerator.Create(new EntityKey("unresolved-type-reference", referenceName));
+        unresolvedReferenceIdByText[referenceName] = unresolvedId;
+
+        AddEntityTriples(
+            triples,
+            unresolvedId,
+            "unresolved-type-reference",
+            referenceName,
+            $"unresolved/{referenceName}");
+
+        return unresolvedId;
     }
 
     private static bool IsExternalStubCandidate(string normalizedReferenceName)

@@ -537,7 +537,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         return reference.ResolutionStatus switch
         {
             DeclarationResolutionStatus.ExternalStub => $"{reference.DisplayText} (external)",
-            DeclarationResolutionStatus.SourceTextFallback => $"{reference.DisplayText} (unresolved)",
+            DeclarationResolutionStatus.SourceTextFallback => $"{reference.DisplayText} (source text fallback)",
             DeclarationResolutionStatus.Unresolved => $"{reference.DisplayText} (unresolved)",
             _ => reference.DisplayText,
         };

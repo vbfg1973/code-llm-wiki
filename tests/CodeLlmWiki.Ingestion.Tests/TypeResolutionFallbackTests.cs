@@ -76,6 +76,25 @@ public sealed class TypeResolutionFallbackTests
         Assert.NotEmpty(pages);
     }
 
+    [Fact]
+    public async Task Query_UnresolvedBaseTypes_AreRetainedWithFallbackStatus()
+    {
+        var fixture = await ResolutionFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+        var pages = new ProjectStructureWikiRenderer().Render(model);
+
+        var brokenWorker = model.Declarations.Types.Single(x => x.Name == "BrokenWorker");
+        var unresolvedBase = Assert.Single(brokenWorker.DirectBaseTypes);
+
+        Assert.Equal("Missing[]", unresolvedBase.DisplayText);
+        Assert.Equal(DeclarationResolutionStatus.SourceTextFallback, unresolvedBase.ResolutionStatus);
+
+        var brokenWorkerPage = pages.Single(x => x.RelativePath == "types/Acme/Resolution/BrokenWorker.md");
+        Assert.Contains("Missing[] (source text fallback)", brokenWorkerPage.Markdown, StringComparison.Ordinal);
+    }
+
     private sealed class ResolutionFixture
     {
         private ResolutionFixture(string repositoryPath)
@@ -129,6 +148,10 @@ public sealed class TypeResolutionFallbackTests
                     public void Dispose()
                     {
                     }
+                }
+
+                public class BrokenWorker : Missing[]
+                {
                 }
                 """);
 

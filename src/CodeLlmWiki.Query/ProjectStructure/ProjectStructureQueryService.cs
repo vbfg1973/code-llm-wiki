@@ -896,6 +896,11 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             return DeclarationResolutionStatus.ExternalStub;
         }
 
+        if (targetMeta.IsType("unresolved-type-reference"))
+        {
+            return DeclarationResolutionStatus.SourceTextFallback;
+        }
+
         return DeclarationResolutionStatus.Unresolved;
     }
 
