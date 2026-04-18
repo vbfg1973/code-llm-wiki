@@ -2,3 +2,7 @@ version: "1.0.0"
 predicates:
   - id: "core:contains"
   - id: "core:references"
+  - id: "core:entityType"
+  - id: "core:hasName"
+  - id: "core:hasPath"
+  - id: "core:discoveryMethod"
