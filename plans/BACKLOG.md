@@ -1,6 +1,6 @@
 # Feature Backlog
 
-Last updated: 2026-04-18
+Last updated: 2026-04-19
 
 Purpose: Track durable product capabilities from the original specification (not just implementation phases), with traceability to PRDs/plans/issues.
 
@@ -69,7 +69,8 @@ Purpose: Track durable product capabilities from the original specification (not
 - [ ] `BL-011` Dependency usage mapping
   - Detail: class/type dependency map with source provenance (namespace/project/package; internal vs external).
   - Planned in:
-    - PRD TBD
+    - [PRD 005](/home/vbfg/dev/dotnet-llm-wiki/plans/005/005-phase-5-dependency-usage-mapping-and-package-provenance.prd.md)
+    - GitHub issue: `#61`
 
 - [ ] `BL-012` Complexity and maintainability metrics
   - Detail: cognitive complexity, cyclomatic complexity, Halstead metrics, LOC, maintainability index, coupling between objects.
@@ -96,11 +97,13 @@ Purpose: Track durable product capabilities from the original specification (not
   - Planned in:
     - PRD TBD
 
-- [ ] `BL-017` Query and publication expansion
+- [x] `BL-017` Query and publication expansion
   - Detail: richer wiki projections and ad hoc query interfaces (including MCP-facing usage).
-  - Planned in:
+  - Implemented in:
     - [PRD 004](/home/vbfg/dev/dotnet-llm-wiki/plans/004/004-phase-4-wiki-navigation-link-consistency.prd.md)
-    - GitHub issue: `#54`
+    - Plan: [PRD 004 plan](/home/vbfg/dev/dotnet-llm-wiki/plans/004/004-phase-4-wiki-navigation-link-consistency.plan.md)
+    - Implementation issues (closed): `#55`, `#56`, `#57`
+    - Parent GitHub issue (closed): `#54`
 
 - [ ] `BL-018` Multi-language analyzer expansion
   - Detail: extend shared repository analysis interfaces to Python and frontend frameworks (React, Vue, Angular).
