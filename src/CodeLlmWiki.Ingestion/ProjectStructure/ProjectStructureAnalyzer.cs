@@ -736,6 +736,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
                     pendingMethodParameterTypeLinks.Add(new PendingMethodParameterTypeLink(
                         parameterId,
+                        methodId,
                         representative.NamespaceName,
                         parameter.DeclaredTypeName,
                         representative.ImportedNamespaces,
@@ -1030,6 +1031,10 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 new EntityNode(pendingReturnTypeLink.MethodId),
                 CorePredicates.HasReturnType,
                 new EntityNode(resolvedReturnTypeId)));
+            triples.Add(new SemanticTriple(
+                new EntityNode(pendingReturnTypeLink.MethodId),
+                CorePredicates.DependsOnTypeDeclaration,
+                new EntityNode(resolvedReturnTypeId)));
         }
 
         foreach (var pendingExtendedTypeLink in pendingMethodExtendedTypeLinks)
@@ -1062,6 +1067,10 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 new EntityNode(pendingExtendedTypeLink.MethodId),
                 CorePredicates.ExtendsType,
                 new EntityNode(resolvedExtendedTypeId)));
+            triples.Add(new SemanticTriple(
+                new EntityNode(pendingExtendedTypeLink.MethodId),
+                CorePredicates.DependsOnTypeDeclaration,
+                new EntityNode(resolvedExtendedTypeId)));
         }
 
         foreach (var pendingParameterTypeLink in pendingMethodParameterTypeLinks)
@@ -1093,6 +1102,10 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             triples.Add(new SemanticTriple(
                 new EntityNode(pendingParameterTypeLink.ParameterId),
                 CorePredicates.HasDeclaredType,
+                new EntityNode(resolvedParameterTypeId)));
+            triples.Add(new SemanticTriple(
+                new EntityNode(pendingParameterTypeLink.MethodId),
+                CorePredicates.DependsOnTypeDeclaration,
                 new EntityNode(resolvedParameterTypeId)));
         }
     }
@@ -2042,6 +2055,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
     private sealed record PendingMethodParameterTypeLink(
         EntityId ParameterId,
+        EntityId MethodId,
         string NamespaceName,
         string DeclaredTypeName,
         IReadOnlyList<string> ImportedNamespaces,

@@ -206,6 +206,23 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             .ToArray();
 
         var declarations = BuildDeclarationCatalog(_triples, metadataById, repositoryId);
+        var declarationDependencyUsageByPackageId = new DeclarationDependencyUsageProjector().Project(
+            new DeclarationDependencyUsageProjectionRequest(
+                _triples,
+                projects,
+                packages,
+                files,
+                declarations.Namespaces,
+                declarations.Types,
+                declarations.Methods.Declarations));
+        packages = packages
+            .Select(package => package with
+            {
+                DeclarationDependencyUsage = declarationDependencyUsageByPackageId.TryGetValue(package.Id, out var usage)
+                    ? usage
+                    : PackageDeclarationDependencyUsageCatalog.Empty,
+            })
+            .ToArray();
 
         var repository = new RepositoryNode(
             repositoryId,
