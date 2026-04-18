@@ -11,7 +11,8 @@ internal static class CSharpDeclarationScanner
     public static NamespaceDiscoveryResult Discover(
         string repositoryRoot,
         IReadOnlyList<string> relativeSourcePaths,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? sourceTextByRelativePath = null)
     {
         var declaredNamespaceFiles = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var declaredNamespaceLocations = new Dictionary<string, HashSet<DeclarationSourceLocation>>();
@@ -19,13 +20,10 @@ internal static class CSharpDeclarationScanner
 
         foreach (var relativePath in relativeSourcePaths)
         {
-            var fullPath = Path.Combine(repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(fullPath))
+            if (!TryGetSourceText(repositoryRoot, relativePath, sourceTextByRelativePath, out var source))
             {
                 continue;
             }
-
-            var source = File.ReadAllText(fullPath);
             var syntaxTree = CSharpSyntaxTree.ParseText(source, path: relativePath, cancellationToken: cancellationToken);
             var root = syntaxTree.GetRoot(cancellationToken) as CompilationUnitSyntax;
             if (root is null)
@@ -81,6 +79,28 @@ internal static class CSharpDeclarationScanner
             .ToArray();
 
         return new NamespaceDiscoveryResult(namespaceNodes, typeNodes);
+    }
+
+    private static bool TryGetSourceText(
+        string repositoryRoot,
+        string relativePath,
+        IReadOnlyDictionary<string, string>? sourceTextByRelativePath,
+        out string source)
+    {
+        if (sourceTextByRelativePath is not null && sourceTextByRelativePath.TryGetValue(relativePath, out source!))
+        {
+            return true;
+        }
+
+        var fullPath = Path.Combine(repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(fullPath))
+        {
+            source = string.Empty;
+            return false;
+        }
+
+        source = File.ReadAllText(fullPath);
+        return true;
     }
 
     private static void VisitMembers(

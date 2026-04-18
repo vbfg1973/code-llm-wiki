@@ -262,10 +262,16 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             return;
         }
 
+        var sourceTextByRelativePath = BuildHeadSourceSnapshot(repositoryRoot, sourceFiles, diagnostics);
+
         NamespaceDiscoveryResult discovery;
         try
         {
-            discovery = CSharpDeclarationScanner.Discover(repositoryRoot, sourceFiles, cancellationToken);
+            discovery = CSharpDeclarationScanner.Discover(
+                repositoryRoot,
+                sourceFiles,
+                cancellationToken,
+                sourceTextByRelativePath);
         }
         catch (Exception ex)
         {
@@ -953,6 +959,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         CaptureMethodCalls(
             repositoryRoot,
             sourceFiles,
+            sourceTextByRelativePath,
             typeIdByQualifiedName,
             methodCandidatesByTypeId,
             memberIdByDeclarationLocation,
@@ -1093,6 +1100,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
     private void CaptureMethodCalls(
         string repositoryRoot,
         IReadOnlyList<string> sourceFiles,
+        IReadOnlyDictionary<string, string> sourceTextByRelativePath,
         IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
         IReadOnlyDictionary<EntityId, List<MethodRelationshipCandidate>> methodCandidatesByTypeId,
         IReadOnlyDictionary<MemberDeclarationLocationKey, EntityId> memberIdByDeclarationLocation,
@@ -1110,13 +1118,17 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         var syntaxTrees = new List<SyntaxTree>(sourceFiles.Count);
         foreach (var relativePath in sourceFiles.OrderBy(x => x, StringComparer.Ordinal))
         {
-            var fullPath = Path.Combine(repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(fullPath))
+            if (!sourceTextByRelativePath.TryGetValue(relativePath, out var sourceText))
             {
-                continue;
+                var fullPath = Path.Combine(repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(fullPath))
+                {
+                    continue;
+                }
+
+                sourceText = File.ReadAllText(fullPath);
             }
 
-            var sourceText = File.ReadAllText(fullPath);
             var syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: relativePath);
             syntaxTrees.Add(syntaxTree);
         }
@@ -2812,6 +2824,34 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         }
 
         return parsed.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
+    }
+
+    private static Dictionary<string, string> BuildHeadSourceSnapshot(
+        string repositoryRoot,
+        IReadOnlyList<string> relativeSourcePaths,
+        List<IngestionDiagnostic> diagnostics)
+    {
+        var sourceTextByRelativePath = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var relativePath in relativeSourcePaths
+                     .Where(x => !string.IsNullOrWhiteSpace(x))
+                     .Distinct(StringComparer.Ordinal)
+                     .OrderBy(x => x, StringComparer.Ordinal))
+        {
+            var gitPath = relativePath.Replace('\\', '/');
+            var result = RunGitText(repositoryRoot, "show", $"HEAD:{gitPath}");
+            if (result.ExitCode != 0)
+            {
+                diagnostics.Add(new IngestionDiagnostic(
+                    "git:head:file:not-available",
+                    $"Failed to load HEAD content for '{relativePath}'; falling back to working tree file content when available."));
+                continue;
+            }
+
+            sourceTextByRelativePath[relativePath] = result.Output;
+        }
+
+        return sourceTextByRelativePath;
     }
 
     private static GitCommandResult RunGitWithNulDelimitedOutput(string repositoryRoot, params string[] args)
