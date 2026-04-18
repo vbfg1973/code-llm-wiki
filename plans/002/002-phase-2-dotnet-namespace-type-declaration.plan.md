@@ -11,7 +11,7 @@
 - [x] Phase 5: Member Declaration Topology Vertical Slice — completion date: 2026-04-18
 - [x] Phase 6: Type Resolution Fallback and External Stub References — completion date: 2026-04-18
 - [x] Phase 7: File Backlink and Traceability Vertical Slice — completion date: 2026-04-18
-- [ ] Phase 8: Publication Determinism, Front Matter Validation, and CI Gates — completion date: 
+- [x] Phase 8: Publication Determinism, Front Matter Validation, and CI Gates — completion date: 2026-04-18
 
 ---
 
@@ -169,7 +169,7 @@ Harden phase-2 publication and validation behavior: enforce scalar front matter 
 
 ### Acceptance criteria
 
-- [ ] Namespace/type/file page front matter validation enforces minimal scalar contracts with conditional fields.
-- [ ] Visible wiki body content remains ID-light/human-readable while IDs remain queryable via front matter/index.
-- [ ] HEAD + git-tracked boundary behavior is preserved, including build-artifact exclusion rules.
-- [ ] Golden and behavioral test suites verify deterministic output, edge cases (partial/nested/generic), and degradation diagnostics.
+- [x] Namespace/type/file page front matter validation enforces minimal scalar contracts with conditional fields.
+- [x] Visible wiki body content remains ID-light/human-readable while IDs remain queryable via front matter/index.
+- [x] HEAD + git-tracked boundary behavior is preserved, including build-artifact exclusion rules.
+- [x] Golden and behavioral test suites verify deterministic output, edge cases (partial/nested/generic), and degradation diagnostics.
