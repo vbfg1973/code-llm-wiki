@@ -157,6 +157,44 @@ public sealed class IngestionArtifactPublisherTests
         Assert.True(longestMethodFileNameLength <= 123, $"Unexpectedly long method wiki filename length: {longestMethodFileNameLength}");
     }
 
+    [Fact]
+    public async Task PublishAsync_Fails_AndDoesNotPromoteLatest_WhenScopedLinkInvariantsFail()
+    {
+        var fixture = await PublisherFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+
+        var runResult = new IngestionRunResult(
+            Status: IngestionRunStatus.SucceededWithDiagnostics,
+            ExitCode: 0,
+            Diagnostics: analysis.Diagnostics,
+            RepositoryId: analysis.RepositoryId,
+            Triples: analysis.Triples);
+
+        var outputRoot = Path.Combine(Path.GetTempPath(), $"codellmwiki-artifacts-invariant-fail-{Guid.NewGuid():N}");
+        var latestDirectory = Path.Combine(outputRoot, "latest");
+        Directory.CreateDirectory(latestDirectory);
+        var markerPath = Path.Combine(latestDirectory, "marker.txt");
+        await File.WriteAllTextAsync(markerPath, "preserve");
+
+        var publisher = new IngestionArtifactPublisher(new FailingInvariantValidator());
+
+        var result = await publisher.PublishAsync(
+            new IngestionArtifactPublishRequest(
+                RepositoryPath: fixture.RepositoryPath,
+                OutputRootPath: outputRoot,
+                StartedAtUtc: new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                CompletedAtUtc: new DateTimeOffset(2026, 1, 1, 0, 0, 5, TimeSpan.Zero),
+                RunResult: runResult),
+            CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.LatestPromoted);
+        Assert.True(File.Exists(markerPath));
+        Assert.Contains("Scoped wiki link invariants failed", result.FailureReason, StringComparison.Ordinal);
+        Assert.Contains("namespaces/Sample/App.md", result.FailureReason, StringComparison.Ordinal);
+    }
+
     private static int CountOccurrences(string value, string token)
     {
         var count = 0;
@@ -189,6 +227,22 @@ public sealed class IngestionArtifactPublisherTests
                 return $"{relative}\n{content}";
             })
             .ToArray();
+    }
+
+    private sealed class FailingInvariantValidator : IWikiScopedLinkInvariantValidator
+    {
+        public WikiScopedLinkInvariantValidationResult Validate(WikiScopedLinkInvariantValidationRequest request)
+        {
+            return new WikiScopedLinkInvariantValidationResult(
+                [
+                    new WikiScopedLinkInvariantViolation(
+                        PageRelativePath: "namespaces/Sample/App.md",
+                        SectionPath: "## Contained Types",
+                        LineNumber: 12,
+                        LineText: "- Worker (class)",
+                        Message: "Expected wiki link bullet for resolvable target.")
+                ]);
+        }
     }
 
     private sealed class PublisherFixture

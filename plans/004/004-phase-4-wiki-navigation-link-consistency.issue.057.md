@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 004](./004-phase-4-wiki-navigation-link-consistency.prd.md)
 
 - Issue: [#57](https://github.com/vbfg1973/code-llm-wiki/issues/57)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: completed
+- [x] Completion date: 2026-04-18
 
 ## Notes
 
@@ -18,11 +18,11 @@ Add a scoped publication-time invariant validator for the two PRD 004 sections a
 
 ## Acceptance criteria
 
-- [ ] Publication invariant validator exists for namespace contained-type and file method sections and reports concrete violations.
-- [ ] Artifact publication fails when scoped link invariants are violated.
-- [ ] Invalid runs are not promoted to `latest` when scoped link invariants fail.
-- [ ] Publisher/validator tests cover pass/fail paths, including failure messaging and promotion behavior.
-- [ ] Golden/snapshot tests are updated only for intentional output deltas introduced by scoped link hardening.
+- [x] Publication invariant validator exists for namespace contained-type and file method sections and reports concrete violations.
+- [x] Artifact publication fails when scoped link invariants are violated.
+- [x] Invalid runs are not promoted to `latest` when scoped link invariants fail.
+- [x] Publisher/validator tests cover pass/fail paths, including failure messaging and promotion behavior.
+- [x] Golden/snapshot tests are updated only for intentional output deltas introduced by scoped link hardening.
 
 ## Blocked by
 

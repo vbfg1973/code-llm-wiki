@@ -10,11 +10,18 @@ namespace CodeLlmWiki.Cli.Features.Ingest;
 
 public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
 {
+    private readonly IWikiScopedLinkInvariantValidator _wikiScopedLinkInvariantValidator;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
+
+    public IngestionArtifactPublisher(IWikiScopedLinkInvariantValidator? wikiScopedLinkInvariantValidator = null)
+    {
+        _wikiScopedLinkInvariantValidator = wikiScopedLinkInvariantValidator ?? new WikiScopedLinkInvariantValidator();
+    }
 
     public async Task<IngestionArtifactPublishResult> PublishAsync(
         IngestionArtifactPublishRequest request,
@@ -44,6 +51,13 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
                 var pages = renderer.Render(model, request.MaxMergeEntriesPerFile)
                     .OrderBy(x => x.RelativePath, StringComparer.Ordinal)
                     .ToArray();
+
+                var validation = _wikiScopedLinkInvariantValidator.Validate(
+                    new WikiScopedLinkInvariantValidationRequest(model, pages));
+                if (!validation.IsValid)
+                {
+                    throw new InvalidOperationException(validation.ToFailureMessage());
+                }
 
                 wikiPageCount = pages.Length;
                 wikiDirectory = Path.Combine(runDirectory, "wiki");
