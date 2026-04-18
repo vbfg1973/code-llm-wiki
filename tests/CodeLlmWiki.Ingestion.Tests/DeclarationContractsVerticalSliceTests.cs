@@ -42,6 +42,7 @@ public sealed class DeclarationContractsVerticalSliceTests
         Assert.Contains("core:hasDeclaringType", predicateIds);
         Assert.Contains("core:hasDeclaredType", predicateIds);
         Assert.Contains("core:hasDeclaredTypeText", predicateIds);
+        Assert.Contains("core:declarationSourceLocation", predicateIds);
         Assert.Contains("core:resolutionStatus", predicateIds);
         Assert.Contains("core:arity", predicateIds);
         Assert.Contains("core:genericParameter", predicateIds);

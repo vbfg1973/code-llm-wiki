@@ -74,9 +74,9 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         var typeById = model.Declarations.Types.ToDictionary(x => x.Id, x => x);
         var memberById = model.Declarations.Members.ToDictionary(x => x.Id, x => x);
         var fileById = model.Files.ToDictionary(x => x.Id, x => x);
-        var namespaceBacklinksByFileId = BuildNamespaceBacklinksByFileId(model.Declarations.Namespaces);
-        var typeBacklinksByFileId = BuildTypeBacklinksByFileId(model.Declarations.Types);
-        var memberBacklinksByFileId = BuildMemberBacklinksByFileId(model.Declarations.Members);
+        var namespaceBacklinksByFileId = BuildNamespaceBacklinksByFileId(model.Declarations.Namespaces, fileById);
+        var typeBacklinksByFileId = BuildTypeBacklinksByFileId(model.Declarations.Types, fileById);
+        var memberBacklinksByFileId = BuildMemberBacklinksByFileId(model.Declarations.Members, fileById);
 
         var pages = new List<WikiPage>
         {
@@ -297,54 +297,107 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
     }
 
     private static IReadOnlyDictionary<EntityId, IReadOnlyList<NamespaceDeclarationNode>> BuildNamespaceBacklinksByFileId(
-        IReadOnlyList<NamespaceDeclarationNode> namespaces)
+        IReadOnlyList<NamespaceDeclarationNode> namespaces,
+        IReadOnlyDictionary<EntityId, FileNode> fileById)
     {
         return namespaces
             .SelectMany(namespaceDeclaration => namespaceDeclaration.DeclarationFileIds.Select(fileId => (fileId, namespaceDeclaration)))
             .GroupBy(x => x.fileId)
             .ToDictionary(
                 x => x.Key,
-                x => (IReadOnlyList<NamespaceDeclarationNode>)x
+                x =>
+                {
+                    var filePath = fileById.TryGetValue(x.Key, out var file) ? file.Path : string.Empty;
+
+                    return (IReadOnlyList<NamespaceDeclarationNode>)x
                     .Select(v => v.namespaceDeclaration)
                     .DistinctBy(v => v.Id)
-                    .OrderBy(v => v.Path, StringComparer.Ordinal)
+                    .OrderBy(v => filePath, StringComparer.Ordinal)
+                    .ThenBy(v => ResolveDeclarationLocationSortLine(v.DeclarationLocations, filePath))
+                    .ThenBy(v => ResolveDeclarationLocationSortColumn(v.DeclarationLocations, filePath))
+                    .ThenBy(v => v.Path, StringComparer.Ordinal)
                     .ThenBy(v => v.Name, StringComparer.Ordinal)
                     .ThenBy(v => v.Id.Value, StringComparer.Ordinal)
-                    .ToArray());
+                    .ToArray();
+                });
     }
 
     private static IReadOnlyDictionary<EntityId, IReadOnlyList<TypeDeclarationNode>> BuildTypeBacklinksByFileId(
-        IReadOnlyList<TypeDeclarationNode> types)
+        IReadOnlyList<TypeDeclarationNode> types,
+        IReadOnlyDictionary<EntityId, FileNode> fileById)
     {
         return types
             .SelectMany(typeDeclaration => typeDeclaration.DeclarationFileIds.Select(fileId => (fileId, typeDeclaration)))
             .GroupBy(x => x.fileId)
             .ToDictionary(
                 x => x.Key,
-                x => (IReadOnlyList<TypeDeclarationNode>)x
+                x =>
+                {
+                    var filePath = fileById.TryGetValue(x.Key, out var file) ? file.Path : string.Empty;
+
+                    return (IReadOnlyList<TypeDeclarationNode>)x
                     .Select(v => v.typeDeclaration)
                     .DistinctBy(v => v.Id)
-                    .OrderBy(v => v.Path, StringComparer.Ordinal)
+                    .OrderBy(v => filePath, StringComparer.Ordinal)
+                    .ThenBy(v => ResolveDeclarationLocationSortLine(v.DeclarationLocations, filePath))
+                    .ThenBy(v => ResolveDeclarationLocationSortColumn(v.DeclarationLocations, filePath))
+                    .ThenBy(v => v.Path, StringComparer.Ordinal)
                     .ThenBy(v => v.Name, StringComparer.Ordinal)
                     .ThenBy(v => v.Id.Value, StringComparer.Ordinal)
-                    .ToArray());
+                    .ToArray();
+                });
     }
 
     private static IReadOnlyDictionary<EntityId, IReadOnlyList<MemberDeclarationNode>> BuildMemberBacklinksByFileId(
-        IReadOnlyList<MemberDeclarationNode> members)
+        IReadOnlyList<MemberDeclarationNode> members,
+        IReadOnlyDictionary<EntityId, FileNode> fileById)
     {
         return members
             .SelectMany(member => member.DeclarationFileIds.Select(fileId => (fileId, member)))
             .GroupBy(x => x.fileId)
             .ToDictionary(
                 x => x.Key,
-                x => (IReadOnlyList<MemberDeclarationNode>)x
+                x =>
+                {
+                    var filePath = fileById.TryGetValue(x.Key, out var file) ? file.Path : string.Empty;
+
+                    return (IReadOnlyList<MemberDeclarationNode>)x
                     .Select(v => v.member)
                     .DistinctBy(v => v.Id)
-                    .OrderBy(v => v.Kind.ToString(), StringComparer.Ordinal)
+                    .OrderBy(v => filePath, StringComparer.Ordinal)
+                    .ThenBy(v => ResolveDeclarationLocationSortLine(v.DeclarationLocations, filePath))
+                    .ThenBy(v => ResolveDeclarationLocationSortColumn(v.DeclarationLocations, filePath))
+                    .ThenBy(v => v.Kind.ToString(), StringComparer.Ordinal)
                     .ThenBy(v => v.Name, StringComparer.Ordinal)
                     .ThenBy(v => v.Id.Value, StringComparer.Ordinal)
-                    .ToArray());
+                    .ToArray();
+                });
+    }
+
+    private static int ResolveDeclarationLocationSortLine(
+        IReadOnlyList<DeclarationLocationNode> locations,
+        string filePath)
+    {
+        var location = locations
+            .Where(x => x.FilePath.Equals(filePath, StringComparison.Ordinal))
+            .OrderBy(x => x.Line)
+            .ThenBy(x => x.Column)
+            .FirstOrDefault();
+
+        return location?.Line ?? int.MaxValue;
+    }
+
+    private static int ResolveDeclarationLocationSortColumn(
+        IReadOnlyList<DeclarationLocationNode> locations,
+        string filePath)
+    {
+        var location = locations
+            .Where(x => x.FilePath.Equals(filePath, StringComparison.Ordinal))
+            .OrderBy(x => x.Line)
+            .ThenBy(x => x.Column)
+            .FirstOrDefault();
+
+        return location?.Column ?? int.MaxValue;
     }
 
     private static WikiPage RenderNamespacePage(
@@ -543,6 +596,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         {
             frontMatter.Add(KeyValue("primary_project_id", primaryProject.Id.Value));
             frontMatter.Add(KeyValue("primary_project_name", primaryProject.Name));
+            frontMatter.Add(KeyValue("primary_assembly_name", primaryProject.Name));
             frontMatter.Add(KeyValue("primary_project_path", primaryProject.Path));
         }
 
@@ -716,17 +770,21 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         IReadOnlyList<ProjectNode> projects,
         out ProjectNode primaryProject)
     {
-        var orderedDeclarationFiles = typeDeclaration.DeclarationFileIds
-            .Where(fileById.ContainsKey)
-            .Select(id => fileById[id])
-            .OrderBy(file => file.Path, StringComparer.Ordinal)
-            .ThenBy(file => file.Id.Value, StringComparer.Ordinal)
+        var orderedDeclarationFilePaths = typeDeclaration.DeclarationLocations
+            .OrderBy(x => x.FilePath, StringComparer.Ordinal)
+            .ThenBy(x => x.Line)
+            .ThenBy(x => x.Column)
+            .Select(x => x.FilePath)
+            .Concat(typeDeclaration.DeclarationFileIds
+                .Where(fileById.ContainsKey)
+                .Select(id => fileById[id].Path))
+            .Distinct(StringComparer.Ordinal)
             .ToArray();
 
-        foreach (var declarationFile in orderedDeclarationFiles)
+        foreach (var declarationFilePath in orderedDeclarationFilePaths)
         {
             var project = projects
-                .Where(candidate => IsFileWithinProject(candidate.Path, declarationFile.Path))
+                .Where(candidate => IsFileWithinProject(candidate.Path, declarationFilePath))
                 .OrderByDescending(candidate => candidate.Path.Length)
                 .ThenBy(candidate => candidate.Path, StringComparer.Ordinal)
                 .ThenBy(candidate => candidate.Id.Value, StringComparer.Ordinal)

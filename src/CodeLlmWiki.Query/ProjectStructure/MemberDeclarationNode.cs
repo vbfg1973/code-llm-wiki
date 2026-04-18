@@ -11,4 +11,7 @@ public sealed record MemberDeclarationNode(
     DeclarationAccessibility Accessibility,
     TypeReferenceNode? DeclaredType,
     string? ConstantValue,
-    IReadOnlyList<EntityId> DeclarationFileIds);
+    IReadOnlyList<EntityId> DeclarationFileIds)
+{
+    public IReadOnlyList<DeclarationLocationNode> DeclarationLocations { get; init; } = [];
+}

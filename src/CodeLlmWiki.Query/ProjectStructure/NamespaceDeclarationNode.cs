@@ -9,4 +9,7 @@ public sealed record NamespaceDeclarationNode(
     EntityId? ParentNamespaceId,
     IReadOnlyList<EntityId> ChildNamespaceIds,
     IReadOnlyList<EntityId> ContainedTypeIds,
-    IReadOnlyList<EntityId> DeclarationFileIds);
+    IReadOnlyList<EntityId> DeclarationFileIds)
+{
+    public IReadOnlyList<DeclarationLocationNode> DeclarationLocations { get; init; } = [];
+}

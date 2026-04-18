@@ -44,6 +44,23 @@ public sealed class FileBacklinkTraceabilityTests
         Assert.Contains("Trace.Sample", filePage.Markdown, StringComparison.Ordinal);
         Assert.Contains("Shared", filePage.Markdown, StringComparison.Ordinal);
         Assert.Contains("AValue", filePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("ZValue", filePage.Markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Render_FilePageMemberBacklinks_OrderBySourceLocationThenIdentity()
+    {
+        var fixture = await TraceabilityFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+        var pages = new ProjectStructureWikiRenderer().Render(model);
+
+        var filePage = pages.Single(x => x.RelativePath == "files/src/A/DeclarationsA.cs.md");
+        var zValueIndex = filePage.Markdown.IndexOf("ZValue (property)", StringComparison.Ordinal);
+        var aValueIndex = filePage.Markdown.IndexOf("AValue (property)", StringComparison.Ordinal);
+
+        Assert.True(zValueIndex >= 0 && aValueIndex > zValueIndex);
     }
 
     [Fact]
@@ -75,6 +92,7 @@ public sealed class FileBacklinkTraceabilityTests
 
         var typePage = pages.Single(x => x.RelativePath == "types/Trace/Sample/Shared.md");
         Assert.Contains("primary_project_name: AProject", typePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("primary_assembly_name: AProject", typePage.Markdown, StringComparison.Ordinal);
         Assert.Contains("primary_project_path: src/A/A.csproj", typePage.Markdown, StringComparison.Ordinal);
     }
 
@@ -131,6 +149,7 @@ public sealed class FileBacklinkTraceabilityTests
 
                 public partial class Shared
                 {
+                    public int ZValue { get; set; }
                     public int AValue { get; set; }
                 }
                 """);

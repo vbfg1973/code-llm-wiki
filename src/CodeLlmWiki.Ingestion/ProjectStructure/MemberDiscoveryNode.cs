@@ -6,4 +6,6 @@ internal sealed record MemberDiscoveryNode(
     string Accessibility,
     string? DeclaredTypeName,
     string? ConstantValue,
-    string RelativeFilePath);
+    string RelativeFilePath,
+    int SourceLine,
+    int SourceColumn);

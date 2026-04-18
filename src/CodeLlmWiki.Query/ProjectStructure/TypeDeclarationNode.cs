@@ -19,4 +19,7 @@ public sealed record TypeDeclarationNode(
     IReadOnlyList<TypeReferenceNode> DirectBaseTypes,
     IReadOnlyList<TypeReferenceNode> DirectInterfaceTypes,
     IReadOnlyList<EntityId> MemberIds,
-    IReadOnlyList<EntityId> DeclarationFileIds);
+    IReadOnlyList<EntityId> DeclarationFileIds)
+{
+    public IReadOnlyList<DeclarationLocationNode> DeclarationLocations { get; init; } = [];
+}

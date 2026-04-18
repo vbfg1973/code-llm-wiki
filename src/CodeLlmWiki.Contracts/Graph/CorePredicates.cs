@@ -45,6 +45,7 @@ public static class CorePredicates
     public static readonly PredicateId HasDeclaredType = new("core:hasDeclaredType");
     public static readonly PredicateId HasDeclaredTypeText = new("core:hasDeclaredTypeText");
     public static readonly PredicateId ConstantValue = new("core:constantValue");
+    public static readonly PredicateId DeclarationSourceLocation = new("core:declarationSourceLocation");
     public static readonly PredicateId ResolutionStatus = new("core:resolutionStatus");
     public static readonly PredicateId IsPartialType = new("core:isPartialType");
     public static readonly PredicateId Arity = new("core:arity");
