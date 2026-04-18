@@ -218,6 +218,7 @@ public sealed class DeclarationContractsVerticalSliceTests
         var typeId = new EntityId("type:Sample.OrderService");
         var methodId = new EntityId("method:Sample.OrderService.Save(System.String)");
         var methodInterfaceId = new EntityId("method:Sample.IOrderService.Save(System.String)");
+        var parameterId = new EntityId("parameter:Sample.OrderService.Save(System.String):0");
 
         var triples =
             new[]
@@ -251,7 +252,13 @@ public sealed class DeclarationContractsVerticalSliceTests
                 Triple(methodInterfaceId, "core:arity", "0"),
                 Triple(methodInterfaceId, "core:hasReturnTypeText", "void"),
 
+                Triple(parameterId, "core:entityType", "method-parameter"),
+                Triple(parameterId, "core:parameterOrdinal", "0"),
+                Triple(parameterId, "core:parameterName", "orderId"),
+                Triple(parameterId, "core:hasDeclaredTypeText", "System.String"),
+
                 Edge(typeId, "core:containsMethod", methodId),
+                Edge(methodId, "core:hasMethodParameter", parameterId),
                 Edge(methodId, "core:implementsMethod", methodInterfaceId),
             };
 
@@ -261,11 +268,17 @@ public sealed class DeclarationContractsVerticalSliceTests
         Assert.Equal(MethodDeclarationKind.Method, method.Kind);
         Assert.Equal("Save", method.Name);
         Assert.Equal("void", method.ReturnType?.DisplayText);
+        var parameter = Assert.Single(method.Parameters);
+        Assert.Equal("orderId", parameter.Name);
+        Assert.Equal(0, parameter.Ordinal);
+        Assert.Equal("System.String", parameter.Type?.DisplayText);
+        Assert.Equal(DeclarationResolutionStatus.SourceTextFallback, parameter.Type?.ResolutionStatus);
 
         var relation = Assert.Single(model.Declarations.Methods.Relations);
         Assert.Equal(MethodRelationKind.ImplementsMethod, relation.Kind);
         Assert.Equal(methodId, relation.SourceMethodId);
         Assert.Equal(methodInterfaceId, relation.TargetMethodId);
+        Assert.Equal(DeclarationResolutionStatus.Resolved, relation.ResolutionStatus);
 
         var owningType = Assert.Single(model.Declarations.Types, x => x.Id == typeId);
         Assert.Contains(methodId, owningType.MethodIds);

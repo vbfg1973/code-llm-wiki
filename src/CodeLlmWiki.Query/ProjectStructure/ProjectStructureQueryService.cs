@@ -385,6 +385,14 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             {
                 meta.IsExtensionMethod = bool.TryParse(value, out var parsed) && parsed;
             }
+            else if (triple.Predicate == CorePredicates.ParameterOrdinal)
+            {
+                meta.ParameterOrdinal = int.TryParse(value, out var parsed) ? parsed : -1;
+            }
+            else if (triple.Predicate == CorePredicates.ParameterName)
+            {
+                meta.ParameterName = value;
+            }
         }
 
         return byId;
@@ -574,8 +582,9 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         var declaringTypeEdges = BuildEntityEdges(triples, CorePredicates.HasDeclaringType);
         var containsMemberEdges = BuildEntityEdges(triples, CorePredicates.ContainsMember);
         var containsMethodEdges = BuildEntityEdges(triples, CorePredicates.ContainsMethod);
-        var memberDeclaredTypeEdges = BuildEntityEdges(triples, CorePredicates.HasDeclaredType);
+        var declaredTypeEdges = BuildEntityEdges(triples, CorePredicates.HasDeclaredType);
         var methodReturnTypeEdges = BuildEntityEdges(triples, CorePredicates.HasReturnType);
+        var methodParameterEdges = BuildEntityEdges(triples, CorePredicates.HasMethodParameter);
         var fileDeclaresMember = BuildEntityEdges(triples, CorePredicates.DeclaresMember);
         var fileDeclaresMethod = BuildEntityEdges(triples, CorePredicates.DeclaresMethod);
         var methodImplementsEdges = BuildEntityEdges(triples, CorePredicates.ImplementsMethod);
@@ -711,13 +720,23 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.Path : id.Value, StringComparer.Ordinal)
                     .ToArray());
 
-        var declaredTypeByMember = memberDeclaredTypeEdges
+        var declaredTypeByEntity = declaredTypeEdges
             .GroupBy(x => x.Subject)
             .ToDictionary(x => x.Key, x => x.First().Object);
 
         var returnTypeByMethod = methodReturnTypeEdges
             .GroupBy(x => x.Subject)
             .ToDictionary(x => x.Key, x => x.First().Object);
+
+        var parameterIdsByMethod = methodParameterEdges
+            .GroupBy(x => x.Subject)
+            .ToDictionary(
+                x => x.Key,
+                x => x.Select(v => v.Object)
+                    .Distinct()
+                    .OrderBy(id => metadataById.TryGetValue(id, out var meta) ? meta.ParameterOrdinal : int.MaxValue)
+                    .ThenBy(id => metadataById.TryGetValue(id, out var meta) ? meta.ParameterName : id.Value, StringComparer.Ordinal)
+                    .ToArray());
 
         var extendedTypeByMethod = methodExtendsTypeEdges
             .GroupBy(x => x.Subject)
@@ -882,7 +901,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 declarationFilesByMember.TryGetValue(memberId, out var declarationFileIds);
                 declarationFileIds ??= [];
 
-                declaredTypeByMember.TryGetValue(memberId, out var declaredTypeId);
+                declaredTypeByEntity.TryGetValue(memberId, out var declaredTypeId);
 
                 var declaredType = declaredTypeId == default
                     ? (!string.IsNullOrWhiteSpace(meta.DeclaredTypeText)
@@ -948,6 +967,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 declarationFileIds ??= [];
                 returnTypeByMethod.TryGetValue(methodId, out var returnTypeId);
                 extendedTypeByMethod.TryGetValue(methodId, out var extendedTypeId);
+                parameterIdsByMethod.TryGetValue(methodId, out var parameterIds);
+                parameterIds ??= [];
 
                 TypeReferenceNode? returnType = null;
                 if (returnTypeId != default)
@@ -978,6 +999,47 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                         GetReferenceResolutionStatus(extendedTypeId, metadataById));
                 }
 
+                var parameters = parameterIds
+                    .Select((parameterId, index) =>
+                    {
+                        var parameterMeta = metadataById.TryGetValue(parameterId, out var parameterMetadata)
+                            ? parameterMetadata
+                            : new EntityMetadata(parameterId);
+
+                        declaredTypeByEntity.TryGetValue(parameterId, out var parameterTypeId);
+                        TypeReferenceNode? parameterType = null;
+
+                        if (parameterTypeId != default)
+                        {
+                            parameterType = new TypeReferenceNode(
+                                parameterTypeId,
+                                metadataById.TryGetValue(parameterTypeId, out var parameterTypeMeta)
+                                    ? parameterTypeMeta.Name
+                                    : parameterTypeId.Value,
+                                GetReferenceResolutionStatus(parameterTypeId, metadataById));
+                        }
+                        else if (!string.IsNullOrWhiteSpace(parameterMeta.DeclaredTypeText))
+                        {
+                            parameterType = new TypeReferenceNode(
+                                null,
+                                parameterMeta.DeclaredTypeText,
+                                DeclarationResolutionStatus.SourceTextFallback);
+                        }
+
+                        var parameterName = !string.IsNullOrWhiteSpace(parameterMeta.ParameterName)
+                            ? parameterMeta.ParameterName
+                            : parameterMeta.Name;
+
+                        var ordinal = parameterMeta.ParameterOrdinal >= 0
+                            ? parameterMeta.ParameterOrdinal
+                            : index;
+
+                        return new MethodParameterNode(parameterName, ordinal, parameterType);
+                    })
+                    .OrderBy(x => x.Ordinal)
+                    .ThenBy(x => x.Name, StringComparer.Ordinal)
+                    .ToArray();
+
                 var methodNode = new MethodDeclarationNode(
                     methodId,
                     ParseMethodKind(meta.MethodKind),
@@ -987,7 +1049,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     declaringTypeId == default ? default : declaringTypeId,
                     ParseAccessibility(meta.Accessibility),
                     meta.Arity,
-                    [],
+                    parameters,
                     returnType,
                     IsStatic: false,
                     IsAbstract: false,
@@ -1156,7 +1218,17 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             return DeclarationResolutionStatus.Resolved;
         }
 
+        if (targetMeta.IsType("method-declaration") || targetMeta.IsType("member-declaration"))
+        {
+            return DeclarationResolutionStatus.Resolved;
+        }
+
         if (targetMeta.IsType("external-type-stub"))
+        {
+            return DeclarationResolutionStatus.ExternalStub;
+        }
+
+        if (targetMeta.IsType("external-method-stub") || targetMeta.IsType("external-member-stub"))
         {
             return DeclarationResolutionStatus.ExternalStub;
         }
@@ -1277,6 +1349,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             ReturnTypeText = string.Empty;
             ConstantValue = string.Empty;
             IsExtensionMethod = false;
+            ParameterName = string.Empty;
+            ParameterOrdinal = -1;
         }
 
         public EntityId Id { get; }
@@ -1346,6 +1420,10 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         public string ConstantValue { get; set; }
 
         public bool IsExtensionMethod { get; set; }
+
+        public string ParameterName { get; set; }
+
+        public int ParameterOrdinal { get; set; }
 
         public bool IsType(string entityType) => EntityType.Equals(entityType, StringComparison.OrdinalIgnoreCase);
     }
