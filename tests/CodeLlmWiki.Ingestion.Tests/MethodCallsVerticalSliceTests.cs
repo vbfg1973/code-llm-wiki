@@ -100,6 +100,26 @@ public sealed class MethodCallsVerticalSliceTests
         Assert.Contains("internal-target-unmatched", callLocalPage.Markdown, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Query_ResolvesInternalCalls_WithDuplicateUnreferencedProjectTypes()
+    {
+        var fixture = await ProjectScopedMethodCallsFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var callerType = model.Declarations.Types.Single(x => x.Name == "Caller");
+        var workerType = model.Declarations.Types.Single(x => x.Name == "Worker");
+        var callMethod = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == callerType.Id && x.Name == "Call");
+        var pingMethod = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == workerType.Id && x.Name == "Ping");
+
+        var outgoingCalls = model.Declarations.Methods.Relations
+            .Where(x => x.Kind == MethodRelationKind.Calls && x.SourceMethodId == callMethod.Id)
+            .ToArray();
+
+        Assert.Contains(outgoingCalls, x => x.TargetMethodId == pingMethod.Id);
+    }
+
     private sealed class MethodCallsFixture
     {
         private MethodCallsFixture(string repositoryPath)
@@ -187,6 +207,119 @@ public sealed class MethodCallsVerticalSliceTests
             RunGit(root, "commit", "-m", "initial");
 
             return new MethodCallsFixture(root);
+        }
+    }
+
+    private sealed class ProjectScopedMethodCallsFixture
+    {
+        private ProjectScopedMethodCallsFixture(string repositoryPath)
+        {
+            RepositoryPath = repositoryPath;
+        }
+
+        public string RepositoryPath { get; }
+
+        public static async Task<ProjectScopedMethodCallsFixture> CreateAsync()
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"codellmwiki-project-scoped-calls-{Guid.NewGuid():N}", "method-call-repo");
+            Directory.CreateDirectory(root);
+
+            await File.WriteAllTextAsync(Path.Combine(root, "Sample.slnx"),
+                """
+                <Solution>
+                  <Project Path="src/App/App.csproj" />
+                  <Project Path="src/LibA/LibA.csproj" />
+                  <Project Path="src/LibB/LibB.csproj" />
+                </Solution>
+                """);
+
+            var appDir = Path.Combine(root, "src", "App");
+            var libADir = Path.Combine(root, "src", "LibA");
+            var libBDir = Path.Combine(root, "src", "LibB");
+            Directory.CreateDirectory(appDir);
+            Directory.CreateDirectory(libADir);
+            Directory.CreateDirectory(libBDir);
+
+            await File.WriteAllTextAsync(Path.Combine(appDir, "App.csproj"),
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <AssemblyName>Acme.ProjectScoped.App</AssemblyName>
+                  </PropertyGroup>
+                  <ItemGroup>
+                    <ProjectReference Include="../LibA/LibA.csproj" />
+                  </ItemGroup>
+                </Project>
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(libADir, "LibA.csproj"),
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <AssemblyName>Acme.ProjectScoped.LibA</AssemblyName>
+                  </PropertyGroup>
+                </Project>
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(libBDir, "LibB.csproj"),
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <AssemblyName>Acme.ProjectScoped.LibB</AssemblyName>
+                  </PropertyGroup>
+                </Project>
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(appDir, "Caller.cs"),
+                """
+                using Acme.Shared;
+
+                namespace Acme.App;
+
+                public class Caller
+                {
+                    public void Call()
+                    {
+                        var worker = new Worker();
+                        worker.Ping();
+                    }
+                }
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(libADir, "Worker.cs"),
+                """
+                namespace Acme.Shared;
+
+                public class Worker
+                {
+                    public void Ping()
+                    {
+                    }
+                }
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(libBDir, "Worker.cs"),
+                """
+                namespace Acme.Shared;
+
+                public class Worker
+                {
+                    public void Ping()
+                    {
+                    }
+                }
+                """);
+
+            RunGit(root, "init", "-b", "main");
+            RunGit(root, "config", "user.email", "test@example.com");
+            RunGit(root, "config", "user.name", "Test User");
+            RunGit(root, "add", ".");
+            RunGit(root, "commit", "-m", "initial");
+
+            return new ProjectScopedMethodCallsFixture(root);
         }
     }
 
