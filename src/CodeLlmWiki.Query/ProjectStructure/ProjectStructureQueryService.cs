@@ -1640,17 +1640,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         var endpoints = endpointIds
             .Select(endpointId =>
             {
-                if (!declaringMethodByEndpoint.TryGetValue(endpointId, out var declaringMethodId)
-                    || !endpointDeclarationIds.Contains(declaringMethodId))
-                {
-                    return null;
-                }
-
-                if (!declaringTypeByEntity.TryGetValue(endpointId, out var declaringTypeId)
-                    || !typeIds.Contains(declaringTypeId))
-                {
-                    return null;
-                }
+                declaringMethodByEndpoint.TryGetValue(endpointId, out var declaringMethodId);
+                declaringTypeByEntity.TryGetValue(endpointId, out var declaringTypeId);
 
                 var meta = metadataById.TryGetValue(endpointId, out var endpointMeta)
                     ? endpointMeta
@@ -1677,14 +1668,12 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     RuleId: ruleIdByEntityId.TryGetValue(endpointId, out var ruleId) ? ruleId : string.Empty,
                     RuleVersion: ruleVersionByEntityId.TryGetValue(endpointId, out var ruleVersion) ? ruleVersion : string.Empty,
                     RuleSource: ruleSourceByEntityId.TryGetValue(endpointId, out var ruleSource) ? ruleSource : string.Empty,
-                    DeclaringMethodId: declaringMethodId,
-                    DeclaringTypeId: declaringTypeId,
+                    DeclaringMethodId: endpointDeclarationIds.Contains(declaringMethodId) ? declaringMethodId : null,
+                    DeclaringTypeId: typeIds.Contains(declaringTypeId) ? declaringTypeId : null,
                     NamespaceId: namespaceIds.Contains(namespaceId) ? namespaceId : null,
                     GroupId: endpointGroupIds.Contains(groupId) ? groupId : null,
                     DeclarationFileIds: declarationFileIds);
             })
-            .Where(x => x is not null)
-            .Select(x => x!)
             .OrderBy(x => x.Family, StringComparer.Ordinal)
             .ThenBy(x => x.NormalizedRouteKey, StringComparer.Ordinal)
             .ThenBy(x => x.HttpMethod, StringComparer.Ordinal)
