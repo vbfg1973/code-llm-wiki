@@ -21,6 +21,8 @@ public sealed class MethodRelationshipVerticalSliceTests
         var implicitType = model.Declarations.Types.Single(x => x.Name == "ImplicitWorker");
         var explicitType = model.Declarations.Types.Single(x => x.Name == "ExplicitWorker");
         var overrideType = model.Declarations.Types.Single(x => x.Name == "OverrideWorker");
+        var abstractBaseType = model.Declarations.Types.Single(x => x.Name == "AbstractBaseWorker");
+        var abstractOverrideType = model.Declarations.Types.Single(x => x.Name == "AbstractOverrideWorker");
 
         var interfaceRun = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == interfaceType.Id && x.Name == "Run");
         var implicitRun = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == implicitType.Id && x.Name == "Run");
@@ -30,6 +32,8 @@ public sealed class MethodRelationshipVerticalSliceTests
             && x.Signature.Contains(".IWorker.Run()", StringComparison.Ordinal));
         var baseExecute = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == baseType.Id && x.Name == "Execute");
         var overrideExecute = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == overrideType.Id && x.Name == "Execute");
+        var abstractBaseExecute = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == abstractBaseType.Id && x.Name == "Execute");
+        var abstractOverrideExecute = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == abstractOverrideType.Id && x.Name == "Execute");
 
         Assert.Contains(model.Declarations.Methods.Relations, x =>
             x.Kind == MethodRelationKind.ImplementsMethod &&
@@ -45,6 +49,11 @@ public sealed class MethodRelationshipVerticalSliceTests
             x.Kind == MethodRelationKind.OverridesMethod &&
             x.SourceMethodId == overrideExecute.Id &&
             x.TargetMethodId == baseExecute.Id);
+
+        Assert.Contains(model.Declarations.Methods.Relations, x =>
+            x.Kind == MethodRelationKind.OverridesMethod &&
+            x.SourceMethodId == abstractOverrideExecute.Id &&
+            x.TargetMethodId == abstractBaseExecute.Id);
     }
 
     [Fact]
@@ -67,6 +76,27 @@ public sealed class MethodRelationshipVerticalSliceTests
             && x.Markdown.Contains("method_signature: Acme.Relationships.OverrideWorker.Execute()", StringComparison.Ordinal));
         Assert.Contains("## Overrides", overrideMethodPage.Markdown, StringComparison.Ordinal);
         Assert.Contains("BaseWorker", overrideMethodPage.Markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Query_ResolvesOverrideRelationships_InMultiProjectContext()
+    {
+        var fixture = await MethodRelationshipProjectScopedFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var baseType = model.Declarations.Types.Single(x => x.Name == "BaseWorker");
+        var overrideType = model.Declarations.Types.Single(x => x.Name == "OverrideWorker");
+        var baseExecute = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == baseType.Id && x.Name == "Execute");
+        var overrideExecute = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == overrideType.Id && x.Name == "Execute");
+
+        Assert.Contains(model.Declarations.Methods.Relations, x =>
+            x.Kind == MethodRelationKind.OverridesMethod &&
+            x.SourceMethodId == overrideExecute.Id &&
+            x.TargetMethodId == baseExecute.Id);
+
+        Assert.DoesNotContain(analysis.Diagnostics, x => x.Code == "method:relationship:override:unresolved");
     }
 
     private sealed class MethodRelationshipFixture
@@ -130,6 +160,16 @@ public sealed class MethodRelationshipVerticalSliceTests
                 {
                     public override void Execute() { }
                 }
+
+                public abstract class AbstractBaseWorker
+                {
+                    public abstract void Execute();
+                }
+
+                public abstract class AbstractOverrideWorker : AbstractBaseWorker
+                {
+                    public abstract override void Execute();
+                }
                 """);
 
             RunGit(root, "init", "-b", "main");
@@ -139,6 +179,109 @@ public sealed class MethodRelationshipVerticalSliceTests
             RunGit(root, "commit", "-m", "initial");
 
             return new MethodRelationshipFixture(root);
+        }
+    }
+
+    private sealed class MethodRelationshipProjectScopedFixture
+    {
+        private MethodRelationshipProjectScopedFixture(string repositoryPath)
+        {
+            RepositoryPath = repositoryPath;
+        }
+
+        public string RepositoryPath { get; }
+
+        public static async Task<MethodRelationshipProjectScopedFixture> CreateAsync()
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"codellmwiki-method-rels-scoped-{Guid.NewGuid():N}", "method-rel-repo");
+            Directory.CreateDirectory(root);
+
+            await File.WriteAllTextAsync(Path.Combine(root, "Sample.slnx"),
+                """
+                <Solution>
+                  <Project Path="src/App/App.csproj" />
+                  <Project Path="src/BaseLib/BaseLib.csproj" />
+                  <Project Path="src/ShadowLib/ShadowLib.csproj" />
+                </Solution>
+                """);
+
+            var appDir = Path.Combine(root, "src", "App");
+            var baseDir = Path.Combine(root, "src", "BaseLib");
+            var shadowDir = Path.Combine(root, "src", "ShadowLib");
+            Directory.CreateDirectory(appDir);
+            Directory.CreateDirectory(baseDir);
+            Directory.CreateDirectory(shadowDir);
+
+            await File.WriteAllTextAsync(Path.Combine(appDir, "App.csproj"),
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <AssemblyName>Acme.Relationships.App</AssemblyName>
+                  </PropertyGroup>
+                  <ItemGroup>
+                    <ProjectReference Include="../BaseLib/BaseLib.csproj" />
+                  </ItemGroup>
+                </Project>
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(baseDir, "BaseLib.csproj"),
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <AssemblyName>Acme.Relationships.Base</AssemblyName>
+                  </PropertyGroup>
+                </Project>
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(shadowDir, "ShadowLib.csproj"),
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <AssemblyName>Acme.Relationships.Shadow</AssemblyName>
+                  </PropertyGroup>
+                </Project>
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(baseDir, "BaseWorker.cs"),
+                """
+                namespace Acme.Relationships;
+
+                public class BaseWorker
+                {
+                    public virtual void Execute() { }
+                }
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(shadowDir, "BaseWorker.cs"),
+                """
+                namespace Acme.Relationships;
+
+                public class BaseWorker
+                {
+                    public virtual void Execute() { }
+                }
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(appDir, "OverrideWorker.cs"),
+                """
+                namespace Acme.Relationships;
+
+                public class OverrideWorker : BaseWorker
+                {
+                    public override void Execute() { }
+                }
+                """);
+
+            RunGit(root, "init", "-b", "main");
+            RunGit(root, "config", "user.email", "test@example.com");
+            RunGit(root, "config", "user.name", "Test User");
+            RunGit(root, "add", ".");
+            RunGit(root, "commit", "-m", "initial");
+
+            return new MethodRelationshipProjectScopedFixture(root);
         }
     }
 

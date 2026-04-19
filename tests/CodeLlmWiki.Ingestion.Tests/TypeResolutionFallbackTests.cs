@@ -88,11 +88,11 @@ public sealed class TypeResolutionFallbackTests
         var brokenWorker = model.Declarations.Types.Single(x => x.Name == "BrokenWorker");
         var unresolvedBase = Assert.Single(brokenWorker.DirectBaseTypes);
 
-        Assert.Equal("Missing[]", unresolvedBase.DisplayText);
+        Assert.Equal("Missing", unresolvedBase.DisplayText);
         Assert.Equal(DeclarationResolutionStatus.SourceTextFallback, unresolvedBase.ResolutionStatus);
 
         var brokenWorkerPage = pages.Single(x => x.RelativePath == "types/Acme/Resolution/BrokenWorker.md");
-        Assert.Contains("Missing[] (source text fallback)", brokenWorkerPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("Missing (source text fallback)", brokenWorkerPage.Markdown, StringComparison.Ordinal);
     }
 
     private sealed class ResolutionFixture

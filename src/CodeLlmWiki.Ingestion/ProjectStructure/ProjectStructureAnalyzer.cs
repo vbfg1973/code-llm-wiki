@@ -435,6 +435,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         var externalStubIdByReference = new Dictionary<string, EntityId>(StringComparer.Ordinal);
         var unresolvedReferenceIdByText = new Dictionary<string, EntityId>(StringComparer.Ordinal);
         var unresolvedCallTargetIdByText = new Dictionary<string, EntityId>(StringComparer.Ordinal);
+        var emittedTypeResolutionFallbackDiagnostics = new HashSet<string>(StringComparer.Ordinal);
         var projectAssemblyContexts = BuildProjectAssemblyContexts(repositoryRoot, projectAssemblyNameByPath);
 
         foreach (var group in typeGroups)
@@ -882,9 +883,12 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                             "type-resolution-fallback",
                             unresolvedReferenceIdByText,
                             triples);
-                        diagnostics.Add(new IngestionDiagnostic(
-                            "type:resolution:fallback",
-                            $"Unresolved base type '{baseType}' for '{representative.QualifiedName}'."));
+                        AddDeduplicatedTypeResolutionFallbackDiagnostic(
+                            diagnostics,
+                            emittedTypeResolutionFallbackDiagnostics,
+                            dedupeScope: "base-type",
+                            referenceName: normalizedBaseType,
+                            message: $"Unresolved base type '{baseType}' for '{representative.QualifiedName}'.");
                     }
                 }
 
@@ -924,9 +928,12 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                             "type-resolution-fallback",
                             unresolvedReferenceIdByText,
                             triples);
-                        diagnostics.Add(new IngestionDiagnostic(
-                            "type:resolution:fallback",
-                            $"Unresolved interface type '{interfaceType}' for '{representative.QualifiedName}'."));
+                        AddDeduplicatedTypeResolutionFallbackDiagnostic(
+                            diagnostics,
+                            emittedTypeResolutionFallbackDiagnostics,
+                            dedupeScope: "interface-type",
+                            referenceName: normalizedInterfaceType,
+                            message: $"Unresolved interface type '{interfaceType}' for '{representative.QualifiedName}'.");
                     }
                 }
 
@@ -955,7 +962,6 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 sourceTypeId,
                 directBaseTypeIdsByTypeId,
                 directInterfaceTypeIdsByTypeId);
-            var baseTypeChain = EnumerateBaseTypeIdsInOrder(sourceTypeId, directBaseTypeIdsByTypeId);
 
             foreach (var sourceMethod in sourceMethods
                          .Where(x => string.Equals(x.Kind, "method", StringComparison.Ordinal))
@@ -1006,47 +1012,6 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     }
                 }
 
-                if (sourceMethod.IsOverride)
-                {
-                    EntityId? overrideTargetId = null;
-                    foreach (var baseTypeId in baseTypeChain)
-                    {
-                        if (!methodCandidatesByTypeId.TryGetValue(baseTypeId, out var baseMethods))
-                        {
-                            continue;
-                        }
-
-                        var target = baseMethods
-                            .Where(x => string.Equals(x.Kind, "method", StringComparison.Ordinal))
-                            .FirstOrDefault(x =>
-                                CreateMethodRelationshipMatchKey(
-                                    ExtractMethodNameForRelationship(x.CanonicalName),
-                                    x.Arity,
-                                    x.ParameterTypeSignatures).Equals(sourceMatchKey, StringComparison.Ordinal));
-
-                        if (target is null)
-                        {
-                            continue;
-                        }
-
-                        overrideTargetId = target.MethodId;
-                        break;
-                    }
-
-                    if (overrideTargetId is not null)
-                    {
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(sourceMethod.MethodId),
-                            CorePredicates.OverridesMethod,
-                            new EntityNode(overrideTargetId.Value)));
-                    }
-                    else
-                    {
-                        diagnostics.Add(new IngestionDiagnostic(
-                            "method:relationship:override:unresolved",
-                            $"Override target could not be resolved for method '{sourceMethod.MethodId.Value}'."));
-                    }
-                }
             }
         }
 
@@ -1155,9 +1120,12 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 }
                 else
                 {
-                    diagnostics.Add(new IngestionDiagnostic(
-                        "type:resolution:fallback",
-                        $"Unresolved declared member type '{pendingMemberTypeLink.DeclaredTypeName}' for member '{pendingMemberTypeLink.MemberId.Value}'."));
+                    AddDeduplicatedTypeResolutionFallbackDiagnostic(
+                        diagnostics,
+                        emittedTypeResolutionFallbackDiagnostics,
+                        dedupeScope: "member-type",
+                        referenceName: normalizedMemberType,
+                        message: $"Unresolved declared member type '{pendingMemberTypeLink.DeclaredTypeName}' for member '{pendingMemberTypeLink.MemberId.Value}'.");
                     continue;
                 }
             }
@@ -1187,9 +1155,12 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 }
                 else
                 {
-                    diagnostics.Add(new IngestionDiagnostic(
-                        "type:resolution:fallback",
-                        $"Unresolved return type '{pendingReturnTypeLink.ReturnTypeName}' for method '{pendingReturnTypeLink.MethodId.Value}'."));
+                    AddDeduplicatedTypeResolutionFallbackDiagnostic(
+                        diagnostics,
+                        emittedTypeResolutionFallbackDiagnostics,
+                        dedupeScope: "return-type",
+                        referenceName: normalizedReturnType,
+                        message: $"Unresolved return type '{pendingReturnTypeLink.ReturnTypeName}' for method '{pendingReturnTypeLink.MethodId.Value}'.");
                     resolvedReturnTypeId = GetOrCreateUnresolvedReferenceId(
                         NormalizeTypeReferenceName(pendingReturnTypeLink.ReturnTypeName),
                         "type-resolution-fallback",
@@ -1227,9 +1198,12 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 }
                 else
                 {
-                    diagnostics.Add(new IngestionDiagnostic(
-                        "type:resolution:fallback",
-                        $"Unresolved extension target type '{pendingExtendedTypeLink.ExtendedTypeName}' for method '{pendingExtendedTypeLink.MethodId.Value}'."));
+                    AddDeduplicatedTypeResolutionFallbackDiagnostic(
+                        diagnostics,
+                        emittedTypeResolutionFallbackDiagnostics,
+                        dedupeScope: "extended-type",
+                        referenceName: normalizedExtendedType,
+                        message: $"Unresolved extension target type '{pendingExtendedTypeLink.ExtendedTypeName}' for method '{pendingExtendedTypeLink.MethodId.Value}'.");
                     resolvedExtendedTypeId = GetOrCreateUnresolvedReferenceId(
                         NormalizeTypeReferenceName(pendingExtendedTypeLink.ExtendedTypeName),
                         "type-resolution-fallback",
@@ -1267,9 +1241,12 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 }
                 else
                 {
-                    diagnostics.Add(new IngestionDiagnostic(
-                        "type:resolution:fallback",
-                        $"Unresolved parameter type '{pendingParameterTypeLink.DeclaredTypeName}' for parameter '{pendingParameterTypeLink.ParameterId.Value}'."));
+                    AddDeduplicatedTypeResolutionFallbackDiagnostic(
+                        diagnostics,
+                        emittedTypeResolutionFallbackDiagnostics,
+                        dedupeScope: "parameter-type",
+                        referenceName: normalizedParameterType,
+                        message: $"Unresolved parameter type '{pendingParameterTypeLink.DeclaredTypeName}' for parameter '{pendingParameterTypeLink.ParameterId.Value}'.");
                     resolvedParameterTypeId = GetOrCreateUnresolvedReferenceId(
                         NormalizeTypeReferenceName(pendingParameterTypeLink.DeclaredTypeName),
                         "type-resolution-fallback",
@@ -3240,13 +3217,21 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
             foreach (var methodDeclaration in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
             {
-                if (methodDeclaration.Body is null && methodDeclaration.ExpressionBody is null)
+                var sourceMethodId = ResolveSourceMethodId(methodDeclaration.Identifier.GetLocation(), methodIdByDeclarationLocation);
+                if (sourceMethodId == default)
                 {
                     continue;
                 }
 
-                var sourceMethodId = ResolveSourceMethodId(methodDeclaration.Identifier.GetLocation(), methodIdByDeclarationLocation);
-                if (sourceMethodId == default)
+                AddOverrideRelationshipForMethod(
+                    methodDeclaration,
+                    sourceMethodId,
+                    semanticModel,
+                    methodIdByDeclarationLocation,
+                    triples,
+                    diagnostics);
+
+                if (methodDeclaration.Body is null && methodDeclaration.ExpressionBody is null)
                 {
                     continue;
                 }
@@ -3856,6 +3841,73 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
     private static int CountPredicateOccurrences(IReadOnlyList<SemanticTriple> triples, PredicateId predicate)
     {
         return triples.Count(x => x.Predicate == predicate);
+    }
+
+    private static void AddDeduplicatedTypeResolutionFallbackDiagnostic(
+        List<IngestionDiagnostic> diagnostics,
+        HashSet<string> emittedFallbackDiagnosticKeys,
+        string dedupeScope,
+        string referenceName,
+        string message)
+    {
+        var key = $"{dedupeScope}:{NormalizeTypeReferenceName(referenceName)}";
+        if (!emittedFallbackDiagnosticKeys.Add(key))
+        {
+            return;
+        }
+
+        diagnostics.Add(new IngestionDiagnostic("type:resolution:fallback", message));
+    }
+
+    private static void AddOverrideRelationshipForMethod(
+        MethodDeclarationSyntax methodDeclaration,
+        EntityId sourceMethodId,
+        SemanticModel semanticModel,
+        IReadOnlyDictionary<MethodDeclarationLocationKey, EntityId> methodIdByDeclarationLocation,
+        List<SemanticTriple> triples,
+        List<IngestionDiagnostic> diagnostics)
+    {
+        var sourceSymbol = semanticModel.GetDeclaredSymbol(methodDeclaration) as IMethodSymbol;
+        var overriddenMethod = sourceSymbol?.OverriddenMethod;
+        if (overriddenMethod is null)
+        {
+            return;
+        }
+
+        var targetMethodId = ResolveDeclaredMethodId(overriddenMethod, methodIdByDeclarationLocation);
+        if (targetMethodId is null)
+        {
+            diagnostics.Add(new IngestionDiagnostic(
+                "method:relationship:override:unresolved",
+                $"Override target could not be resolved for method '{sourceMethodId.Value}'."));
+            return;
+        }
+
+        triples.Add(new SemanticTriple(
+            new EntityNode(sourceMethodId),
+            CorePredicates.OverridesMethod,
+            new EntityNode(targetMethodId.Value)));
+    }
+
+    private static EntityId? ResolveDeclaredMethodId(
+        IMethodSymbol methodSymbol,
+        IReadOnlyDictionary<MethodDeclarationLocationKey, EntityId> methodIdByDeclarationLocation)
+    {
+        foreach (var location in methodSymbol.Locations.Where(x => x.IsInSource))
+        {
+            var lineSpan = location.GetLineSpan();
+            var key = new MethodDeclarationLocationKey(
+                location.SourceTree?.FilePath ?? string.Empty,
+                lineSpan.StartLinePosition.Line + 1,
+                lineSpan.StartLinePosition.Character + 1);
+
+            if (methodIdByDeclarationLocation.TryGetValue(key, out var methodId))
+            {
+                return methodId;
+            }
+        }
+
+        return null;
     }
 
     private void AddCallEdgesForInvocations(
@@ -4799,7 +4851,33 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             return false;
         }
 
-        return normalizedReferenceName.All(c => char.IsLetterOrDigit(c) || c is '_' or '.');
+        if (!normalizedReferenceName.All(c => char.IsLetterOrDigit(c) || c is '_' or '.'))
+        {
+            return false;
+        }
+
+        if (normalizedReferenceName.Contains('.', StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return IsKnownSimpleExternalTypeName(normalizedReferenceName);
+    }
+
+    private static bool IsKnownSimpleExternalTypeName(string normalizedReferenceName)
+    {
+        return normalizedReferenceName switch
+        {
+            "object" or "string" or "bool" or "byte" or "sbyte" or "short" or "ushort"
+                or "int" or "uint" or "long" or "ulong" or "nint" or "nuint"
+                or "float" or "double" or "decimal" or "char" or "void" or "dynamic"
+                or "DateTime" or "DateTimeOffset" or "TimeSpan" or "Guid" or "Uri"
+                or "Task" or "ValueTask" or "CancellationToken"
+                or "IEnumerable" or "IReadOnlyList" or "IReadOnlyDictionary"
+                or "IDisposable" or "IAsyncDisposable"
+                or "List" or "Dictionary" or "HashSet" => true,
+            _ => false,
+        };
     }
 
     private static string NormalizeTypeReferenceName(string referenceName)
@@ -4814,6 +4892,17 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         if (genericIndex >= 0)
         {
             normalized = normalized[..genericIndex];
+        }
+
+        while (normalized.EndsWith("[]", StringComparison.Ordinal))
+        {
+            normalized = normalized[..^2].TrimEnd();
+        }
+
+        while (normalized.EndsWith("?", StringComparison.Ordinal)
+               || normalized.EndsWith("!", StringComparison.Ordinal))
+        {
+            normalized = normalized[..^1].TrimEnd();
         }
 
         return normalized.Trim();
