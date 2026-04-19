@@ -2,6 +2,7 @@ using System.Diagnostics;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Ingestion.ProjectStructure;
 using CodeLlmWiki.Query.ProjectStructure;
+using CodeLlmWiki.Wiki.ProjectStructure;
 
 namespace CodeLlmWiki.Ingestion.Tests;
 
@@ -134,6 +135,41 @@ public sealed class HotspotRankingVerticalSliceTests
                 },
             });
         Assert.Equal(25, zeroTopN.Hotspots.EffectiveConfig.EffectiveTopN);
+    }
+
+    [Fact]
+    public async Task Render_GeneratesDedicatedHotspotPages_WithMinimalFrontMatterAndReadableTables()
+    {
+        var fixture = await HotspotRankingFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var query = new ProjectStructureQueryService(analysis.Triples);
+        var model = query.GetModel(
+            analysis.RepositoryId,
+            new ProjectStructureQueryOptions
+            {
+                MetricScopeFilter = StructuralMetricScopeFilter.AllCodeKinds,
+            });
+
+        var pages = new ProjectStructureWikiRenderer().Render(model);
+        Assert.Contains(pages, x => x.RelativePath == "hotspots/methods.md");
+        Assert.Contains(pages, x => x.RelativePath == "hotspots/types.md");
+        Assert.Contains(pages, x => x.RelativePath == "hotspots/files.md");
+        Assert.Contains(pages, x => x.RelativePath == "hotspots/namespaces.md");
+        Assert.Contains(pages, x => x.RelativePath == "hotspots/projects.md");
+        Assert.Contains(pages, x => x.RelativePath == "hotspots/repository.md");
+
+        var methodsHotspot = pages.Single(x => x.RelativePath == "hotspots/methods.md");
+        Assert.Contains("entity_type: hotspot", methodsHotspot.Markdown, StringComparison.Ordinal);
+        Assert.Contains("hotspot_kind: methods", methodsHotspot.Markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("target_frameworks:", methodsHotspot.Markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("project_path:", methodsHotspot.Markdown, StringComparison.Ordinal);
+        Assert.Contains("| rank | entity | raw_value | normalized_score | severity |", methodsHotspot.Markdown, StringComparison.Ordinal);
+        Assert.Contains("](methods/", methodsHotspot.Markdown, StringComparison.Ordinal);
+
+        var repositoryPage = pages.Single(x => x.RelativePath.StartsWith("repositories/", StringComparison.Ordinal));
+        Assert.Contains("(hotspots/methods.md)", repositoryPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("(hotspots/repository.md)", repositoryPage.Markdown, StringComparison.Ordinal);
     }
 
     private static string BuildFingerprint(HotspotRankingCatalog catalog)
