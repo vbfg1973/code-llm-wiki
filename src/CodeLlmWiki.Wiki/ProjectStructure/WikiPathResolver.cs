@@ -92,6 +92,51 @@ internal sealed class WikiPathResolver
             : $"[[{target}|{safeAlias}]]";
     }
 
+    public string ToMarkdownLink(EntityId entityId, string? alias = null, string? anchor = null)
+    {
+        return ToMarkdownLink(GetPath(entityId), alias, anchor);
+    }
+
+    public string ToMarkdownLink(string relativePath, string? alias = null, string? anchor = null)
+    {
+        var safeAlias = string.IsNullOrWhiteSpace(alias)
+            ? ToWikiTarget(relativePath)
+            : alias.Trim();
+        var href = EncodeHref(relativePath);
+
+        if (!string.IsNullOrWhiteSpace(anchor))
+        {
+            href = $"{href}#{anchor.Trim()}";
+        }
+
+        return $"[{EscapeMarkdownLinkText(safeAlias)}]({href})";
+    }
+
+    public string ToPackageExternalTypeMarkdownLink(
+        EntityId packageId,
+        string packageCanonicalKey,
+        string externalTypeCanonicalName,
+        string? alias = null)
+    {
+        var anchor = BuildPackageExternalTypeAnchor(packageCanonicalKey, externalTypeCanonicalName);
+        return ToMarkdownLink(packageId, alias, anchor);
+    }
+
+    public static string BuildPackageExternalTypeAnchor(string packageCanonicalKey, string externalTypeCanonicalName)
+    {
+        var normalizedPackageKey = packageCanonicalKey.Trim().ToLowerInvariant();
+        var normalizedExternalType = externalTypeCanonicalName.Trim().ToLowerInvariant();
+        var slug = SlugifyAnchorToken(normalizedExternalType);
+        if (string.IsNullOrWhiteSpace(slug))
+        {
+            slug = "external-type";
+        }
+
+        var hashInput = $"{normalizedPackageKey}|{normalizedExternalType}";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(hashInput))).ToLowerInvariant()[..8];
+        return $"ext-{slug}-{hash}";
+    }
+
     private string RegisterNamedPath(string directory, EntityId entityId, string preferredName, string context)
     {
         var preferredStem = SanitizePathSegment(preferredName);
@@ -215,6 +260,53 @@ internal sealed class WikiPathResolver
         return relativePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
             ? relativePath[..^3]
             : relativePath;
+    }
+
+    private static string EscapeMarkdownLinkText(string value)
+    {
+        return value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("[", "\\[", StringComparison.Ordinal)
+            .Replace("]", "\\]", StringComparison.Ordinal)
+            .Replace("|", "\\|", StringComparison.Ordinal);
+    }
+
+    private static string EncodeHref(string value)
+    {
+        var normalized = value.Replace('\\', '/');
+        var segments = normalized
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(Uri.EscapeDataString)
+            .ToArray();
+        return segments.Length == 0
+            ? string.Empty
+            : string.Join('/', segments);
+    }
+
+    private static string SlugifyAnchorToken(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        var previousWasDash = false;
+
+        foreach (var c in value)
+        {
+            if (char.IsLetterOrDigit(c))
+            {
+                builder.Append(char.ToLowerInvariant(c));
+                previousWasDash = false;
+                continue;
+            }
+
+            if (!previousWasDash)
+            {
+                builder.Append('-');
+                previousWasDash = true;
+            }
+        }
+
+        return builder
+            .ToString()
+            .Trim('-');
     }
 
     private static string BuildMethodStem(MethodDeclarationNode methodDeclaration)

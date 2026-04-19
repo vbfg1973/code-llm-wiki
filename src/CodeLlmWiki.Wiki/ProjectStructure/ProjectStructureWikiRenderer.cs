@@ -419,7 +419,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             var declaredVersion = string.IsNullOrWhiteSpace(membership.DeclaredVersion) ? "-" : membership.DeclaredVersion;
             var resolvedVersion = string.IsNullOrWhiteSpace(membership.ResolvedVersion) ? "-" : membership.ResolvedVersion;
             sb.AppendLine(
-                $"| {resolver.ToWikiLink(membership.ProjectId, membership.ProjectName)} | `{membership.ProjectPath}` | `{declaredVersion}` | `{resolvedVersion}` |");
+                $"| {resolver.ToMarkdownLink(membership.ProjectId, membership.ProjectName)} | `{membership.ProjectPath}` | `{declaredVersion}` | `{resolvedVersion}` |");
         }
 
         if (package.DeclarationDependencyUsage.UsageCount > 0)
@@ -1092,7 +1092,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     .OrderBy(x => x.Kind.ToString(), StringComparer.Ordinal)
                     .ThenBy(x => x.Signature, StringComparer.Ordinal)
                     .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
-                    .Select(x => resolver.ToWikiLink(x.Id, FormatMethodLinkAlias(x)))
+                    .Select(x => resolver.ToMarkdownLink(x.Id, FormatMethodLinkAlias(x)))
                     .ToArray()
                 : [];
             var writers = writeMethodIdsByTargetMemberId.TryGetValue(member.Id, out var writeMethodIds)
@@ -1102,13 +1102,13 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     .OrderBy(x => x.Kind.ToString(), StringComparer.Ordinal)
                     .ThenBy(x => x.Signature, StringComparer.Ordinal)
                     .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
-                    .Select(x => resolver.ToWikiLink(x.Id, FormatMethodLinkAlias(x)))
+                    .Select(x => resolver.ToMarkdownLink(x.Id, FormatMethodLinkAlias(x)))
                     .ToArray()
                 : [];
 
             var readersCell = readers.Length == 0 ? "none" : string.Join(", ", readers);
             var writersCell = writers.Length == 0 ? "none" : string.Join(", ", writers);
-            sb.AppendLine($"| {member.Name} | {readers.Length} | {writers.Length} | {readersCell} | {writersCell} |");
+            sb.AppendLine($"| {EscapePipes(member.Name)} | {readers.Length} | {writers.Length} | {readersCell} | {writersCell} |");
         }
     }
 
@@ -1636,14 +1636,14 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         AppendTable(
             sb,
             "Repositories",
-            [new IndexRow(model.Repository.Name, model.Repository.Path, model.Repository.Id.Value, resolver.ToWikiLink(model.Repository.Id, model.Repository.Name))]);
+            [new IndexRow(model.Repository.Name, model.Repository.Path, model.Repository.Id.Value, resolver.ToMarkdownLink(model.Repository.Id, model.Repository.Name))]);
 
         AppendTable(
             sb,
             "Solutions",
             model.Solutions
                 .OrderBy(x => x.Path, StringComparer.Ordinal)
-                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToMarkdownLink(x.Id, x.Name)))
                 .ToArray());
 
         AppendTable(
@@ -1651,7 +1651,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             "Projects",
             model.Projects
                 .OrderBy(x => x.Path, StringComparer.Ordinal)
-                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToMarkdownLink(x.Id, x.Name)))
                 .ToArray());
 
         AppendTable(
@@ -1659,7 +1659,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             "Packages",
             model.Packages
                 .OrderBy(x => x.Name, StringComparer.Ordinal)
-                .Select(x => new IndexRow(x.Name, x.Name, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .Select(x => new IndexRow(x.Name, x.Name, x.Id.Value, resolver.ToMarkdownLink(x.Id, x.Name)))
                 .Concat(
                     model.DependencyAttribution.DeclarationUnknown.UsageCount > 0
                     || model.DependencyAttribution.MethodBodyUnknown.UsageCount > 0
@@ -1667,7 +1667,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                             "Unknown Package Attribution",
                             "packages/unknown-package-attribution.md",
                             $"dependency-attribution:unknown:{model.Repository.Id.Value}",
-                            ToWikiLink("packages/unknown-package-attribution", "Unknown Package Attribution"))]
+                            resolver.ToMarkdownLink("packages/unknown-package-attribution.md", "Unknown Package Attribution"))]
                         : [])
                 .ToArray());
 
@@ -1677,7 +1677,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             model.Declarations.Namespaces
                 .OrderBy(x => x.Path, StringComparer.Ordinal)
                 .ThenBy(x => x.Name, StringComparer.Ordinal)
-                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToMarkdownLink(x.Id, x.Name)))
                 .ToArray());
 
         AppendTable(
@@ -1686,7 +1686,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             model.Declarations.Types
                 .OrderBy(x => x.Path, StringComparer.Ordinal)
                 .ThenBy(x => x.Name, StringComparer.Ordinal)
-                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToMarkdownLink(x.Id, x.Name)))
                 .ToArray());
 
         var typeById = model.Declarations.Types.ToDictionary(x => x.Id, x => x);
@@ -1701,7 +1701,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     var declaringTypePath = typeById.TryGetValue(x.DeclaringTypeId, out var declaringType)
                         ? declaringType.Path
                         : "<unknown-type>";
-                    return new IndexRow(FormatMethodLinkAlias(x), $"{declaringTypePath}::{x.Signature}", x.Id.Value, resolver.ToWikiLink(x.Id, FormatMethodLinkAlias(x)));
+                    return new IndexRow(FormatMethodLinkAlias(x), $"{declaringTypePath}::{x.Signature}", x.Id.Value, resolver.ToMarkdownLink(x.Id, FormatMethodLinkAlias(x)));
                 })
                 .ToArray());
 
@@ -1710,7 +1710,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             "Files",
             model.Files
                 .OrderBy(x => x.Path, StringComparer.Ordinal)
-                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Path)))
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToMarkdownLink(x.Id, x.Path)))
                 .ToArray());
 
         return new WikiPage(

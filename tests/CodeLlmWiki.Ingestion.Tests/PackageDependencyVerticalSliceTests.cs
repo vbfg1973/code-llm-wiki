@@ -97,8 +97,13 @@ public sealed class PackageDependencyVerticalSliceTests
             && page.Markdown.Contains("# Package: Newtonsoft.Json", StringComparison.Ordinal));
 
         Assert.Contains("| project | project_path | declared_version | resolved_version |", packagePage.Markdown, StringComparison.Ordinal);
-        Assert.Contains("|NoAssets]] | `src/NoAssets/NoAssets.csproj` | `12.0.1` | `-` |", packagePage.Markdown, StringComparison.Ordinal);
-        Assert.Contains("|WithAssets]] | `src/WithAssets/WithAssets.csproj` | `13.0.3` | `13.0.3` |", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("| [NoAssets](projects/NoAssets.md) | `src/NoAssets/NoAssets.csproj` | `12.0.1` | `-` |", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("| [WithAssets](projects/WithAssets.md) | `src/WithAssets/WithAssets.csproj` | `13.0.3` | `13.0.3` |", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("| [[projects/", packagePage.Markdown, StringComparison.Ordinal);
+
+        var indexPage = pages.Single(page => page.RelativePath == "index/repository-index.md");
+        Assert.Contains("[NoAssets](projects/NoAssets.md)", indexPage.Markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("| [[", indexPage.Markdown, StringComparison.Ordinal);
 
         var noAssetsIndex = packagePage.Markdown.IndexOf("NoAssets", StringComparison.Ordinal);
         var withAssetsIndex = packagePage.Markdown.IndexOf("WithAssets", StringComparison.Ordinal);
