@@ -9,7 +9,7 @@
 - [x] Phase 3: Override Resolution and Type-Fallback Noise Reduction — completion date: 2026-04-19
 - [x] Phase 4: Quality Gate Policy and Run Status Integration — completion date: 2026-04-19
 - [x] Phase 5: Bounded Parallelism and Deterministic Merge Hardening — completion date: 2026-04-19
-- [ ] Phase 6: Docs Runbook, Contracts, and Regression Hardening
+- [x] Phase 6: Docs Runbook, Contracts, and Regression Hardening — completion date: 2026-04-19
 
 ---
 
@@ -125,7 +125,7 @@ Publish a repo-level diagnostics runbook with status meanings and remediation gu
 
 ### Acceptance criteria
 
-- [ ] Repo docs include a diagnostics runbook with status meanings, probable causes, and actions.
-- [ ] Tests enforce diagnostics contract compatibility and cause-level taxonomy stability.
-- [ ] Tests enforce stage timing output contract and manifest quality evidence.
-- [ ] Human-readable wiki constraints remain unchanged and validated.
+- [x] Repo docs include a diagnostics runbook with status meanings, probable causes, and actions.
+- [x] Tests enforce diagnostics contract compatibility and cause-level taxonomy stability.
+- [x] Tests enforce stage timing output contract and manifest quality evidence.
+- [x] Human-readable wiki constraints remain unchanged and validated.

@@ -22,22 +22,11 @@ Use this file to rehydrate project context quickly for any new agent/session.
 
 ## Current Program State
 
-- `PRD 001`: complete
-- `PRD 002`: complete
-- `PRD 003`: complete
-  - Local PRD: `/plans/003/003-phase-3-dotnet-method-extraction-and-relations.prd.md`
-  - GitHub issue (closed): `#41`
-  - Completed implementation issues (closed): `#42`, `#43`, `#44`, `#45`, `#46`, `#47`
-- `PRD 004`: complete
-  - Local PRD: `/plans/004/004-phase-4-wiki-navigation-link-consistency.prd.md`
-  - Local plan: `/plans/004/004-phase-4-wiki-navigation-link-consistency.plan.md`
-  - GitHub issue (closed): `#54`
-  - Completed implementation issues (closed): `#55`, `#56`, `#57`
-- `PRD 005`: drafted, pending plan/issues
-  - Local PRD: `/plans/005/005-phase-5-dependency-usage-mapping-and-package-provenance.prd.md`
-  - Local plan: `/plans/005/005-phase-5-dependency-usage-mapping-and-package-provenance.plan.md`
-  - GitHub issue: `#61`
-  - Implementation issues (open): `#62`, `#63`, `#64`, `#65`, `#66`
+- Source of truth for capability and delivery status is `/plans/BACKLOG.md`.
+- Source of truth for PRD 010 progress and phase checklists is:
+  - `/plans/010/010-phase-10-semantic-resolution-quality-and-ingestion-observability.plan.md`
+- Source of truth for operator diagnostics/status behavior is:
+  - `/docs/diagnostics-runbook.md`
 
 Canonical feature backlog:
 - `/plans/BACKLOG.md`

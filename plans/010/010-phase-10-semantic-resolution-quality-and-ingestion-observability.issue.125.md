@@ -3,9 +3,12 @@
 > Parent PRD: [PRD 010](/home/vbfg/dev/dotnet-llm-wiki/plans/010/010-phase-10-semantic-resolution-quality-and-ingestion-observability.prd.md)
 
 - Issue: [#125](https://github.com/vbfg1973/code-llm-wiki/issues/125)
-- [ ] Status: open
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
+
+- Completed in [PR #131](https://github.com/vbfg1973/code-llm-wiki/pull/131) and merged to `develop`.
 
 ## Parent PRD
 
@@ -17,10 +20,10 @@ Publish a repo-level diagnostics runbook with status meanings and remediation gu
 
 ## Acceptance criteria
 
-- [ ] Repo docs include a diagnostics runbook with status meanings, probable causes, and actions.
-- [ ] Tests enforce diagnostics contract compatibility and cause-level taxonomy stability.
-- [ ] Tests enforce stage timing output contract and manifest quality evidence.
-- [ ] Human-readable wiki constraints remain unchanged and validated.
+- [x] Repo docs include a diagnostics runbook with status meanings, probable causes, and actions.
+- [x] Tests enforce diagnostics contract compatibility and cause-level taxonomy stability.
+- [x] Tests enforce stage timing output contract and manifest quality evidence.
+- [x] Human-readable wiki constraints remain unchanged and validated.
 
 ## Blocked by
 

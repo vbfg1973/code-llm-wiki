@@ -130,13 +130,13 @@ Purpose: Track durable product capabilities from the original specification (not
     - Parent GitHub issue (closed): `#97`
     - Implementation issues (closed): `#98`, `#99`, `#100`, `#101`
 
-- [ ] `BL-020` Semantic resolution quality and ingestion observability
+- [x] `BL-020` Semantic resolution quality and ingestion observability
   - Detail: improve call/override semantic resolution fidelity, introduce cause-level diagnostics and quality gates, reduce fallback noise, and emit stage timings for large-run triage.
   - Planned in:
     - [PRD 010](/home/vbfg/dev/dotnet-llm-wiki/plans/010/010-phase-10-semantic-resolution-quality-and-ingestion-observability.prd.md)
     - Plan: [PRD 010 plan](/home/vbfg/dev/dotnet-llm-wiki/plans/010/010-phase-10-semantic-resolution-quality-and-ingestion-observability.plan.md)
-    - Parent GitHub issue (open): `#119`
-    - Implementation issues (in progress): `#120` (closed), `#121` (closed), `#122` (closed), `#123` (closed), `#124` (closed), `#125`
+    - Parent GitHub issue (closed): `#119`
+    - Implementation issues (closed): `#120`, `#121`, `#122`, `#123`, `#124`, `#125`
 
 ## Cross-Cutting Constraints (from original intent)
 
