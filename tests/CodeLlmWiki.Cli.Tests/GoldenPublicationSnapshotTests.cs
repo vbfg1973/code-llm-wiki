@@ -255,6 +255,7 @@ public sealed class GoldenPublicationSnapshotTests
 
         var wikiRoot = Path.Combine(publishResult.RunDirectory, "wiki");
         ValidateFrontMatter(wikiRoot);
+        ValidateEndpointAnchorLinkContracts(wikiRoot);
 
         return BuildSnapshot(
             wikiRoot,
@@ -311,7 +312,7 @@ public sealed class GoldenPublicationSnapshotTests
 
         ValidateRequiredFields(frontMatter, "common", "entity_id", "entity_type", "repository_id");
         Assert.True(
-            frontMatter["entity_type"] is "repository" or "solution" or "project" or "package" or "namespace" or "type" or "method" or "file" or "index" or "hotspot" or "guidance",
+            frontMatter["entity_type"] is "repository" or "solution" or "project" or "package" or "namespace" or "type" or "method" or "file" or "index" or "hotspot" or "guidance" or "endpoint" or "endpoint_group",
             $"Invalid entity_type '{frontMatter["entity_type"]}' in {relativePath}");
 
         if (relativePath.StartsWith("repositories/", StringComparison.Ordinal))
@@ -433,6 +434,35 @@ public sealed class GoldenPublicationSnapshotTests
             var hasDeclaringTypeName = frontMatter.ContainsKey("declaring_type_name");
             Assert.True(hasDeclaringTypeId == hasDeclaringTypeName, $"Method declaring-type keys must be emitted as a complete pair in {relativePath}");
         }
+        else if (relativePath.StartsWith("endpoints/", StringComparison.Ordinal))
+        {
+            if (relativePath.Contains("/groups/", StringComparison.Ordinal))
+            {
+                ValidateRequiredFields(frontMatter, "endpoint_group", "endpoint_family", "endpoint_group_key");
+                ValidateAllowedFields(
+                    frontMatter,
+                    "entity_id",
+                    "entity_type",
+                    "repository_id",
+                    "endpoint_family",
+                    "endpoint_group_key");
+            }
+            else
+            {
+                ValidateRequiredFields(frontMatter, "endpoint", "endpoint_family", "endpoint_kind", "endpoint_http_method", "endpoint_route_key", "endpoint_fingerprint");
+                ValidateAllowedFields(
+                    frontMatter,
+                    "entity_id",
+                    "entity_type",
+                    "repository_id",
+                    "endpoint_family",
+                    "endpoint_kind",
+                    "endpoint_http_method",
+                    "endpoint_route_key",
+                    "endpoint_fingerprint",
+                    "endpoint_resolution_reason");
+            }
+        }
         else if (relativePath.StartsWith("index/", StringComparison.Ordinal))
         {
             ValidateAllowedFields(frontMatter, "entity_id", "entity_type", "repository_id");
@@ -508,6 +538,9 @@ public sealed class GoldenPublicationSnapshotTests
             Assert.Contains("## Guidance", body, StringComparison.Ordinal);
             Assert.Contains("[Human Guide](guidance/human.md)", body, StringComparison.Ordinal);
             Assert.Contains("[LLM Contract](guidance/llm-contract.md)", body, StringComparison.Ordinal);
+            Assert.Contains("## Endpoint Groups", body, StringComparison.Ordinal);
+            Assert.Contains("## Endpoints", body, StringComparison.Ordinal);
+            Assert.Contains("## Endpoint Diagnostics", body, StringComparison.Ordinal);
             return;
         }
 
@@ -540,6 +573,35 @@ public sealed class GoldenPublicationSnapshotTests
         Assert.DoesNotContain("entity_id", body, StringComparison.Ordinal);
         Assert.DoesNotContain("repository_id", body, StringComparison.Ordinal);
         Assert.DoesNotContain(frontMatter["entity_id"], body, StringComparison.Ordinal);
+    }
+
+    private static void ValidateEndpointAnchorLinkContracts(string wikiRoot)
+    {
+        var markdownByRelativePath = Directory
+            .EnumerateFiles(wikiRoot, "*.md", SearchOption.AllDirectories)
+            .ToDictionary(
+                path => Path.GetRelativePath(wikiRoot, path).Replace('\\', '/'),
+                File.ReadAllText,
+                StringComparer.Ordinal);
+
+        var endpointPackageLinkPattern = new Regex(@"\((?<path>packages\/[^)#\s]+\.md)#(?<anchor>[^)\s]+)\)", RegexOptions.CultureInvariant);
+
+        foreach (var page in markdownByRelativePath.Where(x => x.Key.StartsWith("endpoints/", StringComparison.Ordinal)))
+        {
+            var matches = endpointPackageLinkPattern.Matches(page.Value);
+            foreach (Match match in matches)
+            {
+                var packageRelativePath = match.Groups["path"].Value;
+                var anchor = match.Groups["anchor"].Value;
+                Assert.True(
+                    markdownByRelativePath.TryGetValue(packageRelativePath, out var packageMarkdown),
+                    $"Endpoint link target '{packageRelativePath}' missing for page '{page.Key}'.");
+                Assert.Contains(
+                    $"<a id=\"{anchor}\"></a>",
+                    packageMarkdown!,
+                    StringComparison.Ordinal);
+            }
+        }
     }
 
     private static void ValidateTimestampLines(IEnumerable<string> lines, string relativePath)
@@ -644,6 +706,7 @@ public sealed class GoldenPublicationSnapshotTests
                   </PropertyGroup>
                   <ItemGroup>
                     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+                    <PackageReference Include="CommandLineParser" Version="2.9.1" />
                   </ItemGroup>
                 </Project>
                 """);
@@ -655,6 +718,9 @@ public sealed class GoldenPublicationSnapshotTests
                 {
                   "libraries": {
                     "Newtonsoft.Json/13.0.3": {
+                      "type": "package"
+                    },
+                    "CommandLineParser/2.9.1": {
                       "type": "package"
                     }
                   }
@@ -680,6 +746,82 @@ public sealed class GoldenPublicationSnapshotTests
                         _count++;
                         Count = _count;
                         MissingApi.Call();
+                    }
+                }
+                """);
+            await File.WriteAllTextAsync(Path.Combine(appDir, "EndpointController.cs"),
+                """
+                using Microsoft.AspNetCore.Mvc;
+
+                namespace Golden.Sample.Endpoints;
+
+                [ApiController]
+                [Route("api/[controller]")]
+                public sealed class OrdersController : ControllerBase
+                {
+                    [HttpGet("{id}")]
+                    public IActionResult Get(string id)
+                    {
+                        return Ok(id);
+                    }
+                }
+                """);
+            await File.WriteAllTextAsync(Path.Combine(appDir, "MinimalApi.cs"),
+                """
+                var app = WebApplication.CreateBuilder(args).Build();
+                app.MapGet("/health", () => Results.Ok("ok"));
+                app.Run();
+                """);
+            await File.WriteAllTextAsync(Path.Combine(appDir, "Handler.cs"),
+                """
+                namespace Golden.Sample.Messages;
+
+                public sealed record Ping(string Value);
+
+                public interface IMessageHandler<TCommand>
+                {
+                    void Handle(TCommand command);
+                }
+
+                public sealed class PingHandler : IMessageHandler<Ping>
+                {
+                    public void Handle(Ping command)
+                    {
+                    }
+                }
+                """);
+            await File.WriteAllTextAsync(Path.Combine(appDir, "Cli.cs"),
+                """
+                using CommandLine;
+
+                namespace Golden.Sample.Cli;
+
+                [Verb("sync")]
+                public sealed class SyncOptions
+                {
+                    public int Execute()
+                    {
+                        return 0;
+                    }
+                }
+                """);
+            await File.WriteAllTextAsync(Path.Combine(appDir, "Grpc.cs"),
+                """
+                namespace Golden.Sample.Grpc;
+
+                public sealed class KnownGrpcService
+                {
+                    public void Handle()
+                    {
+                    }
+                }
+
+                public static class GrpcBoot
+                {
+                    public static void Register(WebApplication app)
+                    {
+                        app.MapGrpcService<KnownGrpcService>();
+                        app.MapGrpcService<MissingGrpcService>();
                     }
                 }
                 """);
