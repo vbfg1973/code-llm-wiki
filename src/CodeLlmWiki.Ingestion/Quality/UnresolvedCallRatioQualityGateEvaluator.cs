@@ -5,7 +5,6 @@ namespace CodeLlmWiki.Ingestion.Quality;
 public sealed class UnresolvedCallRatioQualityGateEvaluator : IUnresolvedCallRatioQualityGateEvaluator
 {
     public const string GateId = "quality:unresolved-call-ratio";
-    private const string InternalTargetUnmatchedCode = "method:call:internal-target-unmatched";
 
     public UnresolvedCallRatioQualityGateEvaluation Evaluate(UnresolvedCallRatioQualityGateRequest request)
     {
@@ -32,7 +31,7 @@ public sealed class UnresolvedCallRatioQualityGateEvaluator : IUnresolvedCallRat
     private static bool IsUnresolvedCallFailureDiagnostic(IngestionDiagnostic diagnostic)
     {
         return string.Equals(diagnostic.Code, CallResolutionDiagnosticCodes.Aggregate, StringComparison.Ordinal)
-               || string.Equals(diagnostic.Code, InternalTargetUnmatchedCode, StringComparison.Ordinal);
+               || string.Equals(diagnostic.Code, CallResolutionDiagnosticCodes.InternalTargetUnmatched, StringComparison.Ordinal);
     }
 
     private static double NormalizeThreshold(double threshold)

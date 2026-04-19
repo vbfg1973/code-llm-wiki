@@ -4227,7 +4227,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     CorePredicates.Calls,
                     new EntityNode(unresolvedTargetId)));
                 diagnostics.Add(new IngestionDiagnostic(
-                    "method:call:internal-target-unmatched",
+                    CallResolutionDiagnosticCodes.InternalTargetUnmatched,
                     $"Invocation '{invocation}' resolved to internal type '{targetTypeQualifiedName}' but no unique method declaration could be matched in method '{sourceMethodId.Value}'."));
                 continue;
             }

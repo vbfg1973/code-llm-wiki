@@ -8,14 +8,16 @@ Use this file to rehydrate project context quickly for any new agent/session.
    - `/plans/BACKLOG.md`
 2. Read planning standards:
    - `/plans/README.md`
-3. Read implemented PRDs and plans:
+3. Read operator diagnostics runbook:
+   - `/docs/diagnostics-runbook.md`
+4. Read implemented PRDs and plans:
    - `/plans/001/001-phase-1-dotnet-project-structure.prd.md`
    - `/plans/001/001-phase-1-dotnet-project-structure.plan.md`
    - `/plans/002/002-phase-2-dotnet-namespace-type-declaration.prd.md`
    - `/plans/002/002-phase-2-dotnet-namespace-type-declaration.plan.md`
    - `/plans/003/003-phase-3-dotnet-method-extraction-and-relations.prd.md`
    - `/plans/003/003-phase-3-dotnet-method-extraction-and-relations.plan.md`
-4. If implementing a capability, read its linked issue file(s):
+5. If implementing a capability, read its linked issue file(s):
    - `/plans/{prd_id}/{prd_id}-{name}.issue.{issue_id}.md`
 
 ## Current Program State
