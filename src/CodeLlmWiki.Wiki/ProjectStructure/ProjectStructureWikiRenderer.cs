@@ -183,6 +183,26 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         var typeBacklinksByFileId = BuildTypeBacklinksByFileId(model.Declarations.Types, fileById);
         var memberBacklinksByFileId = BuildMemberBacklinksByFileId(model.Declarations.Members, fileById);
         var methodBacklinksByFileId = BuildMethodBacklinksByFileId(orderedMethods, fileById);
+        var externalCallTargetsByPackageId = model.Declarations.Methods.Relations
+            .Where(x => x.Kind == MethodRelationKind.Calls && x.ExternalTargetType is not null)
+            .Select(relation => TryResolveExternalTargetPackage(relation, orderedPackages, out var package)
+                ? new
+                {
+                    package.Id,
+                    TargetDisplayText = relation.ExternalTargetType!.DisplayText,
+                }
+                : null)
+            .Where(x => x is not null)
+            .Select(x => x!)
+            .GroupBy(x => x.Id)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<string>)x
+                    .Select(v => v.TargetDisplayText)
+                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                    .Distinct(StringComparer.Ordinal)
+                    .OrderBy(v => v, StringComparer.Ordinal)
+                    .ToArray());
 
         var pages = new List<WikiPage>
         {
@@ -191,7 +211,13 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
 
         pages.AddRange(orderedSolutions.Select(solution => RenderSolutionPage(model.Repository.Id.Value, solution, projectById, resolver)));
         pages.AddRange(orderedProjects.Select(project => RenderProjectPage(model.Repository.Id.Value, project, packageById, resolver)));
-        pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, methodById, resolver)));
+        pages.AddRange(orderedPackages.Select(package =>
+            RenderPackagePage(
+                model.Repository.Id.Value,
+                package,
+                methodById,
+                externalCallTargetsByPackageId,
+                resolver)));
         if (model.DependencyAttribution.DeclarationUnknown.UsageCount > 0
             || model.DependencyAttribution.MethodBodyUnknown.UsageCount > 0)
         {
@@ -215,6 +241,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             RenderMethodPage(
                 model.Repository.Id.Value,
                 method,
+                orderedPackages,
                 typeById,
                 methodById,
                 memberById,
@@ -390,6 +417,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         string repositoryId,
         PackageNode package,
         IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<string>> externalCallTargetsByPackageId,
         WikiPathResolver resolver)
     {
         var sb = new StringBuilder();
@@ -419,7 +447,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             var declaredVersion = string.IsNullOrWhiteSpace(membership.DeclaredVersion) ? "-" : membership.DeclaredVersion;
             var resolvedVersion = string.IsNullOrWhiteSpace(membership.ResolvedVersion) ? "-" : membership.ResolvedVersion;
             sb.AppendLine(
-                $"| {resolver.ToWikiLink(membership.ProjectId, membership.ProjectName)} | `{membership.ProjectPath}` | `{declaredVersion}` | `{resolvedVersion}` |");
+                $"| {resolver.ToMarkdownLink(membership.ProjectId, membership.ProjectName)} | `{membership.ProjectPath}` | `{declaredVersion}` | `{resolvedVersion}` |");
         }
 
         if (package.DeclarationDependencyUsage.UsageCount > 0)
@@ -477,6 +505,18 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                         sb.AppendLine($"    - {methodDisplay} ({methodUsage.UsageCount})");
                     }
                 }
+            }
+        }
+
+        if (externalCallTargetsByPackageId.TryGetValue(package.Id, out var externalCallTargets) && externalCallTargets.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## External Type Anchors");
+            foreach (var externalCallTarget in externalCallTargets)
+            {
+                var anchor = WikiPathResolver.BuildPackageExternalTypeAnchor(package.CanonicalKey, externalCallTarget);
+                sb.AppendLine($"<a id=\"{anchor}\"></a>");
+                sb.AppendLine($"- `{externalCallTarget}`");
             }
         }
 
@@ -1092,7 +1132,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     .OrderBy(x => x.Kind.ToString(), StringComparer.Ordinal)
                     .ThenBy(x => x.Signature, StringComparer.Ordinal)
                     .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
-                    .Select(x => resolver.ToWikiLink(x.Id, FormatMethodLinkAlias(x)))
+                    .Select(x => resolver.ToMarkdownLink(x.Id, FormatMethodLinkAlias(x)))
                     .ToArray()
                 : [];
             var writers = writeMethodIdsByTargetMemberId.TryGetValue(member.Id, out var writeMethodIds)
@@ -1102,13 +1142,13 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     .OrderBy(x => x.Kind.ToString(), StringComparer.Ordinal)
                     .ThenBy(x => x.Signature, StringComparer.Ordinal)
                     .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
-                    .Select(x => resolver.ToWikiLink(x.Id, FormatMethodLinkAlias(x)))
+                    .Select(x => resolver.ToMarkdownLink(x.Id, FormatMethodLinkAlias(x)))
                     .ToArray()
                 : [];
 
             var readersCell = readers.Length == 0 ? "none" : string.Join(", ", readers);
             var writersCell = writers.Length == 0 ? "none" : string.Join(", ", writers);
-            sb.AppendLine($"| {member.Name} | {readers.Length} | {writers.Length} | {readersCell} | {writersCell} |");
+            sb.AppendLine($"| {EscapePipes(member.Name)} | {readers.Length} | {writers.Length} | {readersCell} | {writersCell} |");
         }
     }
 
@@ -1206,6 +1246,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         EntityId sourceMethodId,
         IReadOnlyDictionary<EntityId, IReadOnlyList<MethodRelationNode>> callRelationsBySourceMethodId,
         IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        IReadOnlyList<PackageNode> packages,
         WikiPathResolver resolver)
     {
         if (!callRelationsBySourceMethodId.TryGetValue(sourceMethodId, out var callRelations) || callRelations.Count == 0)
@@ -1237,12 +1278,105 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     DeclarationResolutionStatus.Unresolved => $" (unresolved{unresolvedReasonSuffix})",
                     _ => string.Empty,
                 };
-                sb.AppendLine($"- {relation.ExternalTargetType.DisplayText}{assemblySuffix}{statusSuffix}");
+
+                if (TryResolveExternalTargetPackage(relation, packages, out var package))
+                {
+                    var deepLink = resolver.ToPackageExternalTypeMarkdownLink(
+                        package.Id,
+                        package.CanonicalKey,
+                        relation.ExternalTargetType.DisplayText,
+                        relation.ExternalTargetType.DisplayText);
+                    sb.AppendLine($"- {deepLink}{assemblySuffix}{statusSuffix}");
+                }
+                else
+                {
+                    sb.AppendLine($"- {relation.ExternalTargetType.DisplayText}{assemblySuffix}{statusSuffix}");
+                }
                 continue;
             }
 
             sb.AppendLine("- unresolved target");
         }
+    }
+
+    private static bool TryResolveExternalTargetPackage(
+        MethodRelationNode relation,
+        IReadOnlyList<PackageNode> packages,
+        out PackageNode package)
+    {
+        var assemblyName = relation.ExternalAssemblyName;
+        var externalTypeName = relation.ExternalTargetType?.DisplayText ?? string.Empty;
+
+        var matches = packages
+            .Select(candidate => new
+            {
+                Package = candidate,
+                Score = GetExternalTargetPackageMatchScore(candidate, assemblyName, externalTypeName),
+            })
+            .Where(candidate => candidate.Score > 0)
+            .OrderByDescending(candidate => candidate.Score)
+            .ThenByDescending(candidate => candidate.Package.Name.Length)
+            .ThenBy(candidate => candidate.Package.Name, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Package.Id.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        if (matches.Length == 0)
+        {
+            package = null!;
+            return false;
+        }
+
+        var topScore = matches[0].Score;
+        var topMatches = matches
+            .Where(candidate => candidate.Score == topScore)
+            .ToArray();
+
+        if (topMatches.Length == 1)
+        {
+            package = topMatches[0].Package;
+            return true;
+        }
+
+        package = null!;
+        return false;
+    }
+
+    private static int GetExternalTargetPackageMatchScore(PackageNode package, string? assemblyName, string externalTypeName)
+    {
+        if (!string.IsNullOrWhiteSpace(assemblyName))
+        {
+            var normalizedAssembly = assemblyName.Split(',', 2, StringSplitOptions.TrimEntries)[0]
+                .Trim()
+                .TrimEnd()
+                .TrimEnd('.');
+            if (normalizedAssembly.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedAssembly = normalizedAssembly[..^4];
+            }
+
+            if (normalizedAssembly.Equals(package.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return 3000 + package.Name.Length;
+            }
+
+            if (normalizedAssembly.StartsWith(package.Name + ".", StringComparison.OrdinalIgnoreCase))
+            {
+                return 2000 + package.Name.Length;
+            }
+
+            if (package.Name.StartsWith(normalizedAssembly + ".", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1000 + package.Name.Length;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(externalTypeName)
+            && externalTypeName.StartsWith(package.Name + ".", StringComparison.OrdinalIgnoreCase))
+        {
+            return 500 + package.Name.Length;
+        }
+
+        return 0;
     }
 
     private static string FormatMethodLinkAlias(MethodDeclarationNode method)
@@ -1287,6 +1421,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
     private static WikiPage RenderMethodPage(
         string repositoryId,
         MethodDeclarationNode methodDeclaration,
+        IReadOnlyList<PackageNode> packages,
         IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
         IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
         IReadOnlyDictionary<EntityId, MemberDeclarationNode> memberById,
@@ -1366,6 +1501,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             methodDeclaration.Id,
             callRelationsBySourceMethodId,
             methodById,
+            packages,
             resolver);
 
         sb.AppendLine();
@@ -1636,14 +1772,14 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         AppendTable(
             sb,
             "Repositories",
-            [new IndexRow(model.Repository.Name, model.Repository.Path, model.Repository.Id.Value, resolver.ToWikiLink(model.Repository.Id, model.Repository.Name))]);
+            [new IndexRow(model.Repository.Name, model.Repository.Path, model.Repository.Id.Value, resolver.ToMarkdownLink(model.Repository.Id, model.Repository.Name))]);
 
         AppendTable(
             sb,
             "Solutions",
             model.Solutions
                 .OrderBy(x => x.Path, StringComparer.Ordinal)
-                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToMarkdownLink(x.Id, x.Name)))
                 .ToArray());
 
         AppendTable(
@@ -1651,7 +1787,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             "Projects",
             model.Projects
                 .OrderBy(x => x.Path, StringComparer.Ordinal)
-                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToMarkdownLink(x.Id, x.Name)))
                 .ToArray());
 
         AppendTable(
@@ -1659,7 +1795,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             "Packages",
             model.Packages
                 .OrderBy(x => x.Name, StringComparer.Ordinal)
-                .Select(x => new IndexRow(x.Name, x.Name, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .Select(x => new IndexRow(x.Name, x.Name, x.Id.Value, resolver.ToMarkdownLink(x.Id, x.Name)))
                 .Concat(
                     model.DependencyAttribution.DeclarationUnknown.UsageCount > 0
                     || model.DependencyAttribution.MethodBodyUnknown.UsageCount > 0
@@ -1667,7 +1803,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                             "Unknown Package Attribution",
                             "packages/unknown-package-attribution.md",
                             $"dependency-attribution:unknown:{model.Repository.Id.Value}",
-                            ToWikiLink("packages/unknown-package-attribution", "Unknown Package Attribution"))]
+                            resolver.ToMarkdownLink("packages/unknown-package-attribution.md", "Unknown Package Attribution"))]
                         : [])
                 .ToArray());
 
@@ -1677,7 +1813,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             model.Declarations.Namespaces
                 .OrderBy(x => x.Path, StringComparer.Ordinal)
                 .ThenBy(x => x.Name, StringComparer.Ordinal)
-                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToMarkdownLink(x.Id, x.Name)))
                 .ToArray());
 
         AppendTable(
@@ -1686,7 +1822,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             model.Declarations.Types
                 .OrderBy(x => x.Path, StringComparer.Ordinal)
                 .ThenBy(x => x.Name, StringComparer.Ordinal)
-                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToMarkdownLink(x.Id, x.Name)))
                 .ToArray());
 
         var typeById = model.Declarations.Types.ToDictionary(x => x.Id, x => x);
@@ -1701,7 +1837,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     var declaringTypePath = typeById.TryGetValue(x.DeclaringTypeId, out var declaringType)
                         ? declaringType.Path
                         : "<unknown-type>";
-                    return new IndexRow(FormatMethodLinkAlias(x), $"{declaringTypePath}::{x.Signature}", x.Id.Value, resolver.ToWikiLink(x.Id, FormatMethodLinkAlias(x)));
+                    return new IndexRow(FormatMethodLinkAlias(x), $"{declaringTypePath}::{x.Signature}", x.Id.Value, resolver.ToMarkdownLink(x.Id, FormatMethodLinkAlias(x)));
                 })
                 .ToArray());
 
@@ -1710,7 +1846,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             "Files",
             model.Files
                 .OrderBy(x => x.Path, StringComparer.Ordinal)
-                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToWikiLink(x.Id, x.Path)))
+                .Select(x => new IndexRow(x.Name, x.Path, x.Id.Value, resolver.ToMarkdownLink(x.Id, x.Path)))
                 .ToArray());
 
         return new WikiPage(

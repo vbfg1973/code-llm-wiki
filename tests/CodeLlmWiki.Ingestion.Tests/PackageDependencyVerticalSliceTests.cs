@@ -5,6 +5,7 @@ using CodeLlmWiki.Ontology;
 using CodeLlmWiki.Query.ProjectStructure;
 using CodeLlmWiki.Wiki.ProjectStructure;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace CodeLlmWiki.Ingestion.Tests;
 
@@ -97,8 +98,13 @@ public sealed class PackageDependencyVerticalSliceTests
             && page.Markdown.Contains("# Package: Newtonsoft.Json", StringComparison.Ordinal));
 
         Assert.Contains("| project | project_path | declared_version | resolved_version |", packagePage.Markdown, StringComparison.Ordinal);
-        Assert.Contains("|NoAssets]] | `src/NoAssets/NoAssets.csproj` | `12.0.1` | `-` |", packagePage.Markdown, StringComparison.Ordinal);
-        Assert.Contains("|WithAssets]] | `src/WithAssets/WithAssets.csproj` | `13.0.3` | `13.0.3` |", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("| [NoAssets](projects/NoAssets.md) | `src/NoAssets/NoAssets.csproj` | `12.0.1` | `-` |", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("| [WithAssets](projects/WithAssets.md) | `src/WithAssets/WithAssets.csproj` | `13.0.3` | `13.0.3` |", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("| [[projects/", packagePage.Markdown, StringComparison.Ordinal);
+
+        var indexPage = pages.Single(page => page.RelativePath == "index/repository-index.md");
+        Assert.Contains("[NoAssets](projects/NoAssets.md)", indexPage.Markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("| [[", indexPage.Markdown, StringComparison.Ordinal);
 
         var noAssetsIndex = packagePage.Markdown.IndexOf("NoAssets", StringComparison.Ordinal);
         var withAssetsIndex = packagePage.Markdown.IndexOf("WithAssets", StringComparison.Ordinal);
@@ -185,6 +191,28 @@ public sealed class PackageDependencyVerticalSliceTests
         Assert.Contains("- [[methods/", packagePage.Markdown, StringComparison.Ordinal);
         Assert.Contains("Serialize(", packagePage.Markdown, StringComparison.Ordinal);
         Assert.DoesNotContain("TokenName(", packagePage.Markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Render_MethodCalls_LinkExternalTargets_ThroughPackageDeepAnchors_WhenAttributionIsResolvable()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var pages = new ProjectStructureWikiRenderer().Render(model);
+        var serializeMethodPage = pages.Single(page =>
+            page.RelativePath.StartsWith("methods/App/WithAssets/BodyUsageFacade/", StringComparison.Ordinal)
+            && page.Markdown.Contains("method_name: Serialize", StringComparison.Ordinal));
+        var packagePage = pages.Single(page => page.RelativePath == "packages/Newtonsoft.Json.md");
+
+        Assert.Contains("## Calls", serializeMethodPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("(packages/Newtonsoft.Json.md#ext-newtonsoft-json-linq-jtoken-", serializeMethodPage.Markdown, StringComparison.Ordinal);
+        var match = Regex.Match(serializeMethodPage.Markdown, @"packages/Newtonsoft\.Json\.md#(?<anchor>[^\)\s]+)", RegexOptions.CultureInvariant);
+        Assert.True(match.Success);
+        var anchor = match.Groups["anchor"].Value;
+        Assert.Contains($"<a id=\"{anchor}\"></a>", packagePage.Markdown, StringComparison.Ordinal);
     }
 
     [Fact]

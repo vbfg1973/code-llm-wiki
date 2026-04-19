@@ -117,7 +117,8 @@ public sealed class FileInventoryVerticalSliceTests
 
         var project = model.Projects.Single();
         Assert.Contains(project.Id.Value, indexPage.Markdown, StringComparison.Ordinal);
-        Assert.Contains("[[projects/", indexPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("[App](projects/App.md)", indexPage.Markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("| [[", indexPage.Markdown, StringComparison.Ordinal);
     }
 
     [Fact]
