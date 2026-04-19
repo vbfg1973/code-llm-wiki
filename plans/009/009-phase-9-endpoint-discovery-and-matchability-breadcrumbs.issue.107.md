@@ -3,7 +3,8 @@
 > Parent PRD: [PRD 009](/home/vbfg/dev/dotnet-llm-wiki/plans/009/009-phase-9-endpoint-discovery-and-matchability-breadcrumbs.prd.md)
 
 - Issue: [#107](https://github.com/vbfg1973/code-llm-wiki/issues/107)
-- [ ] Status: open
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -17,10 +18,10 @@ Deliver the controller-baseline vertical slice for endpoint discovery: establish
 
 ## Acceptance criteria
 
-- [ ] Endpoint entities and required relations are ingested as first-class graph facts.
-- [ ] Controller attribute-routed endpoints are discovered and published as one page per canonical endpoint signature.
-- [ ] Endpoint pages include required declaration traceability links (namespace/type/method/file).
-- [ ] Confidence enum and rule provenance are emitted and validated for controller detections.
+- [x] Endpoint entities and required relations are ingested as first-class graph facts.
+- [x] Controller attribute-routed endpoints are discovered and published as one page per canonical endpoint signature.
+- [x] Endpoint pages include required declaration traceability links (namespace/type/method/file).
+- [x] Confidence enum and rule provenance are emitted and validated for controller detections.
 
 ## Blocked by
 

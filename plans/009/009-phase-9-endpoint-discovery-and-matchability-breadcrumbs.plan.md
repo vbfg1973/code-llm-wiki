@@ -4,7 +4,7 @@
 
 ## Execution checklist
 
-- [ ] Phase 1: Endpoint Core Contracts and Controller Baseline
+- [x] Phase 1: Endpoint Core Contracts and Controller Baseline — completion date: 2026-04-19
 - [ ] Phase 2: Minimal API Endpoint Slice
 - [ ] Phase 3: Message Handler and CLI Endpoint Slice
 - [ ] Phase 4: gRPC Endpoint Slice and Partial-Resolution Semantics
@@ -40,10 +40,10 @@ Deliver a complete controller-endpoint vertical slice that establishes the share
 
 ### Acceptance criteria
 
-- [ ] Endpoint entities and required relations are ingested as first-class graph facts.
-- [ ] Controller attribute-routed endpoints are discovered and published as one page per canonical endpoint signature.
-- [ ] Endpoint pages include required declaration traceability links (namespace/type/method/file).
-- [ ] Confidence enum and rule provenance are emitted and validated for controller detections.
+- [x] Endpoint entities and required relations are ingested as first-class graph facts.
+- [x] Controller attribute-routed endpoints are discovered and published as one page per canonical endpoint signature.
+- [x] Endpoint pages include required declaration traceability links (namespace/type/method/file).
+- [x] Confidence enum and rule provenance are emitted and validated for controller detections.
 
 ---
 
