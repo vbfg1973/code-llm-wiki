@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 007](./007-phase-7-complexity-and-maintainability-metrics.prd.md)
 
 - Issue: [#90](https://github.com/vbfg1973/code-llm-wiki/issues/90)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,10 +18,10 @@ Publish BL-012 metric and hotspot outputs through wiki and manifest surfaces. Ad
 
 ## Acceptance criteria
 
-- [ ] Dedicated `hotspots/` pages are generated for methods, types, files, namespaces, projects, and repository views.
-- [ ] Front matter remains minimal scalar-only and Dataview-compatible.
-- [ ] Full metric details are rendered in readable body tables with stable links.
-- [ ] Run manifest includes compact metrics summary with effective config and coverage/completeness fields.
+- [x] Dedicated `hotspots/` pages are generated for methods, types, files, namespaces, projects, and repository views.
+- [x] Front matter remains minimal scalar-only and Dataview-compatible.
+- [x] Full metric details are rendered in readable body tables with stable links.
+- [x] Run manifest includes compact metrics summary with effective config and coverage/completeness fields.
 
 ## Blocked by
 

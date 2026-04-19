@@ -7,7 +7,7 @@
 - [x] Phase 1: Metric Facts Baseline (Method + Type Core) — completion date: 2026-04-19
 - [x] Phase 2: Rollups and Scope Semantics (File/Namespace/Project/Repository) — completion date: 2026-04-19
 - [x] Phase 3: Hotspot Ranking and Severity Contracts — completion date: 2026-04-19
-- [ ] Phase 4: Publication Surfaces (Wiki + Manifest + Front Matter) — completion date:
+- [x] Phase 4: Publication Surfaces (Wiki + Manifest + Front Matter) — completion date: 2026-04-19
 - [ ] Phase 5: Determinism, Parallelism, and Performance Hardening — completion date:
 
 ---
@@ -108,10 +108,10 @@ Publish BL-012 outputs into dedicated hotspot wiki pages and manifest summaries 
 
 ### Acceptance criteria
 
-- [ ] Dedicated `hotspots/` wiki pages are rendered for methods, types, files, namespaces, projects, and repository views.
-- [ ] Hotspot/entity front matter remains minimal scalar-only and supports Dataview use.
-- [ ] Full metric detail remains in readable body sections with stable links/navigation.
-- [ ] Run manifest includes compact metric summary, effective configuration, and coverage/completeness indicators.
+- [x] Dedicated `hotspots/` wiki pages are rendered for methods, types, files, namespaces, projects, and repository views.
+- [x] Hotspot/entity front matter remains minimal scalar-only and supports Dataview use.
+- [x] Full metric detail remains in readable body sections with stable links/navigation.
+- [x] Run manifest includes compact metric summary, effective configuration, and coverage/completeness indicators.
 
 ---
 
