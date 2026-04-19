@@ -427,6 +427,31 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine("## Start Here");
         sb.AppendLine($"- {resolver.ToMarkdownLink("index/repository-index.md", "Repository Index")}");
         sb.AppendLine($"- {resolver.ToMarkdownLink("guidance/human.md", "Human Guide")}");
+        sb.AppendLine();
+        sb.AppendLine("## Contract Rules");
+        sb.AppendLine("- Agents MUST navigate via published wiki links before making material claims.");
+        sb.AppendLine("- Agents MUST prioritize human-readable output and keep IDs out of narrative body content.");
+        sb.AppendLine("- Agents SHOULD keep responses concise and link-first.");
+        sb.AppendLine("- Agents SHOULD use deterministic section ordering to aid comparison across runs.");
+        sb.AppendLine();
+        sb.AppendLine("## Response Template");
+        sb.AppendLine("- Summary");
+        sb.AppendLine("- Evidence Links");
+        sb.AppendLine("- Gaps/Risks");
+        sb.AppendLine("- Next Queries");
+        sb.AppendLine();
+        sb.AppendLine("## Link Policy");
+        sb.AppendLine("- Use wiki links for internal page references in prose.");
+        sb.AppendLine("- Use markdown links for deep anchors and links inside table cells.");
+        sb.AppendLine();
+        sb.AppendLine("## Evidence Policy");
+        sb.AppendLine("- Material claims MUST include one or more supporting wiki links.");
+        sb.AppendLine("- Uncertain or missing evidence MUST be reported in `Gaps/Risks`.");
+        sb.AppendLine();
+        sb.AppendLine("## Guardrails");
+        sb.AppendLine("- Do not claim capabilities not present in this repository snapshot.");
+        sb.AppendLine("- Do not claim cross-repository tracing in single-repository mode.");
+        sb.AppendLine("- Do not expose internal IDs in narrative output.");
 
         return new WikiPage(
             RelativePath: "guidance/llm-contract.md",
