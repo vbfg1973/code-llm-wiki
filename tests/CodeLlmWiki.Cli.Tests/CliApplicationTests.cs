@@ -2,6 +2,7 @@ using CodeLlmWiki.Cli;
 using CodeLlmWiki.Cli.Features.Ingest;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Ingestion;
+using CodeLlmWiki.Ingestion.Quality;
 
 namespace CodeLlmWiki.Cli.Tests;
 
@@ -116,6 +117,48 @@ public sealed class CliApplicationTests
         Assert.NotNull(publisher.LastRequest);
         Assert.Equal(3, publisher.LastRequest!.MaxMergeEntriesPerFile);
         Assert.Equal(4, publisher.LastRequest.MetricComputationMaxDegreeOfParallelism);
+    }
+
+    [Fact]
+    public async Task RunAsync_WritesQualityGateFailureDetailsToStderr()
+    {
+        var runner = new CapturingRunner
+        {
+            NextResult = new IngestionRunResult(
+                Status: IngestionRunStatus.FailedQualityGate,
+                ExitCode: 3,
+                Diagnostics: [new IngestionDiagnostic("method:call:resolution:failed", "failed")],
+                RepositoryId: new StableIdGenerator().Create(new EntityKey("repository", ".")),
+                Triples: [],
+                QualityGate: new UnresolvedCallRatioQualityGateEvidence(
+                    GateId: "quality:unresolved-call-ratio",
+                    UnresolvedCallFailures: 3,
+                    TotalCallResolutionAttempts: 4,
+                    UnresolvedCallRatio: 0.75d,
+                    Threshold: 0.25d,
+                    Passed: false)),
+        };
+        var publisher = new CapturingPublisher();
+        var app = new CliApplication(runner, publisher);
+
+        var originalError = Console.Error;
+        using var errorWriter = new StringWriter();
+        Console.SetError(errorWriter);
+
+        try
+        {
+            var exitCode = await app.RunAsync(["ingest", "--path", "."], CancellationToken.None);
+
+            Assert.Equal(3, exitCode);
+            var stderr = errorWriter.ToString();
+            Assert.Contains("Quality gate failed", stderr, StringComparison.Ordinal);
+            Assert.Contains("0.75", stderr, StringComparison.Ordinal);
+            Assert.Contains("0.25", stderr, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
     }
 
     private static string WriteTempFile(string content)

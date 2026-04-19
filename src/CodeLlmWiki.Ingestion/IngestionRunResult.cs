@@ -1,5 +1,6 @@
 using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
+using CodeLlmWiki.Ingestion.Quality;
 
 namespace CodeLlmWiki.Ingestion;
 
@@ -8,4 +9,5 @@ public sealed record IngestionRunResult(
     int ExitCode,
     IReadOnlyList<IngestionDiagnostic> Diagnostics,
     EntityId RepositoryId,
-    IReadOnlyList<SemanticTriple> Triples);
+    IReadOnlyList<SemanticTriple> Triples,
+    UnresolvedCallRatioQualityGateEvidence? QualityGate = null);
