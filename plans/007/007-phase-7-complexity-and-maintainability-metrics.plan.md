@@ -5,7 +5,7 @@
 ## Execution checklist
 
 - [x] Phase 1: Metric Facts Baseline (Method + Type Core) — completion date: 2026-04-19
-- [ ] Phase 2: Rollups and Scope Semantics (File/Namespace/Project/Repository) — completion date:
+- [x] Phase 2: Rollups and Scope Semantics (File/Namespace/Project/Repository) — completion date: 2026-04-19
 - [ ] Phase 3: Hotspot Ranking and Severity Contracts — completion date:
 - [ ] Phase 4: Publication Surfaces (Wiki + Manifest + Front Matter) — completion date:
 - [ ] Phase 5: Determinism, Parallelism, and Performance Hardening — completion date:
@@ -74,10 +74,10 @@ Build query-layer rollups for each structural scope, including namespace hierarc
 
 ### Acceptance criteria
 
-- [ ] File, namespace, project, and repository metric rollups are available and deterministic.
-- [ ] Namespace hierarchy supports both direct-only and recursive cumulative rollups, including synthetic `(global)` namespace.
-- [ ] Production-default ranking with test/generated filters is available and generated code is excluded by default rankings.
-- [ ] Insufficient-data scopes produce explicit `severity: none` semantics and are excluded from ranked tables by default.
+- [x] File, namespace, project, and repository metric rollups are available and deterministic.
+- [x] Namespace hierarchy supports both direct-only and recursive cumulative rollups, including synthetic `(global)` namespace.
+- [x] Production-default ranking with test/generated filters is available and generated code is excluded by default rankings.
+- [x] Insufficient-data scopes produce explicit `severity: none` semantics and are excluded from ranked tables by default.
 
 ---
 

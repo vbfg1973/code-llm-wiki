@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 007](./007-phase-7-complexity-and-maintainability-metrics.prd.md)
 
 - Issue: [#88](https://github.com/vbfg1973/code-llm-wiki/issues/88)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,10 +18,10 @@ Build deterministic rollups and scope semantics for BL-012 across file, namespac
 
 ## Acceptance criteria
 
-- [ ] File, namespace, project, and repository rollups are available and deterministic.
-- [ ] Namespace rollups support direct-only and recursive cumulative modes including `(global)` namespace.
-- [ ] Production-default ranking with filterable test/generated code kinds is implemented.
-- [ ] Insufficient-data scopes are marked `severity: none` and excluded from default ranked lists.
+- [x] File, namespace, project, and repository rollups are available and deterministic.
+- [x] Namespace rollups support direct-only and recursive cumulative modes including `(global)` namespace.
+- [x] Production-default ranking with filterable test/generated code kinds is implemented.
+- [x] Insufficient-data scopes are marked `severity: none` and excluded from default ranked lists.
 
 ## Blocked by
 
