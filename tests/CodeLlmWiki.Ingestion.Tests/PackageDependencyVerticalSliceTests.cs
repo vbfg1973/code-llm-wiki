@@ -295,6 +295,27 @@ public sealed class PackageDependencyVerticalSliceTests
     }
 
     [Fact]
+    public async Task Render_UnknownPackageAttributionPage_IsDeterministicAcrossRuns()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync(includeAmbiguousPackageInNoAssets: true, includeUnresolvedSignatureInNoAssets: true);
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+
+        var first = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var firstModel = new ProjectStructureQueryService(first.Triples).GetModel(first.RepositoryId);
+        var firstPage = new ProjectStructureWikiRenderer()
+            .Render(firstModel)
+            .Single(page => page.RelativePath == "packages/unknown-package-attribution.md");
+
+        var second = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var secondModel = new ProjectStructureQueryService(second.Triples).GetModel(second.RepositoryId);
+        var secondPage = new ProjectStructureWikiRenderer()
+            .Render(secondModel)
+            .Single(page => page.RelativePath == "packages/unknown-package-attribution.md");
+
+        Assert.Equal(firstPage.Markdown, secondPage.Markdown);
+    }
+
+    [Fact]
     public async Task Ontology_ContainsPackagePredicates_AndStillValidates()
     {
         var ontologyPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "ontology", "ontology.v1.yaml"));
