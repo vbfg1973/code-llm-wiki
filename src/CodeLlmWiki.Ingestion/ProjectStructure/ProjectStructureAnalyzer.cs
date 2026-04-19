@@ -353,6 +353,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
         var typeIdByQualifiedName = new Dictionary<string, EntityId>(StringComparer.Ordinal);
         var typeQualifiedNameById = new Dictionary<EntityId, string>();
+        var namespaceIdByTypeId = new Dictionary<EntityId, EntityId>();
         var declaredTypeNamesBySimpleName = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var methodCandidatesByTypeId = new Dictionary<EntityId, List<MethodRelationshipCandidate>>();
         var directBaseTypeIdsByTypeId = new Dictionary<EntityId, List<EntityId>>();
@@ -383,6 +384,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             var typeId = _stableIdGenerator.Create(new EntityKey("type-declaration", representative.QualifiedName));
             typeIdByQualifiedName[representative.QualifiedName] = typeId;
             typeQualifiedNameById[typeId] = representative.QualifiedName;
+            namespaceIdByTypeId[typeId] = namespaceId;
 
             if (!declaredTypeNamesBySimpleName.TryGetValue(representative.TypeName, out var names))
             {
@@ -995,6 +997,19 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             triples,
             diagnostics);
 
+        CaptureControllerEndpoints(
+            repositoryId,
+            repositoryRoot,
+            sourceFiles,
+            sourceTextByRelativePath,
+            typeIdByQualifiedName,
+            namespaceIdByTypeId,
+            methodIdByDeclarationLocation,
+            declaringTypeIdByMethodId,
+            fileIdByRelativePath,
+            triples,
+            diagnostics);
+
         foreach (var pendingMemberTypeLink in pendingMemberTypeLinks)
         {
             var resolvedMemberTypeName = ResolveInternalTypeName(
@@ -1145,6 +1160,504 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 CorePredicates.DependsOnTypeDeclaration,
                 new EntityNode(resolvedParameterTypeId)));
         }
+    }
+
+    private void CaptureControllerEndpoints(
+        EntityId repositoryId,
+        string repositoryRoot,
+        IReadOnlyList<string> sourceFiles,
+        IReadOnlyDictionary<string, string> sourceTextByRelativePath,
+        IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
+        IReadOnlyDictionary<EntityId, EntityId> namespaceIdByTypeId,
+        IReadOnlyDictionary<MethodDeclarationLocationKey, EntityId> methodIdByDeclarationLocation,
+        IReadOnlyDictionary<EntityId, EntityId> declaringTypeIdByMethodId,
+        IReadOnlyDictionary<string, EntityId> fileIdByRelativePath,
+        List<SemanticTriple> triples,
+        List<IngestionDiagnostic> diagnostics)
+    {
+        if (sourceFiles.Count == 0)
+        {
+            return;
+        }
+
+        var syntaxTrees = new List<SyntaxTree>(sourceFiles.Count);
+        foreach (var relativePath in sourceFiles.OrderBy(x => x, StringComparer.Ordinal))
+        {
+            if (!sourceTextByRelativePath.TryGetValue(relativePath, out var sourceText))
+            {
+                var fullPath = Path.Combine(repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(fullPath))
+                {
+                    continue;
+                }
+
+                sourceText = File.ReadAllText(fullPath);
+            }
+
+            var syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: relativePath);
+            syntaxTrees.Add(syntaxTree);
+        }
+
+        if (syntaxTrees.Count == 0)
+        {
+            return;
+        }
+
+        var compilation = CSharpCompilation.Create(
+            assemblyName: "CodeLlmWiki.EndpointDiscovery",
+            syntaxTrees: syntaxTrees,
+            references: BuildCompilationReferences(diagnostics),
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var emittedEndpointGroupIds = new HashSet<EntityId>();
+        var emittedEndpointIds = new HashSet<EntityId>();
+
+        foreach (var syntaxTree in syntaxTrees)
+        {
+            var semanticModel = compilation.GetSemanticModel(syntaxTree, ignoreAccessibility: true);
+            var root = syntaxTree.GetRoot() as CompilationUnitSyntax;
+            if (root is null)
+            {
+                continue;
+            }
+
+            var relativePath = syntaxTree.FilePath;
+            fileIdByRelativePath.TryGetValue(relativePath, out var declarationFileId);
+
+            foreach (var classDeclaration in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
+            {
+                var classSymbol = semanticModel.GetDeclaredSymbol(classDeclaration) as INamedTypeSymbol;
+                if (classSymbol is null)
+                {
+                    continue;
+                }
+
+                if (!IsControllerType(classDeclaration, classSymbol))
+                {
+                    continue;
+                }
+
+                var qualifiedTypeName = GetTypeQualifiedName(classSymbol);
+                if (!typeIdByQualifiedName.TryGetValue(qualifiedTypeName, out var declaringTypeId))
+                {
+                    continue;
+                }
+
+                var controllerName = classDeclaration.Identifier.ValueText;
+                var controllerTokenValue = controllerName.EndsWith("Controller", StringComparison.Ordinal)
+                    ? controllerName[..^"Controller".Length]
+                    : controllerName;
+
+                var routePrefixTemplates = ExtractRouteTemplates(classDeclaration.AttributeLists);
+                if (routePrefixTemplates.Count == 0)
+                {
+                    routePrefixTemplates = [string.Empty];
+                }
+
+                var groupContexts = routePrefixTemplates
+                    .Select(routePrefixTemplate =>
+                    {
+                        var normalizedRoutePrefix = NormalizeRouteKey(ExpandRouteTokens(routePrefixTemplate, controllerTokenValue, string.Empty));
+                        var endpointGroupKey = $"{declaringTypeId.Value}:controller:{normalizedRoutePrefix}";
+                        var endpointGroupId = _stableIdGenerator.Create(new EntityKey("endpoint-group", endpointGroupKey));
+                        return new
+                        {
+                            AuthoredRoutePrefix = routePrefixTemplate,
+                            NormalizedRoutePrefix = normalizedRoutePrefix,
+                            GroupKey = endpointGroupKey,
+                            GroupId = endpointGroupId,
+                        };
+                    })
+                    .GroupBy(x => x.GroupId)
+                    .Select(x => x.First())
+                    .ToArray();
+
+                foreach (var groupContext in groupContexts)
+                {
+                    if (!emittedEndpointGroupIds.Add(groupContext.GroupId))
+                    {
+                        continue;
+                    }
+
+                    AddEntityTriples(
+                        triples,
+                        groupContext.GroupId,
+                        "endpoint-group",
+                        controllerName,
+                        groupContext.GroupKey);
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(groupContext.GroupId),
+                        CorePredicates.EndpointFamily,
+                        new LiteralNode("controller")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(groupContext.GroupId),
+                        CorePredicates.RoutePrefix,
+                        new LiteralNode(groupContext.AuthoredRoutePrefix)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(groupContext.GroupId),
+                        CorePredicates.NormalizedRouteKey,
+                        new LiteralNode(groupContext.NormalizedRoutePrefix)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(groupContext.GroupId),
+                        CorePredicates.HasDeclaringType,
+                        new EntityNode(declaringTypeId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(repositoryId),
+                        CorePredicates.ContainsEndpointGroup,
+                        new EntityNode(groupContext.GroupId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(declaringTypeId),
+                        CorePredicates.ContainsEndpointGroup,
+                        new EntityNode(groupContext.GroupId)));
+
+                    if (namespaceIdByTypeId.TryGetValue(declaringTypeId, out var namespaceId))
+                    {
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(groupContext.GroupId),
+                            CorePredicates.HasNamespace,
+                            new EntityNode(namespaceId)));
+                    }
+
+                    if (declarationFileId != default)
+                    {
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(declarationFileId),
+                            CorePredicates.DeclaresEndpointGroup,
+                            new EntityNode(groupContext.GroupId)));
+                    }
+                }
+
+                foreach (var methodDeclaration in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
+                {
+                    var methodId = ResolveSourceMethodId(methodDeclaration.Identifier.GetLocation(), methodIdByDeclarationLocation);
+                    if (methodId == default)
+                    {
+                        continue;
+                    }
+
+                    if (!declaringTypeIdByMethodId.TryGetValue(methodId, out var methodDeclaringTypeId)
+                        || methodDeclaringTypeId != declaringTypeId)
+                    {
+                        continue;
+                    }
+
+                    foreach (var groupContext in groupContexts)
+                    {
+                        var endpointCandidates = ExtractControllerEndpointCandidates(
+                            methodDeclaration,
+                            groupContext.AuthoredRoutePrefix,
+                            controllerTokenValue);
+                        foreach (var endpointCandidate in endpointCandidates)
+                        {
+                            var canonicalSignature = $"{endpointCandidate.HttpMethod} {endpointCandidate.NormalizedRouteKey} {methodId.Value}";
+                            var endpointId = _stableIdGenerator.Create(new EntityKey("endpoint", canonicalSignature));
+                            if (!emittedEndpointIds.Add(endpointId))
+                            {
+                                continue;
+                            }
+
+                            AddEntityTriples(
+                                triples,
+                                endpointId,
+                                "endpoint",
+                                $"{endpointCandidate.HttpMethod} {endpointCandidate.NormalizedRouteKey}",
+                                canonicalSignature);
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.EndpointKind,
+                                new LiteralNode("controller-action")));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.EndpointFamily,
+                                new LiteralNode("controller")));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.EndpointHttpMethod,
+                                new LiteralNode(endpointCandidate.HttpMethod)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.AuthoredRouteText,
+                                new LiteralNode(endpointCandidate.AuthoredRouteText)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.NormalizedRouteKey,
+                                new LiteralNode(endpointCandidate.NormalizedRouteKey)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.EndpointConfidence,
+                                new LiteralNode(endpointCandidate.Confidence)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.RuleId,
+                                new LiteralNode("aspnetcore.controller.attribute-route")));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.RuleVersion,
+                                new LiteralNode("1")));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.RuleSource,
+                                new LiteralNode("code-defined")));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.HasEndpointGroup,
+                                new EntityNode(groupContext.GroupId)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.HasDeclaringMethod,
+                                new EntityNode(methodId)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.HasDeclaringType,
+                                new EntityNode(declaringTypeId)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(repositoryId),
+                                CorePredicates.ContainsEndpoint,
+                                new EntityNode(endpointId)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(declaringTypeId),
+                                CorePredicates.ContainsEndpoint,
+                                new EntityNode(endpointId)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(groupContext.GroupId),
+                                CorePredicates.ContainsEndpoint,
+                                new EntityNode(endpointId)));
+
+                            if (namespaceIdByTypeId.TryGetValue(declaringTypeId, out var namespaceId))
+                            {
+                                triples.Add(new SemanticTriple(
+                                    new EntityNode(endpointId),
+                                    CorePredicates.HasNamespace,
+                                    new EntityNode(namespaceId)));
+                            }
+
+                            if (declarationFileId != default)
+                            {
+                                triples.Add(new SemanticTriple(
+                                    new EntityNode(declarationFileId),
+                                    CorePredicates.DeclaresEndpoint,
+                                    new EntityNode(endpointId)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static bool IsControllerType(ClassDeclarationSyntax declaration, INamedTypeSymbol typeSymbol)
+    {
+        if (declaration.Identifier.ValueText.EndsWith("Controller", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (HasAttribute(declaration.AttributeLists, "ApiController"))
+        {
+            return true;
+        }
+
+        var current = typeSymbol.BaseType;
+        while (current is not null)
+        {
+            var baseName = current.Name;
+            if (string.Equals(baseName, "ControllerBase", StringComparison.Ordinal)
+                || string.Equals(baseName, "Controller", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            current = current.BaseType;
+        }
+
+        return false;
+    }
+
+    private static List<ControllerEndpointCandidate> ExtractControllerEndpointCandidates(
+        MethodDeclarationSyntax methodDeclaration,
+        string routePrefixTemplate,
+        string controllerTokenValue)
+    {
+        var candidates = new List<ControllerEndpointCandidate>();
+        var actionTokenValue = methodDeclaration.Identifier.ValueText;
+
+        foreach (var attribute in methodDeclaration.AttributeLists.SelectMany(x => x.Attributes))
+        {
+            var attributeName = ExtractAttributeName(attribute.Name);
+            if (string.IsNullOrWhiteSpace(attributeName))
+            {
+                continue;
+            }
+
+            if (!TryMapHttpMethod(attributeName, out var httpMethod))
+            {
+                continue;
+            }
+
+            var routeSuffix = ExtractFirstStringLiteralArgument(attribute);
+            var authoredRoute = CombineRouteTemplates(routePrefixTemplate, routeSuffix);
+            var normalizedRoute = NormalizeRouteKey(ExpandRouteTokens(authoredRoute, controllerTokenValue, actionTokenValue));
+            if (string.IsNullOrWhiteSpace(normalizedRoute))
+            {
+                normalizedRoute = NormalizeRouteKey(ExpandRouteTokens(routePrefixTemplate, controllerTokenValue, actionTokenValue));
+            }
+
+            candidates.Add(new ControllerEndpointCandidate(
+                HttpMethod: httpMethod,
+                AuthoredRouteText: authoredRoute,
+                NormalizedRouteKey: normalizedRoute,
+                Confidence: "high"));
+        }
+
+        return candidates;
+    }
+
+    private static bool TryMapHttpMethod(string attributeName, out string httpMethod)
+    {
+        switch (attributeName)
+        {
+            case "HttpGet":
+                httpMethod = "GET";
+                return true;
+            case "HttpPost":
+                httpMethod = "POST";
+                return true;
+            case "HttpPut":
+                httpMethod = "PUT";
+                return true;
+            case "HttpDelete":
+                httpMethod = "DELETE";
+                return true;
+            case "HttpPatch":
+                httpMethod = "PATCH";
+                return true;
+            case "HttpHead":
+                httpMethod = "HEAD";
+                return true;
+            case "HttpOptions":
+                httpMethod = "OPTIONS";
+                return true;
+            case "Route":
+                httpMethod = "ANY";
+                return true;
+            default:
+                httpMethod = string.Empty;
+                return false;
+        }
+    }
+
+    private static IReadOnlyList<string> ExtractRouteTemplates(SyntaxList<AttributeListSyntax> attributeLists)
+    {
+        var templates = attributeLists
+            .SelectMany(x => x.Attributes)
+            .Where(x => string.Equals(ExtractAttributeName(x.Name), "Route", StringComparison.Ordinal))
+            .Select(ExtractFirstStringLiteralArgument)
+            .Where(x => x is not null)
+            .Select(x => x!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        return templates;
+    }
+
+    private static string? ExtractFirstStringLiteralArgument(AttributeSyntax attribute)
+    {
+        if (attribute.ArgumentList is null || attribute.ArgumentList.Arguments.Count == 0)
+        {
+            return null;
+        }
+
+        foreach (var argument in attribute.ArgumentList.Arguments)
+        {
+            if (argument.Expression is LiteralExpressionSyntax literal
+                && literal.IsKind(SyntaxKind.StringLiteralExpression))
+            {
+                return literal.Token.ValueText;
+            }
+        }
+
+        return null;
+    }
+
+    private static string ExtractAttributeName(NameSyntax attributeNameSyntax)
+    {
+        var rawName = attributeNameSyntax switch
+        {
+            IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+            QualifiedNameSyntax qualified => qualified.Right.Identifier.ValueText,
+            AliasQualifiedNameSyntax aliasQualified => aliasQualified.Name.Identifier.ValueText,
+            _ => attributeNameSyntax.ToString(),
+        };
+
+        return rawName.EndsWith("Attribute", StringComparison.Ordinal)
+            ? rawName[..^"Attribute".Length]
+            : rawName;
+    }
+
+    private static bool HasAttribute(SyntaxList<AttributeListSyntax> attributeLists, string expectedName)
+    {
+        return attributeLists
+            .SelectMany(x => x.Attributes)
+            .Any(attribute => string.Equals(ExtractAttributeName(attribute.Name), expectedName, StringComparison.Ordinal));
+    }
+
+    private static string CombineRouteTemplates(string? routePrefix, string? routeSuffix)
+    {
+        var prefix = routePrefix?.Trim() ?? string.Empty;
+        var suffix = routeSuffix?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(prefix))
+        {
+            return suffix;
+        }
+
+        if (string.IsNullOrWhiteSpace(suffix))
+        {
+            return prefix;
+        }
+
+        return $"{prefix.TrimEnd('/')}/{suffix.TrimStart('/')}";
+    }
+
+    private static string ExpandRouteTokens(string route, string controllerTokenValue, string actionTokenValue)
+    {
+        if (string.IsNullOrWhiteSpace(route))
+        {
+            return string.Empty;
+        }
+
+        return route
+            .Replace("[controller]", controllerTokenValue, StringComparison.OrdinalIgnoreCase)
+            .Replace("[action]", actionTokenValue, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeRouteKey(string route)
+    {
+        var value = route.Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        value = value.Replace('\\', '/');
+        if (value.StartsWith("~/", StringComparison.Ordinal))
+        {
+            value = value[2..];
+        }
+
+        value = value.Trim('/');
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var segments = value
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => x.Trim())
+            .Where(x => x.Length > 0)
+            .ToArray();
+
+        return string.Join('/', segments).ToLowerInvariant();
     }
 
     private void CaptureMethodCalls(
@@ -3027,6 +3540,12 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         string DeclaredTypeName,
         IReadOnlyList<string> ImportedNamespaces,
         IReadOnlyDictionary<string, string> ImportedAliases);
+
+    private sealed record ControllerEndpointCandidate(
+        string HttpMethod,
+        string AuthoredRouteText,
+        string NormalizedRouteKey,
+        string Confidence);
 
     private sealed record MemberDeclarationLocationKey(string RelativeFilePath, int Line, int Column);
 
