@@ -73,6 +73,32 @@ public sealed class ProjectStructureVerticalSliceTests
         Assert.Contains("[LLM Contract](guidance/llm-contract.md)", indexPage.Markdown, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Render_LlmContract_ContainsNormativePoliciesAndGuardrails()
+    {
+        var fixture = await ProjectStructureFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+
+        var query = new ProjectStructureQueryService(analysis.Triples);
+        var model = query.GetModel(analysis.RepositoryId);
+
+        var pages = new ProjectStructureWikiRenderer().Render(model);
+        var contract = pages.Single(x => x.RelativePath == "guidance/llm-contract.md");
+
+        Assert.Contains("## Contract Rules", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains("MUST", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains("SHOULD", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains("## Response Template", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains("Summary", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains("Evidence Links", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains("Gaps/Risks", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains("Next Queries", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains("## Link Policy", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains("## Evidence Policy", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains("## Guardrails", contract.Markdown, StringComparison.Ordinal);
+    }
+
     private sealed class ProjectStructureFixture
     {
         private ProjectStructureFixture(string repositoryPath)
