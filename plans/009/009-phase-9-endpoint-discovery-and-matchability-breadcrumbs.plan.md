@@ -6,7 +6,7 @@
 
 - [x] Phase 1: Endpoint Core Contracts and Controller Baseline — completion date: 2026-04-19
 - [x] Phase 2: Minimal API Endpoint Slice — completion date: 2026-04-19
-- [ ] Phase 3: Message Handler and CLI Endpoint Slice
+- [x] Phase 3: Message Handler and CLI Endpoint Slice — completion date: 2026-04-19
 - [ ] Phase 4: gRPC Endpoint Slice and Partial-Resolution Semantics
 - [ ] Phase 5: Matchability Fingerprints and Outbound Breadcrumbs
 - [ ] Phase 6: Publication Hardening, Determinism, and Performance
@@ -74,10 +74,10 @@ Deliver end-to-end endpoint extraction for interface-pattern message handlers an
 
 ### Acceptance criteria
 
-- [ ] Message handlers are detected through interface-pattern rules (including custom interfaces).
-- [ ] CLI endpoints are detected from semantic registration patterns without generic `Main` heuristics.
-- [ ] Both families publish endpoint pages and are linked from declaring methods/types.
-- [ ] Tests verify custom handler-interface pattern behavior and deterministic output.
+- [x] Message handlers are detected through interface-pattern rules (including custom interfaces).
+- [x] CLI endpoints are detected from semantic registration patterns without generic `Main` heuristics.
+- [x] Both families publish endpoint pages and are linked from declaring methods/types.
+- [x] Tests verify custom handler-interface pattern behavior and deterministic output.
 
 ---
 

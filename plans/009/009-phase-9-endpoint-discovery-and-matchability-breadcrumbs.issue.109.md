@@ -3,7 +3,8 @@
 > Parent PRD: [PRD 009](/home/vbfg/dev/dotnet-llm-wiki/plans/009/009-phase-9-endpoint-discovery-and-matchability-breadcrumbs.prd.md)
 
 - Issue: [#109](https://github.com/vbfg1973/code-llm-wiki/issues/109)
-- [ ] Status: open
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -17,10 +18,10 @@ Implement endpoint discovery for interface-pattern message handlers and semantic
 
 ## Acceptance criteria
 
-- [ ] Message handlers are detected through interface-pattern rules (including custom interfaces).
-- [ ] CLI endpoints are detected from semantic registration patterns without generic `Main` heuristics.
-- [ ] Both families publish endpoint pages and are linked from declaring methods/types.
-- [ ] Tests verify custom handler-interface pattern behavior and deterministic output.
+- [x] Message handlers are detected through interface-pattern rules (including custom interfaces).
+- [x] CLI endpoints are detected from semantic registration patterns without generic `Main` heuristics.
+- [x] Both families publish endpoint pages and are linked from declaring methods/types.
+- [x] Tests verify custom handler-interface pattern behavior and deterministic output.
 
 ## Blocked by
 
