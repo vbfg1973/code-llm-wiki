@@ -120,6 +120,24 @@ public sealed class MethodCallsVerticalSliceTests
         Assert.Contains(outgoingCalls, x => x.TargetMethodId == pingMethod.Id);
     }
 
+    [Fact]
+    public async Task Query_ProjectScopedCallResolution_IsDeterministicAcrossRuns()
+    {
+        var fixture = await ProjectScopedMethodCallsFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+
+        var first = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var second = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+
+        var firstModel = new ProjectStructureQueryService(first.Triples).GetModel(first.RepositoryId);
+        var secondModel = new ProjectStructureQueryService(second.Triples).GetModel(second.RepositoryId);
+
+        var firstSnapshot = BuildCallSnapshot(firstModel);
+        var secondSnapshot = BuildCallSnapshot(secondModel);
+
+        Assert.Equal(firstSnapshot, secondSnapshot);
+    }
+
     private sealed class MethodCallsFixture
     {
         private MethodCallsFixture(string repositoryPath)
@@ -347,5 +365,18 @@ public sealed class MethodCallsVerticalSliceTests
             var stdErr = process.StandardError.ReadToEnd();
             throw new InvalidOperationException($"git {string.Join(' ', args)} failed: {stdOut}\n{stdErr}");
         }
+    }
+
+    private static IReadOnlyList<string> BuildCallSnapshot(ProjectStructureWikiModel model)
+    {
+        var callerType = model.Declarations.Types.Single(x => x.Name == "Caller");
+        var callMethod = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == callerType.Id && x.Name == "Call");
+
+        return model.Declarations.Methods.Relations
+            .Where(x => x.Kind == MethodRelationKind.Calls && x.SourceMethodId == callMethod.Id)
+            .Select(x =>
+                $"{x.SourceMethodId.Value}|{x.TargetMethodId?.Value ?? "-"}|{x.ResolutionStatus}|{x.ResolutionReason ?? "-"}|{x.ExternalTargetType?.DisplayText ?? "-"}")
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
     }
 }
