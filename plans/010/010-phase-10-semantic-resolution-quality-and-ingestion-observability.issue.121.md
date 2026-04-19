@@ -3,9 +3,12 @@
 > Parent PRD: [PRD 010](/home/vbfg/dev/dotnet-llm-wiki/plans/010/010-phase-10-semantic-resolution-quality-and-ingestion-observability.prd.md)
 
 - Issue: [#121](https://github.com/vbfg1973/code-llm-wiki/issues/121)
-- [ ] Status: open
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
+
+- Completed in [PR #127](https://github.com/vbfg1973/code-llm-wiki/pull/127) and merged to `develop`.
 
 ## Parent PRD
 
@@ -17,10 +20,10 @@ Implement project-scoped semantic compilation contexts and route method-call res
 
 ## Acceptance criteria
 
-- [ ] Method-call resolution uses owning-project semantic context as primary resolution path.
-- [ ] Internal resolvable calls are emitted as resolved method-to-method edges.
-- [ ] Unresolved calls remain explicit with cause-coded diagnostics.
-- [ ] Multi-project fixtures verify improved resolution behavior and deterministic output.
+- [x] Method-call resolution uses owning-project semantic context as primary resolution path.
+- [x] Internal resolvable calls are emitted as resolved method-to-method edges.
+- [x] Unresolved calls remain explicit with cause-coded diagnostics.
+- [x] Multi-project fixtures verify improved resolution behavior and deterministic output.
 
 ## Blocked by
 

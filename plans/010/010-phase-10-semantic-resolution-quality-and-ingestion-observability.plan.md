@@ -5,7 +5,7 @@
 ## Execution checklist
 
 - [x] Phase 1: Diagnostics Taxonomy and Stage Telemetry Baseline — completion date: 2026-04-19
-- [ ] Phase 2: Project-Scoped Semantic Call Resolution Slice
+- [x] Phase 2: Project-Scoped Semantic Call Resolution Slice — completion date: 2026-04-19
 - [ ] Phase 3: Override Resolution and Type-Fallback Noise Reduction
 - [ ] Phase 4: Quality Gate Policy and Run Status Integration
 - [ ] Phase 5: Bounded Parallelism and Deterministic Merge Hardening
@@ -57,10 +57,10 @@ Implement project-scoped semantic compilation contexts and route method-call res
 
 ### Acceptance criteria
 
-- [ ] Method call resolution uses owning-project semantic context as primary path.
-- [ ] Internal resolvable calls are emitted as resolved method-to-method edges.
-- [ ] Unresolved calls remain explicit with cause-coded diagnostics.
-- [ ] Multi-project fixtures verify improved resolution behavior and deterministic output.
+- [x] Method call resolution uses owning-project semantic context as primary path.
+- [x] Internal resolvable calls are emitted as resolved method-to-method edges.
+- [x] Unresolved calls remain explicit with cause-coded diagnostics.
+- [x] Multi-project fixtures verify improved resolution behavior and deterministic output.
 
 ---
 
