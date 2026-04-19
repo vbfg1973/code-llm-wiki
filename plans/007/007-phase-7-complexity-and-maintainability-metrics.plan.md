@@ -6,7 +6,7 @@
 
 - [x] Phase 1: Metric Facts Baseline (Method + Type Core) — completion date: 2026-04-19
 - [x] Phase 2: Rollups and Scope Semantics (File/Namespace/Project/Repository) — completion date: 2026-04-19
-- [ ] Phase 3: Hotspot Ranking and Severity Contracts — completion date:
+- [x] Phase 3: Hotspot Ranking and Severity Contracts — completion date: 2026-04-19
 - [ ] Phase 4: Publication Surfaces (Wiki + Manifest + Front Matter) — completion date:
 - [ ] Phase 5: Determinism, Parallelism, and Performance Hardening — completion date:
 
@@ -91,10 +91,10 @@ Implement ranking/severity engines for per-metric and composite hotspot views wi
 
 ### Acceptance criteria
 
-- [ ] Per-metric rankings are primary and composite ranking is available as secondary triage score.
-- [ ] Composite weighting and threshold configuration are supported with stable defaults and explicit effective values.
-- [ ] Deterministic ordering/tie-break contract is enforced and tested across reruns.
-- [ ] Default row budget is applied with explicit unbounded override behavior.
+- [x] Per-metric rankings are primary and composite ranking is available as secondary triage score.
+- [x] Composite weighting and threshold configuration are supported with stable defaults and explicit effective values.
+- [x] Deterministic ordering/tie-break contract is enforced and tested across reruns.
+- [x] Default row budget is applied with explicit unbounded override behavior.
 
 ---
 

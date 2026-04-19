@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 007](./007-phase-7-complexity-and-maintainability-metrics.prd.md)
 
 - Issue: [#89](https://github.com/vbfg1973/code-llm-wiki/issues/89)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,10 +18,10 @@ Implement hotspot ranking and severity contracts for BL-012 with per-metric prim
 
 ## Acceptance criteria
 
-- [ ] Per-metric rankings and composite rankings are both available with deterministic ordering.
-- [ ] Composite weighting and threshold configuration supports defaults and override values.
-- [ ] Effective weights/thresholds are exposed for auditability.
-- [ ] Default top-N budgeting and explicit unbounded override behavior are implemented and tested.
+- [x] Per-metric rankings and composite rankings are both available with deterministic ordering.
+- [x] Composite weighting and threshold configuration supports defaults and override values.
+- [x] Effective weights/thresholds are exposed for auditability.
+- [x] Default top-N budgeting and explicit unbounded override behavior are implemented and tested.
 
 ## Blocked by
 
