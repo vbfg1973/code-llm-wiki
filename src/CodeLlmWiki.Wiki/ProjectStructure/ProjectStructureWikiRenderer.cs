@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Query.ProjectStructure;
@@ -275,6 +276,47 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     .OrderBy(v => v, StringComparer.Ordinal)
                     .ToArray());
         var inheritedPackageTypeUsageByPackageId = BuildInheritedPackageTypeUsageByPackageId(model.Declarations.Types, orderedPackages);
+        var declarationPackageIdsByTypeId = orderedPackages
+            .SelectMany(package => package.DeclarationDependencyUsage.Namespaces
+                .SelectMany(ns => ns.Types
+                    .Select(typeUsage => (typeUsage.TypeId, package.Id))))
+            .GroupBy(x => x.TypeId)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.Id)
+                    .Distinct()
+                    .OrderBy(v => packageById[v].Name, StringComparer.Ordinal)
+                    .ThenBy(v => v.Value, StringComparer.Ordinal)
+                    .ToArray());
+        var declarationPackageIdsByMethodId = orderedPackages
+            .SelectMany(package => package.DeclarationDependencyUsage.Namespaces
+                .SelectMany(ns => ns.Types
+                    .SelectMany(typeUsage => typeUsage.Methods
+                        .Select(methodUsage => (methodUsage.MethodId, package.Id)))))
+            .GroupBy(x => x.MethodId)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.Id)
+                    .Distinct()
+                    .OrderBy(v => packageById[v].Name, StringComparer.Ordinal)
+                    .ThenBy(v => v.Value, StringComparer.Ordinal)
+                    .ToArray());
+        var methodBodyPackageIdsByMethodId = orderedPackages
+            .SelectMany(package => package.MethodBodyDependencyUsage.Namespaces
+                .SelectMany(ns => ns.Types
+                    .SelectMany(typeUsage => typeUsage.Methods
+                        .Select(methodUsage => (methodUsage.MethodId, package.Id)))))
+            .GroupBy(x => x.MethodId)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.Id)
+                    .Distinct()
+                    .OrderBy(v => packageById[v].Name, StringComparer.Ordinal)
+                    .ThenBy(v => v.Value, StringComparer.Ordinal)
+                    .ToArray());
 
         var pages = new List<WikiPage>
         {
@@ -356,6 +398,12 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 typeById,
                 methodById,
                 endpointGroupById,
+                callRelationsBySourceMethodId,
+                declarationPackageIdsByTypeId,
+                declarationPackageIdsByMethodId,
+                methodBodyPackageIdsByMethodId,
+                orderedPackages,
+                packageById,
                 fileById,
                 resolver)));
         pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, namespaceBacklinksByFileId, typeBacklinksByFileId, memberBacklinksByFileId, methodBacklinksByFileId, resolver, maxMergeEntriesPerFile)));
@@ -2276,6 +2324,12 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
         IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
         IReadOnlyDictionary<EntityId, EndpointGroupNode> endpointGroupById,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<MethodRelationNode>> callRelationsBySourceMethodId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> declarationPackageIdsByTypeId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> declarationPackageIdsByMethodId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> methodBodyPackageIdsByMethodId,
+        IReadOnlyList<PackageNode> packages,
+        IReadOnlyDictionary<EntityId, PackageNode> packageById,
         IReadOnlyDictionary<EntityId, FileNode> fileById,
         WikiPathResolver resolver)
     {
@@ -2296,6 +2350,159 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine($"- Rule Version: `{endpoint.RuleVersion}`");
         sb.AppendLine($"- Rule Source: `{endpoint.RuleSource}`");
         sb.AppendLine($"- Signature: `{endpoint.CanonicalSignature}`");
+
+        var declaringMethodSignature = endpoint.DeclaringMethodId is { } fingerprintMethodId
+            && methodById.TryGetValue(fingerprintMethodId, out var fingerprintMethod)
+            ? fingerprintMethod.Signature
+            : string.Empty;
+        var fingerprintPayload = string.Join(
+            "|",
+            endpoint.Family,
+            endpoint.Kind,
+            endpoint.HttpMethod,
+            endpoint.NormalizedRouteKey,
+            endpoint.RuleId,
+            endpoint.RuleVersion,
+            endpoint.DeclaringTypeId?.Value ?? string.Empty,
+            endpoint.DeclaringMethodId?.Value ?? string.Empty,
+            declaringMethodSignature);
+        var fingerprintHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprintPayload)));
+
+        sb.AppendLine();
+        sb.AppendLine("## Matchability Fingerprint");
+        sb.AppendLine($"- fingerprint_hash: `{fingerprintHash}`");
+        sb.AppendLine($"- protocol_family: `{endpoint.Family}`");
+        sb.AppendLine($"- endpoint_kind: `{endpoint.Kind}`");
+        sb.AppendLine($"- http_method: `{endpoint.HttpMethod}`");
+        sb.AppendLine($"- normalized_route_key: `{endpoint.NormalizedRouteKey}`");
+        sb.AppendLine($"- rule_id: `{endpoint.RuleId}`");
+        sb.AppendLine($"- declaring_type_id: `{endpoint.DeclaringTypeId?.Value ?? string.Empty}`");
+        sb.AppendLine($"- declaring_method_id: `{endpoint.DeclaringMethodId?.Value ?? string.Empty}`");
+        if (!string.IsNullOrWhiteSpace(declaringMethodSignature))
+        {
+            sb.AppendLine($"- declaring_method_signature: `{declaringMethodSignature}`");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Outbound Breadcrumbs (Bounded)");
+        var declarationBreadcrumbs = new List<string>();
+        var methodBodyBreadcrumbs = new List<string>();
+        if (endpoint.DeclaringTypeId is { } declarationTypeIdForBreadcrumbs
+            && declarationPackageIdsByTypeId.TryGetValue(declarationTypeIdForBreadcrumbs, out var declarationTypePackageIds))
+        {
+            foreach (var packageId in declarationTypePackageIds)
+            {
+                if (!packageById.TryGetValue(packageId, out var package))
+                {
+                    continue;
+                }
+
+                declarationBreadcrumbs.Add($"[context=declaration] type dependency package {resolver.ToWikiLink(package.Id, package.Name)}");
+            }
+        }
+
+        if (endpoint.DeclaringMethodId is { } declarationMethodIdForBreadcrumbs
+            && declarationPackageIdsByMethodId.TryGetValue(declarationMethodIdForBreadcrumbs, out var declarationMethodPackageIds))
+        {
+            foreach (var packageId in declarationMethodPackageIds)
+            {
+                if (!packageById.TryGetValue(packageId, out var package))
+                {
+                    continue;
+                }
+
+                declarationBreadcrumbs.Add($"[context=declaration] method signature dependency package {resolver.ToWikiLink(package.Id, package.Name)}");
+            }
+        }
+
+        if (endpoint.DeclaringMethodId is { } declarationSignatureMethodId
+            && methodById.TryGetValue(declarationSignatureMethodId, out var declarationMethod))
+        {
+            var declarationTypeReferences = declarationMethod.Parameters
+                .Select(parameter => parameter.Type)
+                .Concat(declarationMethod.ReturnType is null ? [] : [declarationMethod.ReturnType])
+                .Where(typeReference => typeReference is not null)
+                .Select(typeReference => typeReference!)
+                .Where(typeReference => !string.IsNullOrWhiteSpace(typeReference.DisplayText))
+                .ToArray();
+
+            foreach (var typeReference in declarationTypeReferences)
+            {
+                if (!TryResolvePackageForExternalTypeName(typeReference.DisplayText, packages, out var package))
+                {
+                    continue;
+                }
+
+                var deepLink = resolver.ToPackageExternalTypeMarkdownLink(
+                    package.Id,
+                    package.CanonicalKey,
+                    typeReference.DisplayText,
+                    typeReference.DisplayText);
+                declarationBreadcrumbs.Add($"[context=declaration] signature type {deepLink}");
+            }
+        }
+
+        if (endpoint.DeclaringMethodId is { } methodBodyMethodId
+            && methodBodyPackageIdsByMethodId.TryGetValue(methodBodyMethodId, out var methodBodyPackageIds))
+        {
+            foreach (var packageId in methodBodyPackageIds)
+            {
+                if (!packageById.TryGetValue(packageId, out var package))
+                {
+                    continue;
+                }
+
+                methodBodyBreadcrumbs.Add($"[context=method-body] dependency package {resolver.ToWikiLink(package.Id, package.Name)}");
+            }
+        }
+
+        if (endpoint.DeclaringMethodId is { } callSourceMethodId
+            && callRelationsBySourceMethodId.TryGetValue(callSourceMethodId, out var callRelations))
+        {
+            foreach (var relation in callRelations)
+            {
+                if (relation.TargetMethodId is { } targetMethodId && methodById.TryGetValue(targetMethodId, out var targetMethod))
+                {
+                    methodBodyBreadcrumbs.Add($"[context=method-body] calls {resolver.ToWikiLink(targetMethod.Id, FormatMethodLinkAlias(targetMethod))}");
+                    continue;
+                }
+
+                if (relation.ExternalTargetType is not null)
+                {
+                    var assemblySuffix = string.IsNullOrWhiteSpace(relation.ExternalAssemblyName)
+                        ? string.Empty
+                        : $" ({relation.ExternalAssemblyName})";
+                    if (TryResolveExternalTargetPackage(relation, packages, out var package))
+                    {
+                        var deepLink = resolver.ToPackageExternalTypeMarkdownLink(
+                            package.Id,
+                            package.CanonicalKey,
+                            relation.ExternalTargetType.DisplayText,
+                            relation.ExternalTargetType.DisplayText);
+                        methodBodyBreadcrumbs.Add($"[context=method-body] calls external {deepLink}{assemblySuffix}");
+                    }
+                    else
+                    {
+                        methodBodyBreadcrumbs.Add($"[context=method-body] calls external `{relation.ExternalTargetType.DisplayText}`{assemblySuffix}");
+                    }
+                }
+            }
+        }
+
+        if (declarationBreadcrumbs.Count == 0)
+        {
+            declarationBreadcrumbs.Add("[context=declaration] none");
+        }
+
+        if (methodBodyBreadcrumbs.Count == 0)
+        {
+            methodBodyBreadcrumbs.Add("[context=method-body] none");
+        }
+
+        sb.AppendLine("### Declaration Context");
+        AppendBoundedBreadcrumbLines(sb, declarationBreadcrumbs);
+        sb.AppendLine("### Method-Body Context");
+        AppendBoundedBreadcrumbLines(sb, methodBodyBreadcrumbs);
 
         sb.AppendLine();
         sb.AppendLine("## Declaration Traceability");
@@ -2369,6 +2576,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             KeyValue("endpoint_kind", endpoint.Kind),
             KeyValue("endpoint_http_method", endpoint.HttpMethod),
             KeyValue("endpoint_route_key", endpoint.NormalizedRouteKey),
+            KeyValue("endpoint_fingerprint", fingerprintHash),
         };
         if (!string.IsNullOrWhiteSpace(endpoint.ResolutionReason))
         {
@@ -2882,6 +3090,31 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         }
 
         sb.AppendLine();
+    }
+
+    private static void AppendBoundedBreadcrumbLines(StringBuilder sb, IReadOnlyList<string> breadcrumbs, int maxLines = 25)
+    {
+        var ordered = breadcrumbs
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+        if (ordered.Length == 0)
+        {
+            sb.AppendLine("- none");
+            return;
+        }
+
+        var capped = ordered.Take(maxLines).ToArray();
+        foreach (var breadcrumb in capped)
+        {
+            sb.AppendLine($"- {breadcrumb}");
+        }
+
+        if (ordered.Length > capped.Length)
+        {
+            sb.AppendLine($"- ... truncated ({ordered.Length - capped.Length} more)");
+        }
     }
 
     private static string EscapePipes(string value)
