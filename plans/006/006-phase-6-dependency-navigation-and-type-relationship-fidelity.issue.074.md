@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 006](./006-phase-6-dependency-navigation-and-type-relationship-fidelity.prd.md)
 
 - Issue: [#74](https://github.com/vbfg1973/code-llm-wiki/issues/74)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,10 +18,10 @@ Deliver target-first package declaration dependency navigation so package pages 
 
 ## Acceptance criteria
 
-- [ ] Package pages render declaration dependencies as `External Type -> Internal Type`.
-- [ ] Caller-first declaration dependency presentation is removed from package pages.
-- [ ] External type entries support package deep-link navigation.
-- [ ] Deterministic ordering and regression tests cover declaration target-first behavior.
+- [x] Package pages render declaration dependencies as `External Type -> Internal Type`.
+- [x] Caller-first declaration dependency presentation is removed from package pages.
+- [x] External type entries support package deep-link navigation.
+- [x] Deterministic ordering and regression tests cover declaration target-first behavior.
 
 ## Blocked by
 

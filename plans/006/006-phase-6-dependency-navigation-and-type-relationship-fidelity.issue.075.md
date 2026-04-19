@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 006](./006-phase-6-dependency-navigation-and-type-relationship-fidelity.prd.md)
 
 - Issue: [#75](https://github.com/vbfg1973/code-llm-wiki/issues/75)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,10 +18,10 @@ Deliver target-first package method-body dependency navigation so package pages 
 
 ## Acceptance criteria
 
-- [ ] Package pages render method-body dependencies as `External Type -> Internal Method`.
-- [ ] Method aliases in this section are unambiguous for quick navigation.
-- [ ] Caller-first method-body dependency presentation is removed from package pages.
-- [ ] Deterministic ordering and regression tests cover method-body target-first behavior.
+- [x] Package pages render method-body dependencies as `External Type -> Internal Method`.
+- [x] Method aliases in this section are unambiguous for quick navigation.
+- [x] Caller-first method-body dependency presentation is removed from package pages.
+- [x] Deterministic ordering and regression tests cover method-body target-first behavior.
 
 ## Blocked by
 

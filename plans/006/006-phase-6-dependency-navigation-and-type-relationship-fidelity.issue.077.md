@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 006](./006-phase-6-dependency-navigation-and-type-relationship-fidelity.prd.md)
 
 - Issue: [#77](https://github.com/vbfg1973/code-llm-wiki/issues/77)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,10 +18,10 @@ Add conditional rare/edge dependency sections for package-owned inherited types 
 
 ## Acceptance criteria
 
-- [ ] `Inherited Package Types` appears only when package-owned inheritance evidence exists.
-- [ ] Unresolved external targets are grouped into explicit terminal buckets with concise reasons.
-- [ ] Unknown/unresolved entries preserve navigation consistency without broken links.
-- [ ] Tests validate conditional rendering and reason-label consistency.
+- [x] `Inherited Package Types` appears only when package-owned inheritance evidence exists.
+- [x] Unresolved external targets are grouped into explicit terminal buckets with concise reasons.
+- [x] Unknown/unresolved entries preserve navigation consistency without broken links.
+- [x] Tests validate conditional rendering and reason-label consistency.
 
 ## Blocked by
 

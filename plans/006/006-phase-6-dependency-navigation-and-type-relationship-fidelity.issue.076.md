@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 006](./006-phase-6-dependency-navigation-and-type-relationship-fidelity.prd.md)
 
 - Issue: [#76](https://github.com/vbfg1973/code-llm-wiki/issues/76)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,10 +18,10 @@ Complete direct type relationship navigation on type pages by adding reverse rel
 
 ## Acceptance criteria
 
-- [ ] Type pages include `Inherits From` and `Inherited By` with direct relationships.
-- [ ] Type pages include `Implements` and `Implemented By` with direct relationships.
-- [ ] Internal targets are linked and external/unresolved targets are plain text with status.
-- [ ] Regression tests validate forward and reverse relationship navigation coverage.
+- [x] Type pages include `Inherits From` and `Inherited By` with direct relationships.
+- [x] Type pages include `Implements` and `Implemented By` with direct relationships.
+- [x] Internal targets are linked and external/unresolved targets are plain text with status.
+- [x] Regression tests validate forward and reverse relationship navigation coverage.
 
 ## Blocked by
 

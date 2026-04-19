@@ -4,11 +4,11 @@
 
 ## Execution checklist
 
-- [ ] Phase 1: Link Contract and Anchor Foundation — completion date:
-- [ ] Phase 2: Target-First Package Dependency Navigation — completion date:
-- [ ] Phase 3: Type Relationship Completeness (Direct + Reverse) — completion date:
-- [ ] Phase 4: Conditional Rare/Edge Dependency Sections — completion date:
-- [ ] Phase 5: Determinism and Publication Hardening — completion date:
+- [x] Phase 1: Link Contract and Anchor Foundation — completion date: 2026-04-19
+- [x] Phase 2: Target-First Package Dependency Navigation — completion date: 2026-04-19
+- [x] Phase 3: Type Relationship Completeness (Direct + Reverse) — completion date: 2026-04-19
+- [x] Phase 4: Conditional Rare/Edge Dependency Sections — completion date: 2026-04-19
+- [x] Phase 5: Determinism and Publication Hardening — completion date: 2026-04-19
 
 ---
 
@@ -42,10 +42,10 @@ Introduce and enforce a parse-safe link rendering contract across wiki outputs w
 
 ### Acceptance criteria
 
-- [ ] Table link rendering uses parse-safe markdown link format without delimiter conflicts.
-- [ ] Deep-link anchors for package external type sections are deterministic and stable across runs.
-- [ ] External link routing to package-page anchors is available for dependency and relationship surfaces.
-- [ ] Tests verify table parse safety and deep-link determinism behavior.
+- [x] Table link rendering uses parse-safe markdown link format without delimiter conflicts.
+- [x] Deep-link anchors for package external type sections are deterministic and stable across runs.
+- [x] External link routing to package-page anchors is available for dependency and relationship surfaces.
+- [x] Tests verify table parse safety and deep-link determinism behavior.
 
 ---
 
@@ -59,10 +59,10 @@ Replace current package dependency presentation with target-first sections that 
 
 ### Acceptance criteria
 
-- [ ] Package pages show declaration dependencies as `External Type -> Internal Type`.
-- [ ] Package pages show method-body dependencies as `External Type -> Internal Method`.
-- [ ] Duplicate caller-first package dependency sections are removed from package pages.
-- [ ] Target-first sections enforce deterministic ordering and preserve readability.
+- [x] Package pages show declaration dependencies as `External Type -> Internal Type`.
+- [x] Package pages show method-body dependencies as `External Type -> Internal Method`.
+- [x] Duplicate caller-first package dependency sections are removed from package pages.
+- [x] Target-first sections enforce deterministic ordering and preserve readability.
 
 ---
 
@@ -76,10 +76,10 @@ Complete direct relationship navigation on type pages by adding reverse relation
 
 ### Acceptance criteria
 
-- [ ] Type pages include `Inherits From` and `Inherited By` sections with direct relationships.
-- [ ] Type pages include `Implements` and `Implemented By` sections with direct relationships.
-- [ ] Internal targets render as links; external/unresolved targets render as status-bearing plain text.
-- [ ] Relationship sections are deterministic and covered by regression tests.
+- [x] Type pages include `Inherits From` and `Inherited By` sections with direct relationships.
+- [x] Type pages include `Implements` and `Implemented By` sections with direct relationships.
+- [x] Internal targets render as links; external/unresolved targets render as status-bearing plain text.
+- [x] Relationship sections are deterministic and covered by regression tests.
 
 ---
 
@@ -93,10 +93,10 @@ Introduce conditional rendering for rare and edge dependency contexts, including
 
 ### Acceptance criteria
 
-- [ ] Package pages conditionally render `Inherited Package Types` only when data exists.
-- [ ] Unresolved external targets are grouped into explicit terminal buckets with concise reasons.
-- [ ] Unknown/unresolved sections preserve navigability without introducing broken links.
-- [ ] Tests verify conditional rendering and reason-label consistency.
+- [x] Package pages conditionally render `Inherited Package Types` only when data exists.
+- [x] Unresolved external targets are grouped into explicit terminal buckets with concise reasons.
+- [x] Unknown/unresolved sections preserve navigability without introducing broken links.
+- [x] Tests verify conditional rendering and reason-label consistency.
 
 ---
 
@@ -110,7 +110,7 @@ Harden output contracts by adding deterministic assertions for all new navigatio
 
 ### Acceptance criteria
 
-- [ ] Deterministic ordering assertions cover new package and type navigation sections.
-- [ ] Regression coverage validates split dependency views and relationship completeness end-to-end.
-- [ ] Golden/snapshot outputs are updated only for intentional PRD 006 deltas.
-- [ ] No MCP/query-surface expansion is introduced.
+- [x] Deterministic ordering assertions cover new package and type navigation sections.
+- [x] Regression coverage validates split dependency views and relationship completeness end-to-end.
+- [x] Golden/snapshot outputs are updated only for intentional PRD 006 deltas.
+- [x] No MCP/query-surface expansion is introduced.

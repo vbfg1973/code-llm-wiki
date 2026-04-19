@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 006](./006-phase-6-dependency-navigation-and-type-relationship-fidelity.prd.md)
 
 - Issue: [#78](https://github.com/vbfg1973/code-llm-wiki/issues/78)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,10 +18,10 @@ Harden PRD 006 contracts by enforcing deterministic ordering invariants and publ
 
 ## Acceptance criteria
 
-- [ ] Deterministic ordering/count invariants are asserted for all new dependency/relationship sections.
-- [ ] Regression coverage validates target-first dependency views and reverse relationship navigation end-to-end.
-- [ ] Golden/snapshot artifacts are updated only for intentional PRD 006 output changes.
-- [ ] No MCP/query-surface expansion is introduced.
+- [x] Deterministic ordering/count invariants are asserted for all new dependency/relationship sections.
+- [x] Regression coverage validates target-first dependency views and reverse relationship navigation end-to-end.
+- [x] Golden/snapshot artifacts are updated only for intentional PRD 006 output changes.
+- [x] No MCP/query-surface expansion is introduced.
 
 ## Blocked by
 
