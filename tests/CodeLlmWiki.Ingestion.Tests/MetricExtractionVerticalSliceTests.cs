@@ -28,11 +28,20 @@ public sealed class MetricExtractionVerticalSliceTests
 
         Assert.True(TryGetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.CognitiveComplexity, out var cognitive));
         Assert.True(int.TryParse(cognitive, NumberStyles.Integer, CultureInfo.InvariantCulture, out var cognitiveValue));
-        Assert.True(cognitiveValue > 0);
+        Assert.Equal(3, cognitiveValue);
 
+        var halsteadDistinctOperators = int.Parse(GetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.HalsteadDistinctOperators), CultureInfo.InvariantCulture);
+        var halsteadDistinctOperands = int.Parse(GetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.HalsteadDistinctOperands), CultureInfo.InvariantCulture);
+        var halsteadTotalOperators = int.Parse(GetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.HalsteadTotalOperators), CultureInfo.InvariantCulture);
+        var halsteadTotalOperands = int.Parse(GetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.HalsteadTotalOperands), CultureInfo.InvariantCulture);
+        var halsteadVocabulary = int.Parse(GetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.HalsteadVocabulary), CultureInfo.InvariantCulture);
+        var halsteadLength = int.Parse(GetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.HalsteadLength), CultureInfo.InvariantCulture);
         Assert.True(TryGetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.HalsteadVolume, out var halsteadVolume));
+        Assert.DoesNotContain(',', halsteadVolume);
         Assert.True(double.TryParse(halsteadVolume, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var halsteadValue));
         Assert.True(halsteadValue > 0d);
+        Assert.Equal(halsteadDistinctOperators + halsteadDistinctOperands, halsteadVocabulary);
+        Assert.Equal(halsteadTotalOperators + halsteadTotalOperands, halsteadLength);
 
         Assert.True(TryGetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.LocTotalLines, out var locTotal));
         Assert.True(int.TryParse(locTotal, NumberStyles.Integer, CultureInfo.InvariantCulture, out var locTotalValue));
@@ -70,6 +79,25 @@ public sealed class MetricExtractionVerticalSliceTests
         Assert.Equal(3, declarationCbo);
         Assert.Equal(3, methodBodyCbo);
         Assert.Equal(4, totalCbo);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_CboNormalization_UnwrapsArrayAndNullableWrappers()
+    {
+        var fixture = await MetricFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var wrapperType = model.Declarations.Types.Single(x => x.Name == "WrapperSubject");
+
+        var declarationCbo = int.Parse(GetLiteral(analysis.Triples, wrapperType.Id, CorePredicates.CboDeclaration), CultureInfo.InvariantCulture);
+        var methodBodyCbo = int.Parse(GetLiteral(analysis.Triples, wrapperType.Id, CorePredicates.CboMethodBody), CultureInfo.InvariantCulture);
+        var totalCbo = int.Parse(GetLiteral(analysis.Triples, wrapperType.Id, CorePredicates.CboTotal), CultureInfo.InvariantCulture);
+
+        Assert.Equal(2, declarationCbo);
+        Assert.Equal(2, methodBodyCbo);
+        Assert.Equal(2, totalCbo);
     }
 
     [Fact]
@@ -184,6 +212,7 @@ public sealed class MetricExtractionVerticalSliceTests
 
                 public class DependencyA { }
                 public class DependencyB { }
+                public struct DependencyStruct { }
 
                 public class Consumer
                 {
@@ -216,6 +245,19 @@ public sealed class MetricExtractionVerticalSliceTests
                     {
                         var map = new System.Collections.Generic.Dictionary<DependencyA, DependencyB>();
                         return map.Count;
+                    }
+                }
+
+                public class WrapperSubject
+                {
+                    private DependencyA[] _array = [];
+                    private DependencyStruct? _optional;
+
+                    public int Compute()
+                    {
+                        _ = typeof(DependencyA[]);
+                        _ = typeof(DependencyStruct?);
+                        return 0;
                     }
                 }
 
