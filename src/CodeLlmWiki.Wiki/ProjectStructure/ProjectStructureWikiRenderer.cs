@@ -230,6 +230,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         {
             RenderRepositoryPage(model, resolver),
         };
+        pages.AddRange(RenderGuidancePages(model, resolver));
 
         pages.AddRange(orderedSolutions.Select(solution => RenderSolutionPage(model.Repository.Id.Value, solution, projectById, resolver)));
         pages.AddRange(orderedProjects.Select(project => RenderProjectPage(model.Repository.Id.Value, project, packageById, resolver)));
@@ -312,6 +313,10 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine($"- Submodules: {model.Submodules.Count}");
         sb.AppendLine($"- Index: {ToWikiLink("index/repository-index", "Repository Index")}");
         sb.AppendLine();
+        sb.AppendLine("## Guidance");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("guidance/human.md", "Human Guide")}");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("guidance/llm-contract.md", "LLM Contract")}");
+        sb.AppendLine();
         sb.AppendLine("## Hotspots");
         sb.AppendLine($"- {resolver.ToMarkdownLink("hotspots/methods.md", "Methods")}");
         sb.AppendLine($"- {resolver.ToMarkdownLink("hotspots/types.md", "Types")}");
@@ -367,6 +372,72 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     KeyValue("repository_path", model.Repository.Path),
                     KeyValue("head_branch", model.Repository.HeadBranch),
                     KeyValue("mainline_branch", model.Repository.MainlineBranch),
+                ],
+                sb.ToString().TrimEnd()));
+    }
+
+    private static IReadOnlyList<WikiPage> RenderGuidancePages(ProjectStructureWikiModel model, WikiPathResolver resolver)
+    {
+        return
+        [
+            RenderHumanGuidancePage(model.Repository.Id.Value, model.Repository.HeadBranch, resolver),
+            RenderLlmContractGuidancePage(model.Repository.Id.Value, model.Repository.HeadBranch, resolver),
+        ];
+    }
+
+    private static WikiPage RenderHumanGuidancePage(
+        string repositoryId,
+        string headBranch,
+        WikiPathResolver resolver)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("# Human Guide");
+        sb.AppendLine();
+        sb.AppendLine("Use this page to orient quickly in the generated wiki.");
+        sb.AppendLine();
+        sb.AppendLine("## Start Here");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("index/repository-index.md", "Repository Index")}");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("hotspots/repository.md", "Repository Hotspots")}");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("guidance/llm-contract.md", "LLM Contract")}");
+
+        return new WikiPage(
+            RelativePath: "guidance/human.md",
+            Title: "Human Guide",
+            Markdown: WithFrontMatter(
+                [
+                    KeyValue("entity_id", $"guidance:human:{repositoryId}"),
+                    KeyValue("entity_type", "guidance"),
+                    KeyValue("repository_id", repositoryId),
+                    KeyValue("guidance_kind", "human"),
+                    KeyValue("head_branch", headBranch),
+                ],
+                sb.ToString().TrimEnd()));
+    }
+
+    private static WikiPage RenderLlmContractGuidancePage(
+        string repositoryId,
+        string headBranch,
+        WikiPathResolver resolver)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("# LLM Contract");
+        sb.AppendLine();
+        sb.AppendLine("Normative operating guidance for LLM agents over this snapshot.");
+        sb.AppendLine();
+        sb.AppendLine("## Start Here");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("index/repository-index.md", "Repository Index")}");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("guidance/human.md", "Human Guide")}");
+
+        return new WikiPage(
+            RelativePath: "guidance/llm-contract.md",
+            Title: "LLM Contract",
+            Markdown: WithFrontMatter(
+                [
+                    KeyValue("entity_id", $"guidance:llm-contract:{repositoryId}"),
+                    KeyValue("entity_type", "guidance"),
+                    KeyValue("repository_id", repositoryId),
+                    KeyValue("guidance_kind", "llm"),
+                    KeyValue("head_branch", headBranch),
                 ],
                 sb.ToString().TrimEnd()));
     }
@@ -2274,6 +2345,10 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
     {
         var sb = new StringBuilder();
         sb.AppendLine("# Repository Index");
+        sb.AppendLine();
+        sb.AppendLine("## Guidance");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("guidance/human.md", "Human Guide")}");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("guidance/llm-contract.md", "LLM Contract")}");
         sb.AppendLine();
 
         AppendTable(

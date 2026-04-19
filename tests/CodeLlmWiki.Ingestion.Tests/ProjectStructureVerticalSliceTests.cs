@@ -57,8 +57,20 @@ public sealed class ProjectStructureVerticalSliceTests
         Assert.Equal(first.Count, second.Count);
         Assert.Equal(first.Select(x => x.RelativePath), second.Select(x => x.RelativePath));
         Assert.Equal(first.Select(x => x.Markdown), second.Select(x => x.Markdown));
-        Assert.Equal(11, first.Count);
+        Assert.Equal(13, first.Count);
         Assert.Contains(first, x => x.RelativePath == "index/repository-index.md");
+        Assert.Contains(first, x => x.RelativePath == "guidance/human.md");
+        Assert.Contains(first, x => x.RelativePath == "guidance/llm-contract.md");
+
+        var repositoryPage = first.Single(x => x.RelativePath == "repositories/sample-repo.md");
+        Assert.Contains("## Guidance", repositoryPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("[Human Guide](guidance/human.md)", repositoryPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("[LLM Contract](guidance/llm-contract.md)", repositoryPage.Markdown, StringComparison.Ordinal);
+
+        var indexPage = first.Single(x => x.RelativePath == "index/repository-index.md");
+        Assert.Contains("## Guidance", indexPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("[Human Guide](guidance/human.md)", indexPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("[LLM Contract](guidance/llm-contract.md)", indexPage.Markdown, StringComparison.Ordinal);
     }
 
     private sealed class ProjectStructureFixture
