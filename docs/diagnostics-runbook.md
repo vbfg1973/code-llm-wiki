@@ -25,7 +25,7 @@ Purpose: define run status meanings, diagnostic code contracts, likely causes, a
 - Emitted to `stderr` during execution.
 - Line format:
   - start: `ingest_stage|event=start|stage=<stage_id>`
-  - end: `ingest_stage|event=end|stage=<stage_id>|duration_ms=<n>|...counters`
+  - end: `ingest_stage|event=end|stage=<stage_id>|elapsed_ms=<n>|...counters`
 - Stable stage IDs:
   - `project_discovery`
   - `source_snapshot`
