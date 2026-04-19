@@ -5,4 +5,5 @@ namespace CodeLlmWiki.Query.ProjectStructure;
 public interface IProjectStructureQueryService
 {
     ProjectStructureWikiModel GetModel(EntityId repositoryId);
+    ProjectStructureWikiModel GetModel(EntityId repositoryId, ProjectStructureQueryOptions options);
 }

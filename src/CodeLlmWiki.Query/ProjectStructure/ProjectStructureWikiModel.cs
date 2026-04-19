@@ -10,4 +10,5 @@ public sealed record ProjectStructureWikiModel(
 {
     public DeclarationCatalog Declarations { get; init; } = DeclarationCatalog.Empty;
     public DependencyAttributionCatalog DependencyAttribution { get; init; } = DependencyAttributionCatalog.Empty;
+    public StructuralMetricRollupCatalog StructuralMetrics { get; init; } = StructuralMetricRollupCatalog.Empty;
 }
