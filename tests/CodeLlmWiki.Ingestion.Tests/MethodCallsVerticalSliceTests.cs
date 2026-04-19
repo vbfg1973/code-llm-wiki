@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Ingestion.ProjectStructure;
 using CodeLlmWiki.Query.ProjectStructure;
@@ -136,6 +137,31 @@ public sealed class MethodCallsVerticalSliceTests
         var secondSnapshot = BuildCallSnapshot(secondModel);
 
         Assert.Equal(firstSnapshot, secondSnapshot);
+    }
+
+    [Fact]
+    public async Task Query_ProjectScopedCallResolution_IsDeterministicAcrossParallelDegreeSettings()
+    {
+        var fixture = await ProjectScopedMethodCallsFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+
+        var serial = await analyzer.AnalyzeAsync(
+            fixture.RepositoryPath,
+            CancellationToken.None,
+            new ProjectStructureAnalysisOptions(SemanticCallGraphMaxDegreeOfParallelism: 1));
+        var parallelFirst = await analyzer.AnalyzeAsync(
+            fixture.RepositoryPath,
+            CancellationToken.None,
+            new ProjectStructureAnalysisOptions(SemanticCallGraphMaxDegreeOfParallelism: 4));
+        var parallelSecond = await analyzer.AnalyzeAsync(
+            fixture.RepositoryPath,
+            CancellationToken.None,
+            new ProjectStructureAnalysisOptions(SemanticCallGraphMaxDegreeOfParallelism: 4));
+
+        Assert.Equal(BuildTripleSnapshot(serial.Triples), BuildTripleSnapshot(parallelFirst.Triples));
+        Assert.Equal(BuildTripleSnapshot(parallelFirst.Triples), BuildTripleSnapshot(parallelSecond.Triples));
+        Assert.Equal(BuildDiagnosticSnapshot(serial.Diagnostics), BuildDiagnosticSnapshot(parallelFirst.Diagnostics));
+        Assert.Equal(BuildDiagnosticSnapshot(parallelFirst.Diagnostics), BuildDiagnosticSnapshot(parallelSecond.Diagnostics));
     }
 
     private sealed class MethodCallsFixture
@@ -376,6 +402,22 @@ public sealed class MethodCallsVerticalSliceTests
             .Where(x => x.Kind == MethodRelationKind.Calls && x.SourceMethodId == callMethod.Id)
             .Select(x =>
                 $"{x.SourceMethodId.Value}|{x.TargetMethodId?.Value ?? "-"}|{x.ResolutionStatus}|{x.ResolutionReason ?? "-"}|{x.ExternalTargetType?.DisplayText ?? "-"}")
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildTripleSnapshot(IReadOnlyList<SemanticTriple> triples)
+    {
+        return triples
+            .Select(triple => $"{triple.Subject}|{triple.Predicate}|{triple.Object}")
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildDiagnosticSnapshot(IReadOnlyList<IngestionDiagnostic> diagnostics)
+    {
+        return diagnostics
+            .Select(diagnostic => $"{diagnostic.Code}|{diagnostic.Message}")
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToArray();
     }

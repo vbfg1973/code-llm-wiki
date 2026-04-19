@@ -2,6 +2,7 @@ using System.Xml.Linq;
 using System.Text.Json;
 using System.Diagnostics;
 using System.Globalization;
+using System.Collections.Concurrent;
 using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Ingestion.Diagnostics;
@@ -25,6 +26,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
     private readonly ICallResolutionDiagnosticClassifier _callResolutionDiagnosticClassifier;
     private readonly IIngestionStageTelemetry _stageTelemetry;
     private readonly IProjectScopedCompilationProvider _projectScopedCompilationProvider;
+    private readonly object _externalStubGate = new();
+    private readonly object _unresolvedCallTargetGate = new();
 
     public ProjectStructureAnalyzer(
         IStableIdGenerator stableIdGenerator,
@@ -40,8 +43,12 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         _projectScopedCompilationProvider = projectScopedCompilationProvider ?? new ProjectScopedCompilationProvider();
     }
 
-    public Task<ProjectStructureAnalysisResult> AnalyzeAsync(string repositoryPath, CancellationToken cancellationToken)
+    public Task<ProjectStructureAnalysisResult> AnalyzeAsync(
+        string repositoryPath,
+        CancellationToken cancellationToken,
+        ProjectStructureAnalysisOptions? options = null)
     {
+        var analysisOptions = options ?? ProjectStructureAnalysisOptions.Default;
         var triples = new List<SemanticTriple>();
         var diagnostics = new List<IngestionDiagnostic>();
 
@@ -270,6 +277,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             projectAssemblyNameByPath,
             triples,
             diagnostics,
+            analysisOptions.EffectiveSemanticCallGraphMaxDegreeOfParallelism,
             cancellationToken);
 
         return Task.FromResult(new ProjectStructureAnalysisResult(repositoryId, triples, diagnostics));
@@ -283,6 +291,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         IReadOnlyDictionary<string, string> projectAssemblyNameByPath,
         List<SemanticTriple> triples,
         List<IngestionDiagnostic> diagnostics,
+        int semanticCallGraphMaxDegreeOfParallelism,
         CancellationToken cancellationToken)
     {
         if (sourceFiles.Count == 0)
@@ -1031,7 +1040,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 externalStubIdByReference,
                 unresolvedCallTargetIdByText,
                 triples,
-                diagnostics);
+                diagnostics,
+                semanticCallGraphMaxDegreeOfParallelism);
             var callEdgeCountAfter = CountPredicateOccurrences(triples, CorePredicates.Calls);
             semanticCallGraphStage.SetCounters(
                 new Dictionary<string, long>
@@ -1039,6 +1049,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     ["method_count"] = methodIdByDeclarationLocation.Count,
                     ["call_edges"] = callEdgeCountAfter,
                     ["call_edges_added"] = Math.Max(0, callEdgeCountAfter - callEdgeCountBefore),
+                    ["semantic_mdop"] = Math.Max(1, semanticCallGraphMaxDegreeOfParallelism),
+                    ["semantic_projects"] = projectAssemblyNameByPath.Count,
                 });
         }
 
@@ -3172,7 +3184,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         Dictionary<string, EntityId> externalStubIdByReference,
         Dictionary<string, EntityId> unresolvedCallTargetIdByText,
         List<SemanticTriple> triples,
-        List<IngestionDiagnostic> diagnostics)
+        List<IngestionDiagnostic> diagnostics,
+        int semanticCallGraphMaxDegreeOfParallelism)
     {
         if (sourceFiles.Count == 0)
         {
@@ -3190,11 +3203,94 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 References: references),
             diagnostics);
 
+        var projectBatches = BuildSemanticCallProjectBatches(repositoryRoot, sourceFiles, projectAssemblyNameByPath);
+        var effectiveMdop = Math.Max(1, semanticCallGraphMaxDegreeOfParallelism);
+        List<SemanticCallProjectBatchResult> projectResults;
+
+        if (effectiveMdop == 1 || projectBatches.Count <= 1)
+        {
+            projectResults = projectBatches
+                .Select(batch => ProcessSemanticCallProjectBatch(
+                    batch,
+                    semanticContext,
+                    typeIdByQualifiedName,
+                    methodCandidatesByTypeId,
+                    declaringTypeIdByMethodId,
+                    memberIdByDeclarationLocation,
+                    methodIdByDeclarationLocation,
+                    externalStubIdByReference,
+                    unresolvedCallTargetIdByText))
+                .ToList();
+        }
+        else
+        {
+            var bag = new ConcurrentBag<SemanticCallProjectBatchResult>();
+            Parallel.ForEach(
+                projectBatches,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = effectiveMdop,
+                },
+                batch =>
+                {
+                    var result = ProcessSemanticCallProjectBatch(
+                        batch,
+                        semanticContext,
+                        typeIdByQualifiedName,
+                        methodCandidatesByTypeId,
+                        declaringTypeIdByMethodId,
+                        memberIdByDeclarationLocation,
+                        methodIdByDeclarationLocation,
+                        externalStubIdByReference,
+                        unresolvedCallTargetIdByText);
+                    bag.Add(result);
+                });
+            projectResults = bag.ToList();
+        }
+
+        var mergedDeclarationDependenciesByTypeId = new Dictionary<EntityId, HashSet<EntityId>>();
+        var mergedMethodBodyDependenciesByTypeId = new Dictionary<EntityId, HashSet<EntityId>>();
+
+        foreach (var result in projectResults)
+        {
+            MergeTypeDependencyMap(mergedDeclarationDependenciesByTypeId, result.DeclarationDependenciesByTypeId);
+            MergeTypeDependencyMap(mergedMethodBodyDependenciesByTypeId, result.MethodBodyDependenciesByTypeId);
+        }
+
+        var orderedTriples = projectResults
+            .SelectMany(x => x.Triples)
+            .OrderBy(CreateDeterministicTripleSortKey, StringComparer.Ordinal)
+            .ToArray();
+        triples.AddRange(orderedTriples);
+
+        var orderedDiagnostics = projectResults
+            .SelectMany(x => x.Diagnostics)
+            .OrderBy(x => x.Code, StringComparer.Ordinal)
+            .ThenBy(x => x.Message, StringComparer.Ordinal)
+            .ToArray();
+        diagnostics.AddRange(orderedDiagnostics);
+
+        EmitCboMetricsByType(typeIdByQualifiedName.Values, mergedDeclarationDependenciesByTypeId, mergedMethodBodyDependenciesByTypeId, triples);
+    }
+
+    private SemanticCallProjectBatchResult ProcessSemanticCallProjectBatch(
+        SemanticCallProjectBatch projectBatch,
+        IProjectScopedSemanticContext semanticContext,
+        IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
+        IReadOnlyDictionary<EntityId, List<MethodRelationshipCandidate>> methodCandidatesByTypeId,
+        IReadOnlyDictionary<EntityId, EntityId> declaringTypeIdByMethodId,
+        IReadOnlyDictionary<MemberDeclarationLocationKey, EntityId> memberIdByDeclarationLocation,
+        IReadOnlyDictionary<MethodDeclarationLocationKey, EntityId> methodIdByDeclarationLocation,
+        Dictionary<string, EntityId> externalStubIdByReference,
+        Dictionary<string, EntityId> unresolvedCallTargetIdByText)
+    {
         var declarationDependenciesByTypeId = new Dictionary<EntityId, HashSet<EntityId>>();
         var methodBodyDependenciesByTypeId = new Dictionary<EntityId, HashSet<EntityId>>();
         var emittedMethodMetricIds = new HashSet<EntityId>();
+        var triples = new List<SemanticTriple>();
+        var diagnostics = new List<IngestionDiagnostic>();
 
-        foreach (var relativePath in sourceFiles.OrderBy(x => x, StringComparer.Ordinal))
+        foreach (var relativePath in projectBatch.SourceFiles)
         {
             if (!semanticContext.TryGetSemanticModel(relativePath, out var semanticModel, out _))
             {
@@ -3316,7 +3412,117 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             }
         }
 
-        EmitCboMetricsByType(typeIdByQualifiedName.Values, declarationDependenciesByTypeId, methodBodyDependenciesByTypeId, triples);
+        return new SemanticCallProjectBatchResult(
+            projectBatch.ProjectSortKey,
+            triples,
+            diagnostics,
+            declarationDependenciesByTypeId,
+            methodBodyDependenciesByTypeId);
+    }
+
+    private static IReadOnlyList<SemanticCallProjectBatch> BuildSemanticCallProjectBatches(
+        string repositoryRoot,
+        IReadOnlyList<string> sourceFiles,
+        IReadOnlyDictionary<string, string> projectAssemblyNameByPath)
+    {
+        var projectContexts = projectAssemblyNameByPath.Keys
+            .Select(projectPath => new
+            {
+                ProjectPath = Path.GetFullPath(projectPath),
+                ProjectSortKey = ToRelativePath(repositoryRoot, Path.GetFullPath(projectPath)),
+                RelativeDirectory = ToRelativePath(repositoryRoot, Path.GetDirectoryName(projectPath) ?? string.Empty),
+            })
+            .OrderByDescending(x => x.RelativeDirectory.Length)
+            .ThenBy(x => x.RelativeDirectory, StringComparer.Ordinal)
+            .ToArray();
+
+        var filesByProjectSortKey = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var fallbackFiles = new List<string>();
+
+        foreach (var relativePath in sourceFiles.Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal))
+        {
+            string? matchedProjectSortKey = null;
+            foreach (var context in projectContexts)
+            {
+                if (IsSourceFileUnderProjectDirectory(relativePath, context.RelativeDirectory))
+                {
+                    matchedProjectSortKey = context.ProjectSortKey;
+                    break;
+                }
+            }
+
+            if (matchedProjectSortKey is null)
+            {
+                fallbackFiles.Add(relativePath);
+                continue;
+            }
+
+            if (!filesByProjectSortKey.TryGetValue(matchedProjectSortKey, out var files))
+            {
+                files = [];
+                filesByProjectSortKey[matchedProjectSortKey] = files;
+            }
+
+            files.Add(relativePath);
+        }
+
+        var batches = filesByProjectSortKey
+            .OrderBy(x => x.Key, StringComparer.Ordinal)
+            .Select(x => new SemanticCallProjectBatch(
+                x.Key,
+                x.Value.OrderBy(y => y, StringComparer.Ordinal).ToArray()))
+            .ToList();
+
+        if (fallbackFiles.Count > 0)
+        {
+            batches.Add(new SemanticCallProjectBatch(
+                "_fallback",
+                fallbackFiles.OrderBy(x => x, StringComparer.Ordinal).ToArray()));
+        }
+
+        return batches;
+    }
+
+    private static bool IsSourceFileUnderProjectDirectory(string relativeSourceFilePath, string relativeProjectDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(relativeProjectDirectory) || relativeProjectDirectory == ".")
+        {
+            return true;
+        }
+
+        return relativeSourceFilePath.Equals(relativeProjectDirectory, StringComparison.Ordinal)
+               || relativeSourceFilePath.StartsWith(relativeProjectDirectory + "/", StringComparison.Ordinal);
+    }
+
+    private static void MergeTypeDependencyMap(
+        Dictionary<EntityId, HashSet<EntityId>> target,
+        IReadOnlyDictionary<EntityId, HashSet<EntityId>> source)
+    {
+        foreach (var pair in source)
+        {
+            if (!target.TryGetValue(pair.Key, out var targetSet))
+            {
+                targetSet = [];
+                target[pair.Key] = targetSet;
+            }
+
+            targetSet.UnionWith(pair.Value);
+        }
+    }
+
+    private static string CreateDeterministicTripleSortKey(SemanticTriple triple)
+    {
+        return $"{CreateDeterministicNodeSortKey(triple.Subject)}|{triple.Predicate.Value}|{CreateDeterministicNodeSortKey(triple.Object)}";
+    }
+
+    private static string CreateDeterministicNodeSortKey(GraphNode node)
+    {
+        return node switch
+        {
+            EntityNode entity => $"E:{entity.Id.Value}",
+            LiteralNode literal => $"L:{literal.Value?.ToString() ?? string.Empty}",
+            _ => node.ToString() ?? string.Empty,
+        };
     }
 
     private static void AppendTypeDependencies(
@@ -4711,27 +4917,30 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         Dictionary<string, EntityId> unresolvedCallTargetIdByText,
         List<SemanticTriple> triples)
     {
-        var key = $"{resolutionReason}|{targetText}";
-        if (unresolvedCallTargetIdByText.TryGetValue(key, out var existing))
+        lock (_unresolvedCallTargetGate)
         {
-            return existing;
+            var key = $"{resolutionReason}|{targetText}";
+            if (unresolvedCallTargetIdByText.TryGetValue(key, out var existing))
+            {
+                return existing;
+            }
+
+            var unresolvedNaturalKey = $"{resolutionReason}:{targetText}";
+            var unresolvedId = _stableIdGenerator.Create(new EntityKey("unresolved-call-target", unresolvedNaturalKey));
+            unresolvedCallTargetIdByText[key] = unresolvedId;
+            AddEntityTriples(
+                triples,
+                unresolvedId,
+                "unresolved-call-target",
+                targetText,
+                $"unresolved-call/{targetText}");
+            triples.Add(new SemanticTriple(
+                new EntityNode(unresolvedId),
+                CorePredicates.ResolutionReason,
+                new LiteralNode(resolutionReason)));
+
+            return unresolvedId;
         }
-
-        var unresolvedNaturalKey = $"{resolutionReason}:{targetText}";
-        var unresolvedId = _stableIdGenerator.Create(new EntityKey("unresolved-call-target", unresolvedNaturalKey));
-        unresolvedCallTargetIdByText[key] = unresolvedId;
-        AddEntityTriples(
-            triples,
-            unresolvedId,
-            "unresolved-call-target",
-            targetText,
-            $"unresolved-call/{targetText}");
-        triples.Add(new SemanticTriple(
-            new EntityNode(unresolvedId),
-            CorePredicates.ResolutionReason,
-            new LiteralNode(resolutionReason)));
-
-        return unresolvedId;
     }
 
     private static string FormatDeclarationSourceLocation(DeclarationSourceLocation location)
@@ -4796,22 +5005,25 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         Dictionary<string, EntityId> externalStubIdByReference,
         List<SemanticTriple> triples)
     {
-        if (externalStubIdByReference.TryGetValue(referenceName, out var existing))
+        lock (_externalStubGate)
         {
-            return existing;
+            if (externalStubIdByReference.TryGetValue(referenceName, out var existing))
+            {
+                return existing;
+            }
+
+            var stubId = _stableIdGenerator.Create(new EntityKey("external-type-stub", referenceName));
+            externalStubIdByReference[referenceName] = stubId;
+
+            AddEntityTriples(
+                triples,
+                stubId,
+                "external-type-stub",
+                referenceName,
+                $"external/{referenceName}");
+
+            return stubId;
         }
-
-        var stubId = _stableIdGenerator.Create(new EntityKey("external-type-stub", referenceName));
-        externalStubIdByReference[referenceName] = stubId;
-
-        AddEntityTriples(
-            triples,
-            stubId,
-            "external-type-stub",
-            referenceName,
-            $"external/{referenceName}");
-
-        return stubId;
     }
 
     private EntityId GetOrCreateUnresolvedReferenceId(
@@ -6080,6 +6292,17 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             entry.EndsWith("/", StringComparison.Ordinal) &&
             relativeFilePath.StartsWith(entry, StringComparison.OrdinalIgnoreCase));
     }
+
+    private sealed record SemanticCallProjectBatch(
+        string ProjectSortKey,
+        IReadOnlyList<string> SourceFiles);
+
+    private sealed record SemanticCallProjectBatchResult(
+        string ProjectSortKey,
+        IReadOnlyList<SemanticTriple> Triples,
+        IReadOnlyList<IngestionDiagnostic> Diagnostics,
+        IReadOnlyDictionary<EntityId, HashSet<EntityId>> DeclarationDependenciesByTypeId,
+        IReadOnlyDictionary<EntityId, HashSet<EntityId>> MethodBodyDependenciesByTypeId);
 
     private sealed record ProjectDiscoveryResult(
         string Name,

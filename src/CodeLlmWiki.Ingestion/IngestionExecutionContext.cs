@@ -6,4 +6,5 @@ namespace CodeLlmWiki.Ingestion;
 public sealed record IngestionExecutionContext(
     string RepositoryPath,
     EntityId RepositoryId,
-    OntologyDefinition Ontology);
+    OntologyDefinition Ontology,
+    int? SemanticCallGraphMaxDegreeOfParallelism = null);
