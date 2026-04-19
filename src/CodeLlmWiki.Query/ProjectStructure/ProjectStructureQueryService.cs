@@ -255,6 +255,21 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     : PackageMethodBodyDependencyUsageCatalog.Empty,
             })
             .ToArray();
+        var typeDependencyRollupsByTypeId = BuildTypeDependencyRollupsByTypeId(
+            packages,
+            declarationUnknownDependencyUsage,
+            methodBodyUnknownDependencyUsage);
+        declarations = declarations with
+        {
+            Types = declarations.Types
+                .Select(type => type with
+                {
+                    DependencyRollup = typeDependencyRollupsByTypeId.TryGetValue(type.Id, out var rollup)
+                        ? rollup
+                        : TypeDependencyRollupCatalog.Empty,
+                })
+                .ToArray(),
+        };
 
         var repository = new RepositoryNode(
             repositoryId,
@@ -270,6 +285,116 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 declarationUnknownDependencyUsage,
                 methodBodyUnknownDependencyUsage),
         };
+    }
+
+    private static IReadOnlyDictionary<EntityId, TypeDependencyRollupCatalog> BuildTypeDependencyRollupsByTypeId(
+        IReadOnlyList<PackageNode> packages,
+        UnknownDependencyUsageCatalog declarationUnknownDependencyUsage,
+        UnknownDependencyUsageCatalog methodBodyUnknownDependencyUsage)
+    {
+        var packageById = packages.ToDictionary(package => package.Id, package => package);
+        var declarationCounts = new Dictionary<(EntityId TypeId, EntityId PackageId), int>();
+        var methodBodyCounts = new Dictionary<(EntityId TypeId, EntityId PackageId), int>();
+        var declarationUnknownCounts = new Dictionary<EntityId, int>();
+        var methodBodyUnknownCounts = new Dictionary<EntityId, int>();
+
+        foreach (var package in packages)
+        {
+            foreach (var namespaceUsage in package.DeclarationDependencyUsage.Namespaces)
+            {
+                foreach (var typeUsage in namespaceUsage.Types)
+                {
+                    var key = (typeUsage.TypeId, package.Id);
+                    declarationCounts[key] = declarationCounts.TryGetValue(key, out var existing)
+                        ? existing + typeUsage.UsageCount
+                        : typeUsage.UsageCount;
+                }
+            }
+
+            foreach (var namespaceUsage in package.MethodBodyDependencyUsage.Namespaces)
+            {
+                foreach (var typeUsage in namespaceUsage.Types)
+                {
+                    var key = (typeUsage.TypeId, package.Id);
+                    methodBodyCounts[key] = methodBodyCounts.TryGetValue(key, out var existing)
+                        ? existing + typeUsage.UsageCount
+                        : typeUsage.UsageCount;
+                }
+            }
+        }
+
+        foreach (var namespaceUsage in declarationUnknownDependencyUsage.Namespaces)
+        {
+            foreach (var typeUsage in namespaceUsage.Types)
+            {
+                declarationUnknownCounts[typeUsage.TypeId] = declarationUnknownCounts.TryGetValue(typeUsage.TypeId, out var existing)
+                    ? existing + typeUsage.UsageCount
+                    : typeUsage.UsageCount;
+            }
+        }
+
+        foreach (var namespaceUsage in methodBodyUnknownDependencyUsage.Namespaces)
+        {
+            foreach (var typeUsage in namespaceUsage.Types)
+            {
+                methodBodyUnknownCounts[typeUsage.TypeId] = methodBodyUnknownCounts.TryGetValue(typeUsage.TypeId, out var existing)
+                    ? existing + typeUsage.UsageCount
+                    : typeUsage.UsageCount;
+            }
+        }
+
+        var typeIds = declarationCounts.Keys.Select(x => x.TypeId)
+            .Concat(methodBodyCounts.Keys.Select(x => x.TypeId))
+            .Concat(declarationUnknownCounts.Keys)
+            .Concat(methodBodyUnknownCounts.Keys)
+            .Distinct()
+            .OrderBy(x => x.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        var rollups = new Dictionary<EntityId, TypeDependencyRollupCatalog>();
+        foreach (var typeId in typeIds)
+        {
+            var declarationPackages = declarationCounts
+                .Where(x => x.Key.TypeId == typeId && packageById.ContainsKey(x.Key.PackageId))
+                .Select(x =>
+                {
+                    var package = packageById[x.Key.PackageId];
+                    return new TypeDependencyPackageUsageNode(
+                        PackageId: package.Id,
+                        PackageName: package.Name,
+                        UsageCount: x.Value);
+                })
+                .OrderByDescending(x => x.UsageCount)
+                .ThenBy(x => x.PackageName, StringComparer.Ordinal)
+                .ThenBy(x => x.PackageId.Value, StringComparer.Ordinal)
+                .ToArray();
+
+            var methodBodyPackages = methodBodyCounts
+                .Where(x => x.Key.TypeId == typeId && packageById.ContainsKey(x.Key.PackageId))
+                .Select(x =>
+                {
+                    var package = packageById[x.Key.PackageId];
+                    return new TypeDependencyPackageUsageNode(
+                        PackageId: package.Id,
+                        PackageName: package.Name,
+                        UsageCount: x.Value);
+                })
+                .OrderByDescending(x => x.UsageCount)
+                .ThenBy(x => x.PackageName, StringComparer.Ordinal)
+                .ThenBy(x => x.PackageId.Value, StringComparer.Ordinal)
+                .ToArray();
+
+            declarationUnknownCounts.TryGetValue(typeId, out var declarationUnknownCount);
+            methodBodyUnknownCounts.TryGetValue(typeId, out var methodBodyUnknownCount);
+
+            rollups[typeId] = new TypeDependencyRollupCatalog(
+                DeclarationPackages: declarationPackages,
+                MethodBodyPackages: methodBodyPackages,
+                DeclarationUnknownUsageCount: declarationUnknownCount,
+                MethodBodyUnknownUsageCount: methodBodyUnknownCount);
+        }
+
+        return rollups;
     }
 
     private static Dictionary<EntityId, EntityMetadata> BuildEntityMetadata(IReadOnlyList<SemanticTriple> triples)
