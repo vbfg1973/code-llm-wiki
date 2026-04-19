@@ -106,10 +106,27 @@ public sealed class TypeSymbolVerticalSliceTests
         Assert.Contains("type_name: DerivedWorker", derivedPage.Markdown, StringComparison.Ordinal);
         Assert.Contains("type_kind: class", derivedPage.Markdown, StringComparison.Ordinal);
         Assert.Contains("accessibility: public", derivedPage.Markdown, StringComparison.Ordinal);
-        Assert.Contains("## Direct Base Types", derivedPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("## Inherits From", derivedPage.Markdown, StringComparison.Ordinal);
         Assert.Contains("BaseWorker", derivedPage.Markdown, StringComparison.Ordinal);
-        Assert.Contains("## Direct Interfaces", derivedPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("## Implements", derivedPage.Markdown, StringComparison.Ordinal);
         Assert.Contains("IWorker", derivedPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("## Inherited By", derivedPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("DeeperWorker", derivedPage.Markdown, StringComparison.Ordinal);
+
+        var basePage = pages.Single(x => x.RelativePath == "types/Acme/Workers/BaseWorker.md");
+        Assert.Contains("## Inherited By", basePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("DerivedWorker", basePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("Inner", basePage.Markdown, StringComparison.Ordinal);
+
+        var workerInterfacePage = pages.Single(x => x.RelativePath == "types/Acme/Workers/IWorker.md");
+        Assert.Contains("## Implemented By", workerInterfacePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("DerivedWorker", workerInterfacePage.Markdown, StringComparison.Ordinal);
+
+        var disposablePage = pages.Single(x => x.RelativePath == "types/Acme/Workers/DisposableWorker.md");
+        Assert.Contains("## Implements", disposablePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("IDisposable", disposablePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("(external)", disposablePage.Markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("[[types/System/IDisposable", disposablePage.Markdown, StringComparison.Ordinal);
 
         var innerPage = pages.Single(x => x.RelativePath == "types/Acme/Workers/Outer/Inner.md");
         Assert.Contains("is_nested_type: true", innerPage.Markdown, StringComparison.Ordinal);
@@ -176,6 +193,10 @@ public sealed class TypeSymbolVerticalSliceTests
                 public class BaseWorker { }
                 public class DerivedWorker : BaseWorker, IWorker { }
                 public class DeeperWorker : DerivedWorker { }
+                public sealed class DisposableWorker : System.IDisposable
+                {
+                    public void Dispose() { }
+                }
                 internal class InternalWorker { }
                 public record WorkerRecord(string Name);
                 public struct WorkerStruct { }
