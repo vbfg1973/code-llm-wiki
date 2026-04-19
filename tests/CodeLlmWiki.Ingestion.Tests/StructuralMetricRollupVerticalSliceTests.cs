@@ -48,16 +48,23 @@ public sealed class StructuralMetricRollupVerticalSliceTests
         var defaultFiles = defaultModel.StructuralMetrics.Files;
 
         var productionFile = defaultFiles.Single(x => x.Path == "src/App/Services/Service.cs");
+        var contestFile = defaultFiles.Single(x => x.Path == "src/App/Contest.cs");
         var generatedFile = defaultFiles.Single(x => x.Path == "src/App/Generated/Auto.generated.cs");
         var testFile = defaultFiles.Single(x => x.Path == "tests/App.Tests/ServiceTests.cs");
 
         Assert.Equal(StructuralMetricCodeKind.Production, productionFile.CodeKind);
+        Assert.Equal(StructuralMetricCodeKind.Production, contestFile.CodeKind);
         Assert.Equal(StructuralMetricCodeKind.Generated, generatedFile.CodeKind);
         Assert.Equal(StructuralMetricCodeKind.Test, testFile.CodeKind);
 
         Assert.True(productionFile.Rollup.IncludedInRanking);
         Assert.False(generatedFile.Rollup.IncludedInRanking);
         Assert.False(testFile.Rollup.IncludedInRanking);
+        Assert.Equal(3, defaultModel.StructuralMetrics.Repository.Rollup.Coverage.AnalyzableMethods);
+
+        var defaultTestProject = defaultModel.StructuralMetrics.Projects.Single(x => x.Path == "tests/App.Tests/App.Tests.csproj");
+        Assert.Equal(StructuralMetricSeverity.None, defaultTestProject.Rollup.Severity);
+        Assert.False(defaultTestProject.Rollup.IncludedInRanking);
 
         var includeAllModel = query.GetModel(
             analysis.RepositoryId,
@@ -70,6 +77,11 @@ public sealed class StructuralMetricRollupVerticalSliceTests
         Assert.True(includeAllFiles.Single(x => x.Path == "src/App/Services/Service.cs").Rollup.IncludedInRanking);
         Assert.True(includeAllFiles.Single(x => x.Path == "src/App/Generated/Auto.generated.cs").Rollup.IncludedInRanking);
         Assert.True(includeAllFiles.Single(x => x.Path == "tests/App.Tests/ServiceTests.cs").Rollup.IncludedInRanking);
+        Assert.Equal(5, includeAllModel.StructuralMetrics.Repository.Rollup.Coverage.AnalyzableMethods);
+
+        var includeAllTestProject = includeAllModel.StructuralMetrics.Projects.Single(x => x.Path == "tests/App.Tests/App.Tests.csproj");
+        Assert.Equal(1, includeAllTestProject.Rollup.Coverage.AnalyzableMethods);
+        Assert.True(includeAllTestProject.Rollup.IncludedInRanking);
     }
 
     [Fact]
@@ -149,6 +161,15 @@ public sealed class StructuralMetricRollupVerticalSliceTests
                     {
                         return value + 1;
                     }
+                }
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(appDir, "Contest.cs"),
+                """
+                namespace Acme.Contest;
+
+                public class ContestTag
+                {
                 }
                 """);
 

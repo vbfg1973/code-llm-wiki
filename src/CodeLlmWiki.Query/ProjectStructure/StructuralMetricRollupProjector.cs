@@ -96,8 +96,10 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
                 var types = typesByFileId.TryGetValue(file.Id, out var fileTypes)
                     ? fileTypes
                     : [];
-                var rawRollup = BuildRawRollup(methods, types);
-                var included = IsIncludedInRanking(rawRollup, methods, types, request.ScopeFilter);
+                var filteredMethods = ApplyScopeFilter(methods, request.ScopeFilter);
+                var filteredTypes = ApplyScopeFilter(types, request.ScopeFilter);
+                var rawRollup = BuildRawRollup(filteredMethods, filteredTypes);
+                var included = IsIncludedInRanking(rawRollup, request.ScopeFilter);
                 var rollup = rawRollup with { IncludedInRanking = included };
 
                 return new FileStructuralMetricRollupNode(
@@ -120,8 +122,10 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
                 var types = typesByProjectId.TryGetValue(project.Id, out var projectTypes)
                     ? projectTypes
                     : [];
-                var rawRollup = BuildRawRollup(methods, types);
-                var included = IsIncludedInRanking(rawRollup, methods, types, request.ScopeFilter);
+                var filteredMethods = ApplyScopeFilter(methods, request.ScopeFilter);
+                var filteredTypes = ApplyScopeFilter(types, request.ScopeFilter);
+                var rawRollup = BuildRawRollup(filteredMethods, filteredTypes);
+                var included = IsIncludedInRanking(rawRollup, request.ScopeFilter);
                 var rollup = rawRollup with { IncludedInRanking = included };
 
                 return new ProjectStructuralMetricRollupNode(
@@ -144,8 +148,10 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
                 var directTypes = typesByNamespaceId.TryGetValue(namespaceNode.Id, out var directTypeSet)
                     ? directTypeSet
                     : [];
-                var directRaw = BuildRawRollup(directMethods, directTypes);
-                var directIncluded = IsIncludedInRanking(directRaw, directMethods, directTypes, request.ScopeFilter);
+                var filteredDirectMethods = ApplyScopeFilter(directMethods, request.ScopeFilter);
+                var filteredDirectTypes = ApplyScopeFilter(directTypes, request.ScopeFilter);
+                var directRaw = BuildRawRollup(filteredDirectMethods, filteredDirectTypes);
+                var directIncluded = IsIncludedInRanking(directRaw, request.ScopeFilter);
                 var direct = directRaw with { IncludedInRanking = directIncluded };
 
                 var recursiveMethodSet = namespaceDescendants[namespaceNode.Id]
@@ -156,8 +162,10 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
                     .SelectMany(descendantId => typesByNamespaceId.TryGetValue(descendantId, out var recursiveTypes) ? recursiveTypes : [])
                     .DistinctBy(x => x.Id)
                     .ToArray();
-                var recursiveRaw = BuildRawRollup(recursiveMethodSet, recursiveTypeSet);
-                var recursiveIncluded = IsIncludedInRanking(recursiveRaw, recursiveMethodSet, recursiveTypeSet, request.ScopeFilter);
+                var filteredRecursiveMethods = ApplyScopeFilter(recursiveMethodSet, request.ScopeFilter);
+                var filteredRecursiveTypes = ApplyScopeFilter(recursiveTypeSet, request.ScopeFilter);
+                var recursiveRaw = BuildRawRollup(filteredRecursiveMethods, filteredRecursiveTypes);
+                var recursiveIncluded = IsIncludedInRanking(recursiveRaw, request.ScopeFilter);
                 var recursive = recursiveRaw with { IncludedInRanking = recursiveIncluded };
 
                 return new NamespaceStructuralMetricRollupNode(
@@ -171,8 +179,10 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
             })
             .ToArray();
 
-        var repositoryRaw = BuildRawRollup(methodContexts, typeContexts);
-        var repositoryIncluded = IsIncludedInRanking(repositoryRaw, methodContexts, typeContexts, request.ScopeFilter);
+        var repositoryMethods = ApplyScopeFilter(methodContexts, request.ScopeFilter);
+        var repositoryTypes = ApplyScopeFilter(typeContexts, request.ScopeFilter);
+        var repositoryRaw = BuildRawRollup(repositoryMethods, repositoryTypes);
+        var repositoryIncluded = IsIncludedInRanking(repositoryRaw, request.ScopeFilter);
         var repository = new RepositoryStructuralMetricRollupNode(
             request.RepositoryId,
             repositoryRaw with { IncludedInRanking = repositoryIncluded });
@@ -180,10 +190,26 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
         return new StructuralMetricRollupCatalog(repository, projects, namespaces, files, request.ScopeFilter);
     }
 
+    private static IReadOnlyList<MethodMetricContext> ApplyScopeFilter(
+        IReadOnlyList<MethodMetricContext> methods,
+        StructuralMetricScopeFilter filter)
+    {
+        return methods
+            .Where(method => filter.IncludesCodeKind(method.CodeKind))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<TypeMetricContext> ApplyScopeFilter(
+        IReadOnlyList<TypeMetricContext> types,
+        StructuralMetricScopeFilter filter)
+    {
+        return types
+            .Where(type => filter.IncludesCodeKind(type.CodeKind))
+            .ToArray();
+    }
+
     private static bool IsIncludedInRanking(
         StructuralMetricScopeRollup rollup,
-        IReadOnlyList<MethodMetricContext> methods,
-        IReadOnlyList<TypeMetricContext> types,
         StructuralMetricScopeFilter filter)
     {
         if (filter.ExcludeInsufficientDataFromRanking && rollup.Severity == StructuralMetricSeverity.None)
@@ -191,14 +217,7 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
             return false;
         }
 
-        var eligibleMethods = methods.Count(method => method.IsAnalyzable && filter.IncludesCodeKind(method.CodeKind));
-        if (eligibleMethods > 0)
-        {
-            return true;
-        }
-
-        var eligibleTypes = types.Count(type => type.HasCbo && filter.IncludesCodeKind(type.CodeKind));
-        return eligibleTypes > 0;
+        return rollup.Coverage.AnalyzableMethods > 0 || rollup.Coverage.TypesWithCbo > 0;
     }
 
     private static StructuralMetricScopeRollup BuildRawRollup(
@@ -362,13 +381,8 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
 
     private static StructuralMetricCodeKind ClassifyProjectCodeKind(string projectName, string projectPath)
     {
-        var loweredName = projectName.ToLowerInvariant();
-        var loweredPath = projectPath.Replace('\\', '/').ToLowerInvariant();
-        var isTest = loweredName.Contains("test", StringComparison.Ordinal)
-                     || loweredPath.Contains("/test/", StringComparison.Ordinal)
-                     || loweredPath.Contains("/tests/", StringComparison.Ordinal)
-                     || loweredPath.Contains(".test", StringComparison.Ordinal)
-                     || loweredPath.Contains(".tests", StringComparison.Ordinal);
+        var isTest = ContainsTestToken(projectName)
+                     || ContainsTestToken(projectPath.Replace('\\', '/'));
 
         return isTest
             ? StructuralMetricCodeKind.Test
@@ -393,7 +407,7 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
 
         var isTestFile = loweredPath.Contains("/test/", StringComparison.Ordinal)
                          || loweredPath.Contains("/tests/", StringComparison.Ordinal)
-                         || loweredPath.EndsWith("tests.cs", StringComparison.Ordinal);
+                         || ContainsTestToken(loweredPath);
         if (isTestFile || projectCodeKind == StructuralMetricCodeKind.Test)
         {
             return StructuralMetricCodeKind.Test;
@@ -508,9 +522,16 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
         var coverageByMethodId = triples
             .Where(triple => triple.Predicate == CorePredicates.MetricCoverageStatus)
             .Where(triple => triple.Subject is EntityNode && triple.Object is LiteralNode)
+            .Select(triple => (
+                MethodId: ((EntityNode)triple.Subject).Id,
+                CoverageStatus: ((LiteralNode)triple.Object).Value?.ToString() ?? string.Empty))
+            .GroupBy(x => x.MethodId)
             .ToDictionary(
-                triple => ((EntityNode)triple.Subject).Id,
-                triple => (((LiteralNode)triple.Object).Value?.ToString() ?? string.Empty),
+                group => group.Key,
+                group => group
+                    .Select(x => x.CoverageStatus)
+                    .OrderBy(x => x, StringComparer.Ordinal)
+                    .First(),
                 EqualityComparer<EntityId>.Default);
         var cyclomaticByMethodId = BuildIntMetricMap(triples, CorePredicates.CyclomaticComplexity);
         var cognitiveByMethodId = BuildIntMetricMap(triples, CorePredicates.CognitiveComplexity);
@@ -571,7 +592,9 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
             })
             .Where(item => item.Value.HasValue)
             .GroupBy(item => item.SubjectId)
-            .ToDictionary(group => group.Key, group => group.First().Value!.Value);
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(x => x.Value!.Value).OrderBy(x => x).First());
     }
 
     private static Dictionary<EntityId, double> BuildDoubleMetricMap(IReadOnlyList<SemanticTriple> triples, PredicateId predicate)
@@ -587,7 +610,18 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
             })
             .Where(item => item.Value.HasValue)
             .GroupBy(item => item.SubjectId)
-            .ToDictionary(group => group.Key, group => group.First().Value!.Value);
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(x => x.Value!.Value).OrderBy(x => x).First());
+    }
+
+    private static bool ContainsTestToken(string value)
+    {
+        var lowered = value.ToLowerInvariant();
+        var tokens = lowered
+            .Split(['/', '\\', '.', '-', '_', ' '], StringSplitOptions.RemoveEmptyEntries);
+
+        return tokens.Any(token => token is "test" or "tests");
     }
 
     private sealed record MethodMetricSnapshot(
