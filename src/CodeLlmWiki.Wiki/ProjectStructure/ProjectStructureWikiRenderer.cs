@@ -2288,6 +2288,10 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine($"- Authored Route: `{endpoint.AuthoredRouteTemplate}`");
         sb.AppendLine($"- Normalized Route Key: `{endpoint.NormalizedRouteKey}`");
         sb.AppendLine($"- Confidence: `{endpoint.Confidence.ToString().ToLowerInvariant()}`");
+        if (!string.IsNullOrWhiteSpace(endpoint.ResolutionReason))
+        {
+            sb.AppendLine($"- Resolution Reason: `{endpoint.ResolutionReason}`");
+        }
         sb.AppendLine($"- Rule: `{endpoint.RuleId}`");
         sb.AppendLine($"- Rule Version: `{endpoint.RuleVersion}`");
         sb.AppendLine($"- Rule Source: `{endpoint.RuleSource}`");
@@ -2366,6 +2370,10 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             KeyValue("endpoint_http_method", endpoint.HttpMethod),
             KeyValue("endpoint_route_key", endpoint.NormalizedRouteKey),
         };
+        if (!string.IsNullOrWhiteSpace(endpoint.ResolutionReason))
+        {
+            frontMatter.Add(KeyValue("endpoint_resolution_reason", endpoint.ResolutionReason));
+        }
 
         return new WikiPage(
             RelativePath: resolver.GetPath(endpoint.Id),
@@ -2822,6 +2830,19 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     x.CanonicalSignature,
                     x.Id.Value,
                     resolver.ToMarkdownLink(x.Id, x.Name)))
+                .ToArray());
+
+        AppendTable(
+            sb,
+            "Endpoint Diagnostics",
+            model.Endpoints.Diagnostics
+                .OrderBy(x => x.Family, StringComparer.Ordinal)
+                .ThenBy(x => x.Reason, StringComparer.Ordinal)
+                .Select(x => new IndexRow(
+                    $"{x.Family}:{x.Reason}",
+                    x.Count.ToString(CultureInfo.InvariantCulture),
+                    $"endpoint-diagnostic:{x.Family}:{x.Reason}",
+                    "-"))
                 .ToArray());
 
         AppendTable(

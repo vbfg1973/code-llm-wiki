@@ -1032,6 +1032,18 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             triples,
             diagnostics);
 
+        CaptureGrpcEndpoints(
+            repositoryId,
+            repositoryRoot,
+            sourceFiles,
+            sourceTextByRelativePath,
+            typeIdByQualifiedName,
+            namespaceIdByTypeId,
+            methodIdByDeclarationLocation,
+            fileIdByRelativePath,
+            triples,
+            diagnostics);
+
         CaptureMinimalApiEndpoints(
             repositoryId,
             repositoryRoot,
@@ -2258,6 +2270,497 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             .ToArray();
 
         return string.Join('/', segments).ToLowerInvariant();
+    }
+
+    private void CaptureGrpcEndpoints(
+        EntityId repositoryId,
+        string repositoryRoot,
+        IReadOnlyList<string> sourceFiles,
+        IReadOnlyDictionary<string, string> sourceTextByRelativePath,
+        IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
+        IReadOnlyDictionary<EntityId, EntityId> namespaceIdByTypeId,
+        IReadOnlyDictionary<MethodDeclarationLocationKey, EntityId> methodIdByDeclarationLocation,
+        IReadOnlyDictionary<string, EntityId> fileIdByRelativePath,
+        List<SemanticTriple> triples,
+        List<IngestionDiagnostic> diagnostics)
+    {
+        if (sourceFiles.Count == 0)
+        {
+            return;
+        }
+
+        var syntaxTrees = new List<SyntaxTree>(sourceFiles.Count);
+        foreach (var relativePath in sourceFiles.OrderBy(x => x, StringComparer.Ordinal))
+        {
+            if (!sourceTextByRelativePath.TryGetValue(relativePath, out var sourceText))
+            {
+                var fullPath = Path.Combine(repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(fullPath))
+                {
+                    continue;
+                }
+
+                sourceText = File.ReadAllText(fullPath);
+            }
+
+            var syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: relativePath);
+            syntaxTrees.Add(syntaxTree);
+        }
+
+        if (syntaxTrees.Count == 0)
+        {
+            return;
+        }
+
+        var compilation = CSharpCompilation.Create(
+            assemblyName: "CodeLlmWiki.GrpcDiscovery",
+            syntaxTrees: syntaxTrees,
+            references: BuildCompilationReferences(diagnostics),
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var emittedEndpointGroupIds = new HashSet<EntityId>();
+        var emittedEndpointIds = new HashSet<EntityId>();
+        var unresolvedReferenceIdByText = new Dictionary<string, EntityId>(StringComparer.Ordinal);
+
+        foreach (var syntaxTree in syntaxTrees)
+        {
+            var semanticModel = compilation.GetSemanticModel(syntaxTree, ignoreAccessibility: true);
+            var root = syntaxTree.GetRoot() as CompilationUnitSyntax;
+            if (root is null)
+            {
+                continue;
+            }
+
+            var relativePath = syntaxTree.FilePath;
+            fileIdByRelativePath.TryGetValue(relativePath, out var declarationFileId);
+
+            foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                if (!TryExtractMapGrpcService(invocation, out var serviceTypeSyntax))
+                {
+                    continue;
+                }
+
+                var serviceTypeName = NormalizeTypeReferenceName(serviceTypeSyntax.ToString());
+                if (string.IsNullOrWhiteSpace(serviceTypeName))
+                {
+                    serviceTypeName = "UnknownService";
+                }
+
+                var serviceTypeSymbol = semanticModel.GetTypeInfo(serviceTypeSyntax).Type as INamedTypeSymbol;
+                var serviceTypeQualifiedName = serviceTypeSymbol is null ? null : GetTypeQualifiedName(serviceTypeSymbol);
+                var hasResolvedServiceType = false;
+                var resolvedServiceTypeId = default(EntityId);
+                if (!string.IsNullOrWhiteSpace(serviceTypeQualifiedName)
+                    && typeIdByQualifiedName.TryGetValue(serviceTypeQualifiedName!, out var serviceTypeId))
+                {
+                    hasResolvedServiceType = true;
+                    resolvedServiceTypeId = serviceTypeId;
+                }
+
+                var declaringTypeId = hasResolvedServiceType
+                    ? resolvedServiceTypeId
+                    : GetOrCreateUnresolvedReferenceId(
+                        serviceTypeName,
+                        "grpc-service-type-unresolved",
+                        unresolvedReferenceIdByText,
+                        triples);
+                var serviceName = hasResolvedServiceType
+                    ? serviceTypeSymbol!.Name
+                    : serviceTypeName;
+                var serviceKey = SanitizeRouteKeyToken(serviceName);
+                var normalizedRoutePrefix = $"grpc/{serviceKey}";
+                var endpointGroupKey = $"{declaringTypeId.Value}:grpc";
+                var endpointGroupId = _stableIdGenerator.Create(new EntityKey("endpoint-group", endpointGroupKey));
+                if (emittedEndpointGroupIds.Add(endpointGroupId))
+                {
+                    AddEntityTriples(
+                        triples,
+                        endpointGroupId,
+                        "endpoint-group",
+                        $"{serviceName} gRPC service",
+                        endpointGroupKey);
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointGroupId),
+                        CorePredicates.EndpointFamily,
+                        new LiteralNode("grpc")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointGroupId),
+                        CorePredicates.RoutePrefix,
+                        new LiteralNode(normalizedRoutePrefix)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointGroupId),
+                        CorePredicates.NormalizedRouteKey,
+                        new LiteralNode(normalizedRoutePrefix)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointGroupId),
+                        CorePredicates.HasDeclaringType,
+                        new EntityNode(declaringTypeId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(repositoryId),
+                        CorePredicates.ContainsEndpointGroup,
+                        new EntityNode(endpointGroupId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(declaringTypeId),
+                        CorePredicates.ContainsEndpointGroup,
+                        new EntityNode(endpointGroupId)));
+
+                    if (hasResolvedServiceType && namespaceIdByTypeId.TryGetValue(declaringTypeId, out var namespaceIdForGroup))
+                    {
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(endpointGroupId),
+                            CorePredicates.HasNamespace,
+                            new EntityNode(namespaceIdForGroup)));
+                    }
+
+                    if (declarationFileId != default)
+                    {
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(declarationFileId),
+                            CorePredicates.DeclaresEndpointGroup,
+                            new EntityNode(endpointGroupId)));
+                    }
+                }
+
+                if (!hasResolvedServiceType || serviceTypeSymbol is null)
+                {
+                    var lineSpan = invocation.GetLocation().GetLineSpan();
+                    var location = $"{relativePath}:{lineSpan.StartLinePosition.Line + 1}:{lineSpan.StartLinePosition.Character + 1}";
+                    var normalizedRouteKey = $"{normalizedRoutePrefix}/unresolved";
+                    var canonicalSignature = $"GRPC {normalizedRouteKey} {location}";
+                    var endpointId = _stableIdGenerator.Create(new EntityKey("endpoint", canonicalSignature));
+                    if (!emittedEndpointIds.Add(endpointId))
+                    {
+                        continue;
+                    }
+
+                    AddEntityTriples(
+                        triples,
+                        endpointId,
+                        "endpoint",
+                        $"GRPC {serviceName}",
+                        canonicalSignature);
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.EndpointKind,
+                        new LiteralNode("grpc-service-unresolved")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.EndpointFamily,
+                        new LiteralNode("grpc")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.EndpointHttpMethod,
+                        new LiteralNode("GRPC")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.AuthoredRouteText,
+                        new LiteralNode(serviceName)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.NormalizedRouteKey,
+                        new LiteralNode(normalizedRouteKey)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.EndpointConfidence,
+                        new LiteralNode("low")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.ResolutionReason,
+                        new LiteralNode("grpc-service-type-unresolved")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.RuleId,
+                        new LiteralNode("grpc.aspnetcore.mapgrpcservice")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.RuleVersion,
+                        new LiteralNode("1")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.RuleSource,
+                        new LiteralNode("code-defined")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.HasEndpointGroup,
+                        new EntityNode(endpointGroupId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.HasDeclaringType,
+                        new EntityNode(declaringTypeId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(repositoryId),
+                        CorePredicates.ContainsEndpoint,
+                        new EntityNode(endpointId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(declaringTypeId),
+                        CorePredicates.ContainsEndpoint,
+                        new EntityNode(endpointId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointGroupId),
+                        CorePredicates.ContainsEndpoint,
+                        new EntityNode(endpointId)));
+
+                    if (declarationFileId != default)
+                    {
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(declarationFileId),
+                            CorePredicates.DeclaresEndpoint,
+                            new EntityNode(endpointId)));
+                    }
+
+                    diagnostics.Add(new IngestionDiagnostic(
+                        "endpoint:grpc:service-type-unresolved",
+                        $"gRPC service type '{serviceName}' could not be resolved for '{relativePath}'."));
+                    continue;
+                }
+
+                var grpcMethods = serviceTypeSymbol.GetMembers()
+                    .OfType<IMethodSymbol>()
+                    .Where(methodSymbol =>
+                        methodSymbol.MethodKind == MethodKind.Ordinary
+                        && !methodSymbol.IsStatic
+                        && methodSymbol.DeclaredAccessibility == Accessibility.Public)
+                    .OrderBy(methodSymbol => methodSymbol.Name, StringComparer.Ordinal)
+                    .ToArray();
+
+                if (grpcMethods.Length == 0)
+                {
+                    var normalizedRouteKey = $"{normalizedRoutePrefix}/unresolved";
+                    var canonicalSignature = $"GRPC {normalizedRouteKey} {declaringTypeId.Value}";
+                    var endpointId = _stableIdGenerator.Create(new EntityKey("endpoint", canonicalSignature));
+                    if (!emittedEndpointIds.Add(endpointId))
+                    {
+                        continue;
+                    }
+
+                    AddEntityTriples(
+                        triples,
+                        endpointId,
+                        "endpoint",
+                        $"GRPC {serviceName}",
+                        canonicalSignature);
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.EndpointKind,
+                        new LiteralNode("grpc-service-partial")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.EndpointFamily,
+                        new LiteralNode("grpc")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.EndpointHttpMethod,
+                        new LiteralNode("GRPC")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.AuthoredRouteText,
+                        new LiteralNode(serviceName)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.NormalizedRouteKey,
+                        new LiteralNode(normalizedRouteKey)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.EndpointConfidence,
+                        new LiteralNode("medium")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.ResolutionReason,
+                        new LiteralNode("grpc-service-methods-unresolved")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.RuleId,
+                        new LiteralNode("grpc.aspnetcore.mapgrpcservice")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.RuleVersion,
+                        new LiteralNode("1")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.RuleSource,
+                        new LiteralNode("code-defined")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.HasEndpointGroup,
+                        new EntityNode(endpointGroupId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.HasDeclaringType,
+                        new EntityNode(declaringTypeId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(repositoryId),
+                        CorePredicates.ContainsEndpoint,
+                        new EntityNode(endpointId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(declaringTypeId),
+                        CorePredicates.ContainsEndpoint,
+                        new EntityNode(endpointId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointGroupId),
+                        CorePredicates.ContainsEndpoint,
+                        new EntityNode(endpointId)));
+
+                    if (namespaceIdByTypeId.TryGetValue(declaringTypeId, out var namespaceIdForEndpoint))
+                    {
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(endpointId),
+                            CorePredicates.HasNamespace,
+                            new EntityNode(namespaceIdForEndpoint)));
+                    }
+
+                    if (declarationFileId != default)
+                    {
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(declarationFileId),
+                            CorePredicates.DeclaresEndpoint,
+                            new EntityNode(endpointId)));
+                    }
+
+                    diagnostics.Add(new IngestionDiagnostic(
+                        "endpoint:grpc:service-methods-unresolved",
+                        $"gRPC service '{serviceName}' has no resolvable public methods."));
+                    continue;
+                }
+
+                foreach (var grpcMethod in grpcMethods)
+                {
+                    var methodId = grpcMethod.Locations
+                        .Where(location => location.IsInSource)
+                        .Select(location => ResolveSourceMethodId(location, methodIdByDeclarationLocation))
+                        .FirstOrDefault(resolvedMethodId => resolvedMethodId != default);
+                    var methodName = grpcMethod.Name;
+                    var methodKey = SanitizeRouteKeyToken(methodName);
+                    var normalizedRouteKey = $"{normalizedRoutePrefix}/{methodKey}";
+                    var canonicalSignature = $"GRPC {normalizedRouteKey} {declaringTypeId.Value}:{methodName}";
+                    var endpointId = _stableIdGenerator.Create(new EntityKey("endpoint", canonicalSignature));
+                    if (!emittedEndpointIds.Add(endpointId))
+                    {
+                        continue;
+                    }
+
+                    AddEntityTriples(
+                        triples,
+                        endpointId,
+                        "endpoint",
+                        $"GRPC {serviceName}.{methodName}",
+                        canonicalSignature);
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.EndpointKind,
+                        new LiteralNode("grpc-service-method")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.EndpointFamily,
+                        new LiteralNode("grpc")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.EndpointHttpMethod,
+                        new LiteralNode("GRPC")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.AuthoredRouteText,
+                        new LiteralNode($"{serviceName}/{methodName}")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.NormalizedRouteKey,
+                        new LiteralNode(normalizedRouteKey)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.EndpointConfidence,
+                        new LiteralNode("high")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.RuleId,
+                        new LiteralNode("grpc.aspnetcore.mapgrpcservice")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.RuleVersion,
+                        new LiteralNode("1")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.RuleSource,
+                        new LiteralNode("code-defined")));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.HasEndpointGroup,
+                        new EntityNode(endpointGroupId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.HasDeclaringType,
+                        new EntityNode(declaringTypeId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(repositoryId),
+                        CorePredicates.ContainsEndpoint,
+                        new EntityNode(endpointId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(declaringTypeId),
+                        CorePredicates.ContainsEndpoint,
+                        new EntityNode(endpointId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointGroupId),
+                        CorePredicates.ContainsEndpoint,
+                        new EntityNode(endpointId)));
+
+                    if (methodId != default)
+                    {
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(endpointId),
+                            CorePredicates.HasDeclaringMethod,
+                            new EntityNode(methodId)));
+                    }
+                    else
+                    {
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(endpointId),
+                            CorePredicates.ResolutionReason,
+                            new LiteralNode("grpc-service-method-unresolved")));
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(endpointId),
+                            CorePredicates.EndpointConfidence,
+                            new LiteralNode("medium")));
+                    }
+
+                    if (namespaceIdByTypeId.TryGetValue(declaringTypeId, out var namespaceIdForEndpoint))
+                    {
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(endpointId),
+                            CorePredicates.HasNamespace,
+                            new EntityNode(namespaceIdForEndpoint)));
+                    }
+
+                    if (declarationFileId != default)
+                    {
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(declarationFileId),
+                            CorePredicates.DeclaresEndpoint,
+                            new EntityNode(endpointId)));
+                    }
+                }
+            }
+        }
+    }
+
+    private static bool TryExtractMapGrpcService(
+        InvocationExpressionSyntax invocation,
+        out TypeSyntax serviceTypeSyntax)
+    {
+        serviceTypeSyntax = null!;
+
+        if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
+        {
+            return false;
+        }
+
+        if (memberAccess.Name is not GenericNameSyntax genericName
+            || !string.Equals(genericName.Identifier.ValueText, "MapGrpcService", StringComparison.Ordinal)
+            || genericName.TypeArgumentList.Arguments.Count != 1)
+        {
+            return false;
+        }
+
+        serviceTypeSyntax = genericName.TypeArgumentList.Arguments[0];
+        return true;
     }
 
     private void CaptureMinimalApiEndpoints(
