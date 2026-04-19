@@ -1734,7 +1734,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
             var relativePath = syntaxTree.FilePath;
             fileIdByRelativePath.TryGetValue(relativePath, out var declarationFileId);
-            var groupRoutePrefixByIdentifier = new Dictionary<string, string>(StringComparer.Ordinal);
+            var groupRoutePrefixBySymbol = new Dictionary<ISymbol, string>(SymbolEqualityComparer.Default);
 
             foreach (var localDeclaration in root.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
             {
@@ -1750,9 +1750,13 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                         continue;
                     }
 
-                    var parentPrefix = ResolveMinimalApiRoutePrefix(receiverExpression, groupRoutePrefixByIdentifier);
+                    var parentPrefix = ResolveMinimalApiRoutePrefix(receiverExpression, groupRoutePrefixBySymbol, semanticModel);
                     var composedPrefix = CombineRouteTemplates(parentPrefix, routePrefix);
-                    groupRoutePrefixByIdentifier[variable.Identifier.ValueText] = composedPrefix;
+                    var variableSymbol = semanticModel.GetDeclaredSymbol(variable) as ILocalSymbol;
+                    if (variableSymbol is not null)
+                    {
+                        groupRoutePrefixBySymbol[variableSymbol] = composedPrefix;
+                    }
                 }
             }
 
@@ -1763,7 +1767,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     continue;
                 }
 
-                var routePrefix = ResolveMinimalApiRoutePrefix(receiverExpression, groupRoutePrefixByIdentifier);
+                var routePrefix = ResolveMinimalApiRoutePrefix(receiverExpression, groupRoutePrefixBySymbol, semanticModel);
                 var authoredRoute = CombineRouteTemplates(routePrefix, routeSuffix);
                 var normalizedRoute = NormalizeRouteKey(authoredRoute);
                 if (string.IsNullOrWhiteSpace(normalizedRoute))
@@ -1970,17 +1974,19 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
     private static string ResolveMinimalApiRoutePrefix(
         ExpressionSyntax expression,
-        IReadOnlyDictionary<string, string> groupRoutePrefixByIdentifier)
+        IReadOnlyDictionary<ISymbol, string> groupRoutePrefixBySymbol,
+        SemanticModel semanticModel)
     {
         switch (expression)
         {
             case IdentifierNameSyntax identifier:
-                return groupRoutePrefixByIdentifier.TryGetValue(identifier.Identifier.ValueText, out var prefix)
+                var symbol = semanticModel.GetSymbolInfo(identifier).Symbol;
+                return symbol is not null && groupRoutePrefixBySymbol.TryGetValue(symbol, out var prefix)
                     ? prefix
                     : string.Empty;
             case InvocationExpressionSyntax invocation when TryExtractMapGroup(invocation, out var parent, out var routePrefix):
                 return CombineRouteTemplates(
-                    ResolveMinimalApiRoutePrefix(parent, groupRoutePrefixByIdentifier),
+                    ResolveMinimalApiRoutePrefix(parent, groupRoutePrefixBySymbol, semanticModel),
                     routePrefix);
             default:
                 return string.Empty;

@@ -57,6 +57,36 @@ public sealed class MinimalApiEndpointVerticalSliceTests
         Assert.Contains("- Endpoint Group: [[endpoints/minimal-api/groups/", endpointPage.Markdown, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Query_AndRender_AreDeterministic_ForMinimalApiEndpoints()
+    {
+        var fixture = await MinimalApiFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+
+        var firstAnalysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var secondAnalysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var firstModel = new ProjectStructureQueryService(firstAnalysis.Triples).GetModel(firstAnalysis.RepositoryId);
+        var secondModel = new ProjectStructureQueryService(secondAnalysis.Triples).GetModel(secondAnalysis.RepositoryId);
+
+        Assert.Equal(
+            firstModel.Endpoints.Endpoints.Select(x => x.Id.Value).ToArray(),
+            secondModel.Endpoints.Endpoints.Select(x => x.Id.Value).ToArray());
+        Assert.Equal(
+            firstModel.Endpoints.Groups.Select(x => x.Id.Value).ToArray(),
+            secondModel.Endpoints.Groups.Select(x => x.Id.Value).ToArray());
+
+        var firstPages = new ProjectStructureWikiRenderer().Render(firstModel)
+            .Where(x => x.RelativePath.StartsWith("endpoints/minimal-api/", StringComparison.Ordinal))
+            .Select(x => (x.RelativePath, x.Markdown))
+            .ToArray();
+        var secondPages = new ProjectStructureWikiRenderer().Render(secondModel)
+            .Where(x => x.RelativePath.StartsWith("endpoints/minimal-api/", StringComparison.Ordinal))
+            .Select(x => (x.RelativePath, x.Markdown))
+            .ToArray();
+
+        Assert.Equal(firstPages, secondPages);
+    }
+
     private sealed class MinimalApiFixture
     {
         private MinimalApiFixture(string repositoryPath)

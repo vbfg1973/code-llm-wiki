@@ -370,6 +370,10 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine($"- {resolver.ToMarkdownLink("hotspots/projects.md", "Projects")}");
         sb.AppendLine($"- {resolver.ToMarkdownLink("hotspots/repository.md", "Repository")}");
         sb.AppendLine();
+        sb.AppendLine("## Endpoints");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("index/repository-index.md", "Endpoint Groups", "endpoint-groups")}");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("index/repository-index.md", "Endpoints", "endpoints")}");
+        sb.AppendLine();
         sb.AppendLine("## Solutions");
 
         foreach (var solution in model.Solutions.OrderBy(x => x.Path, StringComparer.Ordinal))
@@ -2715,6 +2719,37 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                         : "<unknown-type>";
                     return new IndexRow(FormatMethodLinkAlias(x), $"{declaringTypePath}::{x.Signature}", x.Id.Value, resolver.ToMarkdownLink(x.Id, FormatMethodLinkAlias(x)));
                 })
+                .ToArray());
+
+        AppendTable(
+            sb,
+            "Endpoint Groups",
+            model.Endpoints.Groups
+                .OrderBy(x => x.Family, StringComparer.Ordinal)
+                .ThenBy(x => x.NormalizedRoutePrefix, StringComparer.Ordinal)
+                .ThenBy(x => x.CanonicalKey, StringComparer.Ordinal)
+                .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
+                .Select(x => new IndexRow(
+                    $"{x.Family}:{x.Name}",
+                    string.IsNullOrWhiteSpace(x.NormalizedRoutePrefix) ? x.CanonicalKey : x.NormalizedRoutePrefix,
+                    x.Id.Value,
+                    resolver.ToMarkdownLink(x.Id, x.Name)))
+                .ToArray());
+
+        AppendTable(
+            sb,
+            "Endpoints",
+            model.Endpoints.Endpoints
+                .OrderBy(x => x.Family, StringComparer.Ordinal)
+                .ThenBy(x => x.NormalizedRouteKey, StringComparer.Ordinal)
+                .ThenBy(x => x.HttpMethod, StringComparer.Ordinal)
+                .ThenBy(x => x.CanonicalSignature, StringComparer.Ordinal)
+                .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
+                .Select(x => new IndexRow(
+                    $"{x.Family}:{x.HttpMethod} {x.NormalizedRouteKey}",
+                    x.CanonicalSignature,
+                    x.Id.Value,
+                    resolver.ToMarkdownLink(x.Id, x.Name)))
                 .ToArray());
 
         AppendTable(
