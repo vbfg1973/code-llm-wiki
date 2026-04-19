@@ -95,7 +95,8 @@ public sealed class CliApplicationTests
             {
               "ontologyPath": "./ontology/ontology.v1.yaml",
               "max_merge_entries_per_file": 7,
-              "metric_computation_max_degree_of_parallelism": 5
+              "metric_computation_max_degree_of_parallelism": 5,
+              "semantic_call_max_degree_of_parallelism": 2
             }
             """);
 
@@ -110,13 +111,16 @@ public sealed class CliApplicationTests
                 "--config", configPath,
                 "--max-merge-entries-per-file", "3",
                 "--metric-mdop", "4",
+                "--semantic-mdop", "6",
             ],
             CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.NotNull(publisher.LastRequest);
+        Assert.NotNull(runner.LastRequest);
         Assert.Equal(3, publisher.LastRequest!.MaxMergeEntriesPerFile);
         Assert.Equal(4, publisher.LastRequest.MetricComputationMaxDegreeOfParallelism);
+        Assert.Equal(6, runner.LastRequest!.SemanticCallGraphMaxDegreeOfParallelism);
     }
 
     [Fact]

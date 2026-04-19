@@ -190,6 +190,31 @@ public sealed class IngestionRunnerTests
         Assert.True(result.QualityGate!.Passed);
     }
 
+    [Fact]
+    public async Task RunAsync_PassesSemanticCallGraphMdop_IntoExecutionContext()
+    {
+        var pipeline = new CapturingPipeline();
+        var runner = new IngestionRunner(new OntologyLoader(), pipeline);
+        var ontologyPath = WriteTempFile(
+            """
+            version: "1.0.0"
+            predicates:
+              - id: "core:contains"
+            """);
+
+        var request = new IngestionRunRequest(
+            RepositoryPath: ".",
+            ConfigPath: null,
+            OntologyPath: ontologyPath,
+            AllowPartialSuccess: false,
+            SemanticCallGraphMaxDegreeOfParallelism: 7);
+
+        _ = await runner.RunAsync(request, CancellationToken.None);
+
+        Assert.NotNull(pipeline.LastContext);
+        Assert.Equal(7, pipeline.LastContext!.SemanticCallGraphMaxDegreeOfParallelism);
+    }
+
     private static string WriteTempFile(string content)
     {
         var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.yaml");
@@ -218,10 +243,12 @@ public sealed class IngestionRunnerTests
         }
 
         public bool WasCalled { get; private set; }
+        public IngestionExecutionContext? LastContext { get; private set; }
 
         public Task<IngestionPipelineResult> ExecuteAsync(IngestionExecutionContext context, CancellationToken cancellationToken)
         {
             WasCalled = true;
+            LastContext = context;
             return Task.FromResult(new IngestionPipelineResult(_triples, _diagnostics));
         }
     }

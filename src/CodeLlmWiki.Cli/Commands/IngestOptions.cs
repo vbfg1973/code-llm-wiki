@@ -25,4 +25,7 @@ public sealed class IngestOptions
 
     [Option('d', "metric-mdop", Required = false, HelpText = "Max degree of parallelism for metric/rollup computation.")]
     public int? MetricComputationMaxDegreeOfParallelism { get; init; }
+
+    [Option('s', "semantic-mdop", Required = false, HelpText = "Max degree of parallelism for semantic call graph project processing.")]
+    public int? SemanticCallGraphMaxDegreeOfParallelism { get; init; }
 }

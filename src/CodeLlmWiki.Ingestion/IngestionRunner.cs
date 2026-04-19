@@ -36,7 +36,11 @@ public sealed class IngestionRunner : IIngestionRunner
         var fullRepositoryPath = Path.GetFullPath(request.RepositoryPath);
         var repositoryId = _stableIdGenerator.Create(new EntityKey("repository", fullRepositoryPath));
 
-        var context = new IngestionExecutionContext(fullRepositoryPath, repositoryId, ontology.Definition);
+        var context = new IngestionExecutionContext(
+            RepositoryPath: fullRepositoryPath,
+            RepositoryId: repositoryId,
+            Ontology: ontology.Definition,
+            SemanticCallGraphMaxDegreeOfParallelism: request.SemanticCallGraphMaxDegreeOfParallelism);
 
         var pipelineResult = await _pipeline.ExecuteAsync(context, cancellationToken);
         var diagnostics = pipelineResult.Diagnostics.ToArray();

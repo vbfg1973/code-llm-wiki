@@ -58,12 +58,15 @@ public sealed class CliApplication
             ?? config.MaxMergeEntriesPerFile;
         var metricComputationMdop = options.MetricComputationMaxDegreeOfParallelism
             ?? config.MetricComputationMaxDegreeOfParallelism;
+        var semanticCallGraphMdop = options.SemanticCallGraphMaxDegreeOfParallelism
+            ?? config.SemanticCallGraphMaxDegreeOfParallelism;
 
         var request = new IngestionRunRequest(
             RepositoryPath: options.RepositoryPath,
             ConfigPath: options.ConfigPath,
             OntologyPath: ontologyPath,
-            AllowPartialSuccess: allowPartial);
+            AllowPartialSuccess: allowPartial,
+            SemanticCallGraphMaxDegreeOfParallelism: semanticCallGraphMdop);
 
         var startedAtUtc = DateTimeOffset.UtcNow;
         var result = await _runner.RunAsync(request, cancellationToken);
