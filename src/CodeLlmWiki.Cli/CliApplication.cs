@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using CodeLlmWiki.Cli.Commands;
 using CodeLlmWiki.Cli.Config;
@@ -87,6 +88,16 @@ public sealed class CliApplication
             }
 
             return 1;
+        }
+
+        if (result.Status == IngestionRunStatus.FailedQualityGate && result.QualityGate is { } qualityGate)
+        {
+            Console.Error.WriteLine(
+                "Quality gate failed: unresolved-call-ratio "
+                + $"{qualityGate.UnresolvedCallRatio.ToString("0.####", CultureInfo.InvariantCulture)} "
+                + "exceeds threshold "
+                + $"{qualityGate.Threshold.ToString("0.####", CultureInfo.InvariantCulture)} "
+                + $"(unresolved={qualityGate.UnresolvedCallFailures}, total={qualityGate.TotalCallResolutionAttempts}).");
         }
 
         return result.ExitCode;

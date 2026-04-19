@@ -5,6 +5,7 @@ using CodeLlmWiki.Cli.Features.Ingest;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Ingestion;
 using CodeLlmWiki.Ingestion.ProjectStructure;
+using CodeLlmWiki.Ingestion.Quality;
 using CodeLlmWiki.Ingestion.Telemetry;
 
 namespace CodeLlmWiki.Cli.Tests;
@@ -129,6 +130,57 @@ public sealed class IngestionArtifactPublisherTests
         Assert.True(File.Exists(markerPath));
         Assert.True(File.Exists(result.ManifestPath));
         Assert.True(File.Exists(Path.Combine(result.RunDirectory, "graph", "graph.graphml")));
+    }
+
+    [Fact]
+    public async Task PublishAsync_DoesNotPromoteLatest_WhenQualityGateFailed_AndEmitsQualityEvidence()
+    {
+        var outputRoot = Path.Combine(Path.GetTempPath(), $"codellmwiki-artifacts-quality-failed-{Guid.NewGuid():N}");
+        var latestDirectory = Path.Combine(outputRoot, "latest");
+        Directory.CreateDirectory(latestDirectory);
+        var markerPath = Path.Combine(latestDirectory, "marker.txt");
+        await File.WriteAllTextAsync(markerPath, "preserve");
+
+        var runResult = new IngestionRunResult(
+            Status: IngestionRunStatus.FailedQualityGate,
+            ExitCode: 3,
+            Diagnostics:
+            [
+                new IngestionDiagnostic("method:call:resolution:failed", "failed"),
+                new IngestionDiagnostic("method:call:internal-target-unmatched", "failed"),
+            ],
+            RepositoryId: default,
+            Triples: [],
+            QualityGate: new UnresolvedCallRatioQualityGateEvidence(
+                GateId: "quality:unresolved-call-ratio",
+                UnresolvedCallFailures: 2,
+                TotalCallResolutionAttempts: 4,
+                UnresolvedCallRatio: 0.5d,
+                Threshold: 0.25d,
+                Passed: false));
+
+        var publisher = new IngestionArtifactPublisher();
+        var result = await publisher.PublishAsync(
+            new IngestionArtifactPublishRequest(
+                RepositoryPath: ".",
+                OutputRootPath: outputRoot,
+                StartedAtUtc: new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                CompletedAtUtc: new DateTimeOffset(2026, 1, 1, 0, 0, 5, TimeSpan.Zero),
+                RunResult: runResult),
+            CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.False(result.LatestPromoted);
+        Assert.True(File.Exists(markerPath));
+
+        var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(result.ManifestPath));
+        var qualityGate = manifest.RootElement.GetProperty("QualityGate");
+        Assert.Equal("quality:unresolved-call-ratio", qualityGate.GetProperty("GateId").GetString());
+        Assert.False(qualityGate.GetProperty("Passed").GetBoolean());
+        Assert.Equal(2, qualityGate.GetProperty("UnresolvedCallFailures").GetInt32());
+        Assert.Equal(4, qualityGate.GetProperty("TotalCallResolutionAttempts").GetInt32());
+        Assert.Equal(0.5d, qualityGate.GetProperty("UnresolvedCallRatio").GetDouble(), 8);
+        Assert.Equal(0.25d, qualityGate.GetProperty("Threshold").GetDouble(), 8);
     }
 
     [Fact]

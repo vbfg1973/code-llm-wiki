@@ -1,4 +1,6 @@
+using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
+using CodeLlmWiki.Ingestion.Quality;
 using CodeLlmWiki.Ontology;
 
 namespace CodeLlmWiki.Ingestion;
@@ -8,15 +10,18 @@ public sealed class IngestionRunner : IIngestionRunner
     private readonly IOntologyLoader _ontologyLoader;
     private readonly IIngestionPipeline _pipeline;
     private readonly IStableIdGenerator _stableIdGenerator;
+    private readonly IUnresolvedCallRatioQualityGateEvaluator _qualityGateEvaluator;
 
     public IngestionRunner(
         IOntologyLoader ontologyLoader,
         IIngestionPipeline pipeline,
-        IStableIdGenerator? stableIdGenerator = null)
+        IStableIdGenerator? stableIdGenerator = null,
+        IUnresolvedCallRatioQualityGateEvaluator? qualityGateEvaluator = null)
     {
         _ontologyLoader = ontologyLoader;
         _pipeline = pipeline;
         _stableIdGenerator = stableIdGenerator ?? new StableIdGenerator();
+        _qualityGateEvaluator = qualityGateEvaluator ?? new UnresolvedCallRatioQualityGateEvaluator();
     }
 
     public async Task<IngestionRunResult> RunAsync(IngestionRunRequest request, CancellationToken cancellationToken)
@@ -35,11 +40,11 @@ public sealed class IngestionRunner : IIngestionRunner
 
         var pipelineResult = await _pipeline.ExecuteAsync(context, cancellationToken);
         var diagnostics = pipelineResult.Diagnostics.ToArray();
-        var status = diagnostics.Length == 0
+        var baseStatus = diagnostics.Length == 0
             ? IngestionRunStatus.Succeeded
             : IngestionRunStatus.SucceededWithDiagnostics;
 
-        var exitCode = status switch
+        var baseExitCode = baseStatus switch
         {
             IngestionRunStatus.Succeeded => 0,
             IngestionRunStatus.SucceededWithDiagnostics when request.AllowPartialSuccess => 0,
@@ -47,6 +52,26 @@ public sealed class IngestionRunner : IIngestionRunner
             _ => 1,
         };
 
-        return new IngestionRunResult(status, exitCode, diagnostics, repositoryId, pipelineResult.Triples);
+        var qualityGate = _qualityGateEvaluator.Evaluate(
+            new UnresolvedCallRatioQualityGateRequest(
+                Diagnostics: diagnostics,
+                TotalCallResolutionAttempts: CountCallResolutionAttempts(pipelineResult.Triples)));
+        if (qualityGate.Passed)
+        {
+            return new IngestionRunResult(baseStatus, baseExitCode, diagnostics, repositoryId, pipelineResult.Triples, qualityGate.Evidence);
+        }
+
+        return new IngestionRunResult(
+            Status: IngestionRunStatus.FailedQualityGate,
+            ExitCode: 3,
+            Diagnostics: diagnostics,
+            RepositoryId: repositoryId,
+            Triples: pipelineResult.Triples,
+            QualityGate: qualityGate.Evidence);
+    }
+
+    private static int CountCallResolutionAttempts(IReadOnlyList<SemanticTriple> triples)
+    {
+        return triples.Count(x => x.Predicate == CorePredicates.Calls);
     }
 }

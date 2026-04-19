@@ -114,7 +114,7 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
                     });
             }
 
-            var shouldPromoteLatest = request.RunResult.Status != IngestionRunStatus.Failed;
+            var shouldPromoteLatest = request.RunResult.Status is not IngestionRunStatus.Failed and not IngestionRunStatus.FailedQualityGate;
             var manifest = BuildManifest(
                 request,
                 runId,
@@ -207,7 +207,16 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
                 GraphMl: graphMlPath is null ? null : "graph/graph.graphml",
                 Manifest: "manifest.json"),
             LatestPromoted: latestPromoted,
-            Metrics: metricsSummary);
+            Metrics: metricsSummary,
+            QualityGate: request.RunResult.QualityGate is null
+                ? null
+                : new RunQualityGateSummary(
+                    GateId: request.RunResult.QualityGate.GateId,
+                    Passed: request.RunResult.QualityGate.Passed,
+                    UnresolvedCallFailures: request.RunResult.QualityGate.UnresolvedCallFailures,
+                    TotalCallResolutionAttempts: request.RunResult.QualityGate.TotalCallResolutionAttempts,
+                    UnresolvedCallRatio: request.RunResult.QualityGate.UnresolvedCallRatio,
+                    Threshold: request.RunResult.QualityGate.Threshold));
     }
 
     private static RunMetricsSummary BuildMetricsSummary(ProjectStructureWikiModel model)
@@ -373,7 +382,8 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
         IReadOnlyList<DiagnosticSummary> DiagnosticsSummary,
         ArtifactReferences Artifacts,
         bool LatestPromoted,
-        RunMetricsSummary? Metrics);
+        RunMetricsSummary? Metrics,
+        RunQualityGateSummary? QualityGate);
 
     private sealed record ArtifactReferences(string? Wiki, string? GraphMl, string Manifest);
 
@@ -409,4 +419,12 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
         int InsufficientNamespaceScopeCount,
         int InsufficientProjectScopeCount,
         bool RepositoryScopeInsufficient);
+
+    private sealed record RunQualityGateSummary(
+        string GateId,
+        bool Passed,
+        int UnresolvedCallFailures,
+        int TotalCallResolutionAttempts,
+        double UnresolvedCallRatio,
+        double Threshold);
 }
