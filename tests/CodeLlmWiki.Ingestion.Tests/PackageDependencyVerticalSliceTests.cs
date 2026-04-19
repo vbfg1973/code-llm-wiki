@@ -193,6 +193,23 @@ public sealed class PackageDependencyVerticalSliceTests
     }
 
     [Fact]
+    public async Task Render_MethodCalls_LinkExternalTargets_ThroughPackageDeepAnchors_WhenAttributionIsResolvable()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var pages = new ProjectStructureWikiRenderer().Render(model);
+        var serializeMethodPage = pages.Single(page =>
+            page.RelativePath.StartsWith("methods/App/WithAssets/BodyUsageFacade/", StringComparison.Ordinal)
+            && page.Markdown.Contains("method_name: Serialize", StringComparison.Ordinal));
+
+        Assert.Contains("## Calls", serializeMethodPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("(packages/Newtonsoft.Json.md#ext-newtonsoft-json-linq-jtoken-", serializeMethodPage.Markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Query_UsesProjectScopedAttribution_InMixedVersionRepository()
     {
         var fixture = await PackageDependencyFixture.CreateAsync();

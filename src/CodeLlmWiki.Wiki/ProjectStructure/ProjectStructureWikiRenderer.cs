@@ -215,6 +215,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             RenderMethodPage(
                 model.Repository.Id.Value,
                 method,
+                orderedPackages,
                 typeById,
                 methodById,
                 memberById,
@@ -1206,6 +1207,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         EntityId sourceMethodId,
         IReadOnlyDictionary<EntityId, IReadOnlyList<MethodRelationNode>> callRelationsBySourceMethodId,
         IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        IReadOnlyList<PackageNode> packages,
         WikiPathResolver resolver)
     {
         if (!callRelationsBySourceMethodId.TryGetValue(sourceMethodId, out var callRelations) || callRelations.Count == 0)
@@ -1237,12 +1239,105 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     DeclarationResolutionStatus.Unresolved => $" (unresolved{unresolvedReasonSuffix})",
                     _ => string.Empty,
                 };
-                sb.AppendLine($"- {relation.ExternalTargetType.DisplayText}{assemblySuffix}{statusSuffix}");
+
+                if (TryResolveExternalTargetPackage(relation, packages, out var package))
+                {
+                    var deepLink = resolver.ToPackageExternalTypeMarkdownLink(
+                        package.Id,
+                        package.CanonicalKey,
+                        relation.ExternalTargetType.DisplayText,
+                        relation.ExternalTargetType.DisplayText);
+                    sb.AppendLine($"- {deepLink}{assemblySuffix}{statusSuffix}");
+                }
+                else
+                {
+                    sb.AppendLine($"- {relation.ExternalTargetType.DisplayText}{assemblySuffix}{statusSuffix}");
+                }
                 continue;
             }
 
             sb.AppendLine("- unresolved target");
         }
+    }
+
+    private static bool TryResolveExternalTargetPackage(
+        MethodRelationNode relation,
+        IReadOnlyList<PackageNode> packages,
+        out PackageNode package)
+    {
+        var assemblyName = relation.ExternalAssemblyName;
+        var externalTypeName = relation.ExternalTargetType?.DisplayText ?? string.Empty;
+
+        var matches = packages
+            .Select(candidate => new
+            {
+                Package = candidate,
+                Score = GetExternalTargetPackageMatchScore(candidate, assemblyName, externalTypeName),
+            })
+            .Where(candidate => candidate.Score > 0)
+            .OrderByDescending(candidate => candidate.Score)
+            .ThenByDescending(candidate => candidate.Package.Name.Length)
+            .ThenBy(candidate => candidate.Package.Name, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Package.Id.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        if (matches.Length == 0)
+        {
+            package = null!;
+            return false;
+        }
+
+        var topScore = matches[0].Score;
+        var topMatches = matches
+            .Where(candidate => candidate.Score == topScore)
+            .ToArray();
+
+        if (topMatches.Length == 1)
+        {
+            package = topMatches[0].Package;
+            return true;
+        }
+
+        package = null!;
+        return false;
+    }
+
+    private static int GetExternalTargetPackageMatchScore(PackageNode package, string? assemblyName, string externalTypeName)
+    {
+        if (!string.IsNullOrWhiteSpace(assemblyName))
+        {
+            var normalizedAssembly = assemblyName.Split(',', 2, StringSplitOptions.TrimEntries)[0]
+                .Trim()
+                .TrimEnd()
+                .TrimEnd('.');
+            if (normalizedAssembly.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedAssembly = normalizedAssembly[..^4];
+            }
+
+            if (normalizedAssembly.Equals(package.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return 3000 + package.Name.Length;
+            }
+
+            if (normalizedAssembly.StartsWith(package.Name + ".", StringComparison.OrdinalIgnoreCase))
+            {
+                return 2000 + package.Name.Length;
+            }
+
+            if (package.Name.StartsWith(normalizedAssembly + ".", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1000 + package.Name.Length;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(externalTypeName)
+            && externalTypeName.StartsWith(package.Name + ".", StringComparison.OrdinalIgnoreCase))
+        {
+            return 500 + package.Name.Length;
+        }
+
+        return 0;
     }
 
     private static string FormatMethodLinkAlias(MethodDeclarationNode method)
@@ -1287,6 +1382,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
     private static WikiPage RenderMethodPage(
         string repositoryId,
         MethodDeclarationNode methodDeclaration,
+        IReadOnlyList<PackageNode> packages,
         IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
         IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
         IReadOnlyDictionary<EntityId, MemberDeclarationNode> memberById,
@@ -1366,6 +1462,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             methodDeclaration.Id,
             callRelationsBySourceMethodId,
             methodById,
+            packages,
             resolver);
 
         sb.AppendLine();
