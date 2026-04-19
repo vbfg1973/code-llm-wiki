@@ -3,7 +3,8 @@
 > Parent PRD: [PRD 008](./008-phase-8-llm-and-user-guidance-documentation.prd.md)
 
 - Issue: [#98](https://github.com/vbfg1973/code-llm-wiki/issues/98)
-- [ ] Status: open
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -17,10 +18,10 @@ Publish first-class snapshot guidance pages for human and LLM consumers at stabl
 
 ## Acceptance criteria
 
-- [ ] Both guidance pages are emitted in every generated wiki snapshot at fixed paths.
-- [ ] Required minimal front matter is present, including `guidance_kind` and branch context fields.
-- [ ] Repository and repository-index pages each include a compact `Guidance` section linking both guidance pages.
-- [ ] Deterministic output ordering and rerun stability are preserved.
+- [x] Both guidance pages are emitted in every generated wiki snapshot at fixed paths.
+- [x] Required minimal front matter is present, including `guidance_kind` and branch context fields.
+- [x] Repository and repository-index pages each include a compact `Guidance` section linking both guidance pages.
+- [x] Deterministic output ordering and rerun stability are preserved.
 
 ## Blocked by
 

@@ -2,6 +2,13 @@
 
 > Source PRD: [PRD 008](/home/vbfg/dev/dotnet-llm-wiki/plans/008/008-phase-8-llm-and-user-guidance-documentation.prd.md)
 
+## Execution checklist
+
+- [x] Phase 1: Publish Guidance Pages and Entry Links — completion date: 2026-04-19
+- [x] Phase 2: Implement Normative LLM Contract and Guardrails — completion date: 2026-04-19
+- [x] Phase 3: Add Named Recipes and Capability Matrix — completion date: 2026-04-19
+- [x] Phase 4: Harden Contract Invariants and Determinism — completion date: 2026-04-19
+
 ## Architectural decisions
 
 Durable decisions that apply across all phases:
@@ -28,10 +35,10 @@ Publish human and LLM guidance pages as first-class wiki artifacts in each snaps
 
 ### Acceptance criteria
 
-- [ ] Both guidance pages are generated in every wiki snapshot at fixed paths.
-- [ ] Guidance pages carry required minimal front matter and branch context in front matter only.
-- [ ] Repository and repository-index pages each include a compact `Guidance` section linking both pages.
-- [ ] Deterministic output behavior is preserved across reruns.
+- [x] Both guidance pages are generated in every wiki snapshot at fixed paths.
+- [x] Guidance pages carry required minimal front matter and branch context in front matter only.
+- [x] Repository and repository-index pages each include a compact `Guidance` section linking both pages.
+- [x] Deterministic output behavior is preserved across reruns.
 
 ---
 
@@ -45,10 +52,10 @@ Populate the LLM guidance page with normative operating rules, explicit link/evi
 
 ### Acceptance criteria
 
-- [ ] LLM page contains normative policy sections using explicit `MUST`/`SHOULD` language.
-- [ ] Required response-template policy is present and unambiguous.
-- [ ] Link-style and evidence policies are explicit and consistent with existing parse-safety decisions.
-- [ ] Guardrails and prohibited behaviors are explicitly documented.
+- [x] LLM page contains normative policy sections using explicit `MUST`/`SHOULD` language.
+- [x] Required response-template policy is present and unambiguous.
+- [x] Link-style and evidence policies are explicit and consistent with existing parse-safety decisions.
+- [x] Guardrails and prohibited behaviors are explicitly documented.
 
 ---
 
@@ -62,10 +69,10 @@ Add a bounded set of named query recipes with stable anchors and concise step gu
 
 ### Acceptance criteria
 
-- [ ] Named recipes are present, bounded, and task-oriented.
-- [ ] Recipe entry points have explicit stable anchors suitable for deep linking.
-- [ ] Capability matrix clearly distinguishes available and deferred capabilities.
-- [ ] Capability matrix references backlog truth for traceability.
+- [x] Named recipes are present, bounded, and task-oriented.
+- [x] Recipe entry points have explicit stable anchors suitable for deep linking.
+- [x] Capability matrix clearly distinguishes available and deferred capabilities.
+- [x] Capability matrix references backlog truth for traceability.
 
 ---
 
@@ -79,7 +86,7 @@ Introduce and enforce guidance-specific validation and regression tests that loc
 
 ### Acceptance criteria
 
-- [ ] Automated tests enforce guidance page presence and required front matter keys.
-- [ ] Automated tests enforce required anchors/sections and entry links from repository/index pages.
-- [ ] Golden/snapshot coverage reflects intentional guidance additions only.
-- [ ] Repeated runs produce stable guidance outputs with no nondeterministic drift.
+- [x] Automated tests enforce guidance page presence and required front matter keys.
+- [x] Automated tests enforce required anchors/sections and entry links from repository/index pages.
+- [x] Golden/snapshot coverage reflects intentional guidance additions only.
+- [x] Repeated runs produce stable guidance outputs with no nondeterministic drift.

@@ -3,7 +3,8 @@
 > Parent PRD: [PRD 008](./008-phase-8-llm-and-user-guidance-documentation.prd.md)
 
 - Issue: [#99](https://github.com/vbfg1973/code-llm-wiki/issues/99)
-- [ ] Status: open
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -17,10 +18,10 @@ Implement the normative LLM operating contract content: explicit MUST/SHOULD rul
 
 ## Acceptance criteria
 
-- [ ] LLM contract includes explicit normative policy language and required contract sections.
-- [ ] Response template policy (`Summary`, `Evidence Links`, `Gaps/Risks`, `Next Queries`) is explicitly defined.
-- [ ] Evidence and link-style policies are explicit and align to existing parse-safe navigation conventions.
-- [ ] Guardrails/non-goals prevent unsupported claims and noisy output patterns.
+- [x] LLM contract includes explicit normative policy language and required contract sections.
+- [x] Response template policy (`Summary`, `Evidence Links`, `Gaps/Risks`, `Next Queries`) is explicitly defined.
+- [x] Evidence and link-style policies are explicit and align to existing parse-safe navigation conventions.
+- [x] Guardrails/non-goals prevent unsupported claims and noisy output patterns.
 
 ## Blocked by
 

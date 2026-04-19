@@ -3,7 +3,8 @@
 > Parent PRD: [PRD 008](./008-phase-8-llm-and-user-guidance-documentation.prd.md)
 
 - Issue: [#100](https://github.com/vbfg1973/code-llm-wiki/issues/100)
-- [ ] Status: open
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -17,10 +18,10 @@ Add named, bounded query recipes with stable anchors and include a compact capab
 
 ## Acceptance criteria
 
-- [ ] A bounded set of named recipes is present and task-oriented.
-- [ ] Key recipe sections expose stable explicit anchors for deep linking.
-- [ ] Capability matrix clearly separates available vs deferred capabilities.
-- [ ] Capability matrix links to backlog identifiers/pages for traceability.
+- [x] A bounded set of named recipes is present and task-oriented.
+- [x] Key recipe sections expose stable explicit anchors for deep linking.
+- [x] Capability matrix clearly separates available vs deferred capabilities.
+- [x] Capability matrix links to backlog identifiers/pages for traceability.
 
 ## Blocked by
 
