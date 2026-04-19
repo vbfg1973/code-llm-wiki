@@ -93,7 +93,8 @@ public sealed class CliApplicationTests
             """
             {
               "ontologyPath": "./ontology/ontology.v1.yaml",
-              "max_merge_entries_per_file": 7
+              "max_merge_entries_per_file": 7,
+              "metric_computation_max_degree_of_parallelism": 5
             }
             """);
 
@@ -107,12 +108,14 @@ public sealed class CliApplicationTests
                 "--path", ".",
                 "--config", configPath,
                 "--max-merge-entries-per-file", "3",
+                "--metric-mdop", "4",
             ],
             CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.NotNull(publisher.LastRequest);
         Assert.Equal(3, publisher.LastRequest!.MaxMergeEntriesPerFile);
+        Assert.Equal(4, publisher.LastRequest.MetricComputationMaxDegreeOfParallelism);
     }
 
     private static string WriteTempFile(string content)

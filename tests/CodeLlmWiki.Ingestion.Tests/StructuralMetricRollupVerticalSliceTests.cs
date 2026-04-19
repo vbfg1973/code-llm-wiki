@@ -122,10 +122,19 @@ public sealed class StructuralMetricRollupVerticalSliceTests
             {
                 MetricComputationMaxDegreeOfParallelism = 4,
             });
+        var secondParallelModel = query.GetModel(
+            analysis.RepositoryId,
+            new ProjectStructureQueryOptions
+            {
+                MetricComputationMaxDegreeOfParallelism = 4,
+            });
 
         Assert.Equal(
             BuildFingerprint(serialModel.StructuralMetrics),
             BuildFingerprint(parallelModel.StructuralMetrics));
+        Assert.Equal(
+            BuildFingerprint(parallelModel.StructuralMetrics),
+            BuildFingerprint(secondParallelModel.StructuralMetrics));
     }
 
     private static string BuildFingerprint(StructuralMetricRollupCatalog catalog)

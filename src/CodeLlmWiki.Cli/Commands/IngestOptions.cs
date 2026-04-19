@@ -22,4 +22,7 @@ public sealed class IngestOptions
 
     [Option('m', "max-merge-entries-per-file", Required = false, HelpText = "Caps merge-to-mainline entries per file in wiki output.")]
     public int? MaxMergeEntriesPerFile { get; init; }
+
+    [Option('d', "metric-mdop", Required = false, HelpText = "Max degree of parallelism for metric/rollup computation.")]
+    public int? MetricComputationMaxDegreeOfParallelism { get; init; }
 }

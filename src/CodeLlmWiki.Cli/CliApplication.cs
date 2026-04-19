@@ -55,6 +55,8 @@ public sealed class CliApplication
 
         var maxMergeEntriesPerFile = options.MaxMergeEntriesPerFile
             ?? config.MaxMergeEntriesPerFile;
+        var metricComputationMdop = options.MetricComputationMaxDegreeOfParallelism
+            ?? config.MetricComputationMaxDegreeOfParallelism;
 
         var request = new IngestionRunRequest(
             RepositoryPath: options.RepositoryPath,
@@ -73,7 +75,8 @@ public sealed class CliApplication
                 StartedAtUtc: startedAtUtc,
                 CompletedAtUtc: completedAtUtc,
                 RunResult: result,
-                MaxMergeEntriesPerFile: maxMergeEntriesPerFile),
+                MaxMergeEntriesPerFile: maxMergeEntriesPerFile,
+                MetricComputationMaxDegreeOfParallelism: metricComputationMdop),
             cancellationToken);
 
         if (!publication.Succeeded)

@@ -47,7 +47,13 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
             if (request.RunResult.RepositoryId != default && request.RunResult.Triples.Count > 0)
             {
                 var query = new ProjectStructureQueryService(request.RunResult.Triples);
-                var model = query.GetModel(request.RunResult.RepositoryId);
+                var queryOptions = request.MetricComputationMaxDegreeOfParallelism is { } maxDegreeOfParallelism
+                    ? ProjectStructureQueryOptions.Default with
+                    {
+                        MetricComputationMaxDegreeOfParallelism = maxDegreeOfParallelism,
+                    }
+                    : ProjectStructureQueryOptions.Default;
+                var model = query.GetModel(request.RunResult.RepositoryId, queryOptions);
                 metricsSummary = BuildMetricsSummary(model);
                 var renderer = new ProjectStructureWikiRenderer();
                 var pages = renderer.Render(model, request.MaxMergeEntriesPerFile)

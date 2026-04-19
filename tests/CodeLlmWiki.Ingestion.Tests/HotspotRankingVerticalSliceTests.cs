@@ -195,10 +195,20 @@ public sealed class HotspotRankingVerticalSliceTests
                 MetricScopeFilter = StructuralMetricScopeFilter.AllCodeKinds,
                 MetricComputationMaxDegreeOfParallelism = 4,
             });
+        var secondParallelModel = query.GetModel(
+            analysis.RepositoryId,
+            new ProjectStructureQueryOptions
+            {
+                MetricScopeFilter = StructuralMetricScopeFilter.AllCodeKinds,
+                MetricComputationMaxDegreeOfParallelism = 4,
+            });
 
         Assert.Equal(
             BuildFingerprint(serialModel.Hotspots),
             BuildFingerprint(parallelModel.Hotspots));
+        Assert.Equal(
+            BuildFingerprint(parallelModel.Hotspots),
+            BuildFingerprint(secondParallelModel.Hotspots));
     }
 
     private static string BuildFingerprint(HotspotRankingCatalog catalog)
