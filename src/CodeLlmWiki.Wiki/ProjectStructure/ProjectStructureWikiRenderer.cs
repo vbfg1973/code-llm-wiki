@@ -867,6 +867,46 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             MemberDeclarationKind.Field,
             resolver);
 
+        sb.AppendLine();
+        sb.AppendLine("## Dependency Rollup");
+        sb.AppendLine("### Declaration Packages");
+        if (typeDeclaration.DependencyRollup.DeclarationPackages.Count == 0
+            && typeDeclaration.DependencyRollup.DeclarationUnknownUsageCount == 0)
+        {
+            sb.AppendLine("- none");
+        }
+        else
+        {
+            foreach (var usage in typeDeclaration.DependencyRollup.DeclarationPackages)
+            {
+                sb.AppendLine($"- {resolver.ToWikiLink(usage.PackageId, usage.PackageName)} ({usage.UsageCount})");
+            }
+
+            if (typeDeclaration.DependencyRollup.DeclarationUnknownUsageCount > 0)
+            {
+                sb.AppendLine($"- Unknown package attribution ({typeDeclaration.DependencyRollup.DeclarationUnknownUsageCount})");
+            }
+        }
+
+        sb.AppendLine("### Method Body Packages");
+        if (typeDeclaration.DependencyRollup.MethodBodyPackages.Count == 0
+            && typeDeclaration.DependencyRollup.MethodBodyUnknownUsageCount == 0)
+        {
+            sb.AppendLine("- none");
+        }
+        else
+        {
+            foreach (var usage in typeDeclaration.DependencyRollup.MethodBodyPackages)
+            {
+                sb.AppendLine($"- {resolver.ToWikiLink(usage.PackageId, usage.PackageName)} ({usage.UsageCount})");
+            }
+
+            if (typeDeclaration.DependencyRollup.MethodBodyUnknownUsageCount > 0)
+            {
+                sb.AppendLine($"- Unknown package attribution ({typeDeclaration.DependencyRollup.MethodBodyUnknownUsageCount})");
+            }
+        }
+
         if (typeDeclaration.GenericParameters.Count > 0 || typeDeclaration.GenericConstraints.Count > 0)
         {
             sb.AppendLine();

@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 005](./005-phase-5-dependency-usage-mapping-and-package-provenance.prd.md)
 
 - Issue: [#66](https://github.com/vbfg1973/code-llm-wiki/issues/66)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: completed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,11 +18,11 @@ Harden BL-011 contracts by finalizing query/wiki rollups derived from method-lev
 
 ## Acceptance criteria
 
-- [ ] Type-level dependency rollups are derived in query/wiki from method-level evidence without duplicating ingestion truth.
-- [ ] Deterministic ordering/count invariants are enforced across dependency query and wiki outputs.
-- [ ] Regression coverage validates declaration/method-body split, attribution semantics, and unresolved semantics stability.
-- [ ] Golden/snapshot tests are updated only for intentional BL-011 output deltas.
-- [ ] No MCP/query-surface expansion is introduced in this phase.
+- [x] Type-level dependency rollups are derived in query/wiki from method-level evidence without duplicating ingestion truth.
+- [x] Deterministic ordering/count invariants are enforced across dependency query and wiki outputs.
+- [x] Regression coverage validates declaration/method-body split, attribution semantics, and unresolved semantics stability.
+- [x] Golden/snapshot tests are updated only for intentional BL-011 output deltas.
+- [x] No MCP/query-surface expansion is introduced in this phase.
 
 ## Blocked by
 

@@ -316,6 +316,57 @@ public sealed class PackageDependencyVerticalSliceTests
     }
 
     [Fact]
+    public async Task Query_TypeDependencyRollups_PreserveDeclarationAndMethodBodySplit()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var declarationOnlyType = model.Declarations.Types.Single(x => x.Name == "SerializerFacade");
+        Assert.Contains(declarationOnlyType.DependencyRollup.DeclarationPackages, x => x.PackageName == "Newtonsoft.Json");
+        Assert.Empty(declarationOnlyType.DependencyRollup.MethodBodyPackages);
+
+        var methodBodyType = model.Declarations.Types.Single(x => x.Name == "BodyUsageFacade");
+        Assert.Empty(methodBodyType.DependencyRollup.DeclarationPackages);
+        Assert.Contains(methodBodyType.DependencyRollup.MethodBodyPackages, x => x.PackageName == "Newtonsoft.Json");
+    }
+
+    [Fact]
+    public async Task Query_TypeDependencyRollups_TrackUnknownAttributionCounts()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync(includeAmbiguousPackageInNoAssets: true, includeUnresolvedSignatureInNoAssets: true);
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var ambiguousType = model.Declarations.Types.Single(x => x.Name == "NoAssetsJsonFacade");
+        Assert.True(ambiguousType.DependencyRollup.DeclarationUnknownUsageCount > 0);
+        Assert.True(ambiguousType.DependencyRollup.MethodBodyUnknownUsageCount > 0);
+
+        var unresolvedType = model.Declarations.Types.Single(x => x.Name == "NoAssetsUnresolvedFacade");
+        Assert.True(unresolvedType.DependencyRollup.DeclarationUnknownUsageCount > 0);
+    }
+
+    [Fact]
+    public async Task Render_TypePage_IncludesDependencyRollupSections()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var pages = new ProjectStructureWikiRenderer().Render(model);
+        var typePage = pages.Single(page => page.RelativePath.StartsWith("types/", StringComparison.Ordinal)
+            && page.Markdown.Contains("# Type: BodyUsageFacade", StringComparison.Ordinal));
+
+        Assert.Contains("## Dependency Rollup", typePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("### Declaration Packages", typePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("### Method Body Packages", typePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("[[packages/", typePage.Markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Ontology_ContainsPackagePredicates_AndStillValidates()
     {
         var ontologyPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "ontology", "ontology.v1.yaml"));
