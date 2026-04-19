@@ -13,4 +13,5 @@ public sealed record PackageNode(
     public PackageDeclarationDependencyUsageCatalog DeclarationDependencyUsage { get; init; } = PackageDeclarationDependencyUsageCatalog.Empty;
     public PackageDeclarationDependencyTargetFirstCatalog DeclarationDependencyTargetFirst { get; init; } = PackageDeclarationDependencyTargetFirstCatalog.Empty;
     public PackageMethodBodyDependencyUsageCatalog MethodBodyDependencyUsage { get; init; } = PackageMethodBodyDependencyUsageCatalog.Empty;
+    public PackageMethodBodyDependencyTargetFirstCatalog MethodBodyDependencyTargetFirst { get; init; } = PackageMethodBodyDependencyTargetFirstCatalog.Empty;
 }

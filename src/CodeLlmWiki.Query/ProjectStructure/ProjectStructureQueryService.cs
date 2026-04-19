@@ -233,6 +233,15 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 declarations.Namespaces,
                 declarations.Types,
                 declarations.Methods.Declarations));
+        var methodBodyDependencyTargetFirstByPackageId = new MethodBodyDependencyTargetFirstProjector().Project(
+            new MethodBodyDependencyUsageProjectionRequest(
+                _triples,
+                projects,
+                packages,
+                files,
+                declarations.Namespaces,
+                declarations.Types,
+                declarations.Methods.Declarations));
         var declarationUnknownDependencyUsage = new UnknownDependencyUsageProjector().Project(
             new UnknownDependencyUsageProjectionRequest(
                 CorePredicates.DependsOnTypeDeclaration,
@@ -265,6 +274,9 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 MethodBodyDependencyUsage = methodBodyDependencyUsageByPackageId.TryGetValue(package.Id, out var methodBodyUsage)
                     ? methodBodyUsage
                     : PackageMethodBodyDependencyUsageCatalog.Empty,
+                MethodBodyDependencyTargetFirst = methodBodyDependencyTargetFirstByPackageId.TryGetValue(package.Id, out var methodBodyTargetFirstUsage)
+                    ? methodBodyTargetFirstUsage
+                    : PackageMethodBodyDependencyTargetFirstCatalog.Empty,
             })
             .ToArray();
         var typeDependencyRollupsByTypeId = BuildTypeDependencyRollupsByTypeId(
