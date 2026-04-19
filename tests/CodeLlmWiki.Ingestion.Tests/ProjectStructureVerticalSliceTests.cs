@@ -99,6 +99,34 @@ public sealed class ProjectStructureVerticalSliceTests
         Assert.Contains("## Guardrails", contract.Markdown, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Render_LlmContract_ContainsAnchoredRecipes_AndCapabilityMatrix()
+    {
+        var fixture = await ProjectStructureFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+
+        var query = new ProjectStructureQueryService(analysis.Triples);
+        var model = query.GetModel(analysis.RepositoryId);
+
+        var pages = new ProjectStructureWikiRenderer().Render(model);
+        var contract = pages.Single(x => x.RelativePath == "guidance/llm-contract.md");
+
+        Assert.Contains("## Named Recipes", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains("<a id=\"recipe-structure-survey\"></a>", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains("<a id=\"recipe-hotspot-triage\"></a>", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains("<a id=\"recipe-dependency-trace\"></a>", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains("## Capability Matrix", contract.Markdown, StringComparison.Ordinal);
+
+        var headBranchLine = contract.Markdown
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .First(line => line.StartsWith("head_branch:", StringComparison.Ordinal));
+        var headBranch = headBranchLine["head_branch:".Length..].Trim();
+
+        Assert.Contains($"[BL-013](https://github.com/vbfg1973/code-llm-wiki/blob/{headBranch}/plans/BACKLOG.md#bl-013-domain-term-extraction-and-linking)", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains($"[BL-014](https://github.com/vbfg1973/code-llm-wiki/blob/{headBranch}/plans/BACKLOG.md#bl-014-endpoint-discovery-and-behavior-metadata)", contract.Markdown, StringComparison.Ordinal);
+    }
+
     private sealed class ProjectStructureFixture
     {
         private ProjectStructureFixture(string repositoryPath)
