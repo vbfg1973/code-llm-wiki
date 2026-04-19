@@ -103,6 +103,39 @@ public sealed class HotspotRankingVerticalSliceTests
         Assert.Contains(unbounded.Hotspots.CompositeRankings, x => x.Rows.Count > 1);
     }
 
+    [Fact]
+    public async Task Query_UsesDefaultTopNFallback_WhenTopNIsNotConfigured()
+    {
+        var fixture = await HotspotRankingFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var query = new ProjectStructureQueryService(analysis.Triples);
+
+        var nullTopN = query.GetModel(
+            analysis.RepositoryId,
+            new ProjectStructureQueryOptions
+            {
+                MetricScopeFilter = StructuralMetricScopeFilter.AllCodeKinds,
+                HotspotRanking = new HotspotRankingOptions
+                {
+                    TopN = null,
+                },
+            });
+        Assert.Equal(25, nullTopN.Hotspots.EffectiveConfig.EffectiveTopN);
+
+        var zeroTopN = query.GetModel(
+            analysis.RepositoryId,
+            new ProjectStructureQueryOptions
+            {
+                MetricScopeFilter = StructuralMetricScopeFilter.AllCodeKinds,
+                HotspotRanking = new HotspotRankingOptions
+                {
+                    TopN = 0,
+                },
+            });
+        Assert.Equal(25, zeroTopN.Hotspots.EffectiveConfig.EffectiveTopN);
+    }
+
     private static string BuildFingerprint(HotspotRankingCatalog catalog)
     {
         var primary = catalog.PrimaryRankings
