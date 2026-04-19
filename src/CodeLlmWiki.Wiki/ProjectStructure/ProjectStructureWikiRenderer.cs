@@ -183,6 +183,18 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         var typeBacklinksByFileId = BuildTypeBacklinksByFileId(model.Declarations.Types, fileById);
         var memberBacklinksByFileId = BuildMemberBacklinksByFileId(model.Declarations.Members, fileById);
         var methodBacklinksByFileId = BuildMethodBacklinksByFileId(orderedMethods, fileById);
+        var inheritedByTypeIdsByBaseTypeId = BuildReverseTypeRelationshipMap(
+            model.Declarations.Types,
+            type => type.DirectBaseTypes
+                .Where(x => x.TypeId is not null)
+                .Select(x => x.TypeId!.Value),
+            typeById);
+        var implementedByTypeIdsByInterfaceTypeId = BuildReverseTypeRelationshipMap(
+            model.Declarations.Types,
+            type => type.DirectInterfaceTypes
+                .Where(x => x.TypeId is not null)
+                .Select(x => x.TypeId!.Value),
+            typeById);
         var externalCallTargetsByPackageId = model.Declarations.Methods.Relations
             .Where(x => x.Kind == MethodRelationKind.Calls && x.ExternalTargetType is not null)
             .Select(relation => TryResolveExternalTargetPackage(relation, orderedPackages, out var package)
@@ -233,6 +245,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 methodById,
                 readMethodIdsByTargetMemberId,
                 writeMethodIdsByTargetMemberId,
+                inheritedByTypeIdsByBaseTypeId,
+                implementedByTypeIdsByInterfaceTypeId,
                 fileById,
                 orderedProjects,
                 resolver)));
@@ -815,6 +829,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
         IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> readMethodIdsByTargetMemberId,
         IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> writeMethodIdsByTargetMemberId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> inheritedByTypeIdsByBaseTypeId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> implementedByTypeIdsByInterfaceTypeId,
         IReadOnlyDictionary<EntityId, FileNode> fileById,
         IReadOnlyList<ProjectNode> projects,
         WikiPathResolver resolver)
@@ -845,32 +861,20 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         }
 
         sb.AppendLine();
-        sb.AppendLine("## Direct Base Types");
-        foreach (var directBaseType in typeDeclaration.DirectBaseTypes)
-        {
-            if (directBaseType.TypeId is { } directBaseTypeId && typeById.TryGetValue(directBaseTypeId, out var baseType))
-            {
-                sb.AppendLine($"- {resolver.ToWikiLink(baseType.Id, baseType.Name)}");
-            }
-            else
-            {
-                sb.AppendLine($"- {FormatTypeReference(directBaseType)}");
-            }
-        }
+        sb.AppendLine("## Inherits From");
+        AppendTypeReferenceSection(sb, typeDeclaration.DirectBaseTypes, typeById, resolver);
 
         sb.AppendLine();
-        sb.AppendLine("## Direct Interfaces");
-        foreach (var directInterface in typeDeclaration.DirectInterfaceTypes)
-        {
-            if (directInterface.TypeId is { } directInterfaceId && typeById.TryGetValue(directInterfaceId, out var interfaceType))
-            {
-                sb.AppendLine($"- {resolver.ToWikiLink(interfaceType.Id, interfaceType.Name)}");
-            }
-            else
-            {
-                sb.AppendLine($"- {FormatTypeReference(directInterface)}");
-            }
-        }
+        sb.AppendLine("## Inherited By");
+        AppendReverseTypeRelationshipSection(sb, typeDeclaration.Id, inheritedByTypeIdsByBaseTypeId, typeById, resolver);
+
+        sb.AppendLine();
+        sb.AppendLine("## Implements");
+        AppendTypeReferenceSection(sb, typeDeclaration.DirectInterfaceTypes, typeById, resolver);
+
+        sb.AppendLine();
+        sb.AppendLine("## Implemented By");
+        AppendReverseTypeRelationshipSection(sb, typeDeclaration.Id, implementedByTypeIdsByInterfaceTypeId, typeById, resolver);
 
         sb.AppendLine();
         sb.AppendLine("## Members");
@@ -1023,6 +1027,71 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             RelativePath: resolver.GetPath(typeDeclaration.Id),
             Title: typeDeclaration.Name,
             Markdown: WithFrontMatter(frontMatter, sb.ToString().TrimEnd()));
+    }
+
+    private static IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> BuildReverseTypeRelationshipMap(
+        IReadOnlyList<TypeDeclarationNode> types,
+        Func<TypeDeclarationNode, IEnumerable<EntityId>> forwardTargetSelector,
+        IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById)
+    {
+        return types
+            .SelectMany(type => forwardTargetSelector(type).Select(targetTypeId => (targetTypeId, sourceTypeId: type.Id)))
+            .GroupBy(x => x.targetTypeId)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.sourceTypeId)
+                    .Distinct()
+                    .OrderBy(v => typeById.TryGetValue(v, out var type) ? type.Path : string.Empty, StringComparer.Ordinal)
+                    .ThenBy(v => typeById.TryGetValue(v, out var type) ? type.Name : string.Empty, StringComparer.Ordinal)
+                    .ThenBy(v => v.Value, StringComparer.Ordinal)
+                    .ToArray());
+    }
+
+    private static void AppendTypeReferenceSection(
+        StringBuilder sb,
+        IReadOnlyList<TypeReferenceNode> references,
+        IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
+        WikiPathResolver resolver)
+    {
+        if (references.Count == 0)
+        {
+            sb.AppendLine("- none");
+            return;
+        }
+
+        foreach (var reference in references)
+        {
+            if (reference.TypeId is { } referenceTypeId && typeById.TryGetValue(referenceTypeId, out var type))
+            {
+                sb.AppendLine($"- {resolver.ToWikiLink(type.Id, type.Name)}");
+                continue;
+            }
+
+            sb.AppendLine($"- {FormatTypeReference(reference)}");
+        }
+    }
+
+    private static void AppendReverseTypeRelationshipSection(
+        StringBuilder sb,
+        EntityId targetTypeId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> sourceTypeIdsByTargetTypeId,
+        IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
+        WikiPathResolver resolver)
+    {
+        if (!sourceTypeIdsByTargetTypeId.TryGetValue(targetTypeId, out var sourceTypeIds) || sourceTypeIds.Count == 0)
+        {
+            sb.AppendLine("- none");
+            return;
+        }
+
+        foreach (var sourceTypeId in sourceTypeIds)
+        {
+            if (typeById.TryGetValue(sourceTypeId, out var sourceType))
+            {
+                sb.AppendLine($"- {resolver.ToWikiLink(sourceType.Id, sourceType.Name)}");
+            }
+        }
     }
 
     private static void AppendMemberSection(
