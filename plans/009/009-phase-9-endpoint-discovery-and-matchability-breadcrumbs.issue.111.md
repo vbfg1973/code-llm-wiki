@@ -3,7 +3,8 @@
 > Parent PRD: [PRD 009](/home/vbfg/dev/dotnet-llm-wiki/plans/009/009-phase-9-endpoint-discovery-and-matchability-breadcrumbs.prd.md)
 
 - Issue: [#111](https://github.com/vbfg1973/code-llm-wiki/issues/111)
-- [ ] Status: open
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -17,10 +18,10 @@ Emit deterministic endpoint matchability fingerprints and bounded outbound call 
 
 ## Acceptance criteria
 
-- [ ] Endpoint fingerprint payload is emitted with stable, deterministic fields for later matching.
-- [ ] Outbound call breadcrumbs are emitted from endpoint method contexts with bounded scope.
-- [ ] Dependency-like breadcrumbs include declaration-context vs method-body-context tagging.
-- [ ] External dependency breadcrumbs support navigation to package-level provenance views when applicable.
+- [x] Endpoint fingerprint payload is emitted with stable, deterministic fields for later matching.
+- [x] Outbound call breadcrumbs are emitted from endpoint method contexts with bounded scope.
+- [x] Dependency-like breadcrumbs include declaration-context vs method-body-context tagging.
+- [x] External dependency breadcrumbs support navigation to package-level provenance views when applicable.
 
 ## Blocked by
 

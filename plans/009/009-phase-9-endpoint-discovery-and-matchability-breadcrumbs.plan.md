@@ -8,7 +8,7 @@
 - [x] Phase 2: Minimal API Endpoint Slice — completion date: 2026-04-19
 - [x] Phase 3: Message Handler and CLI Endpoint Slice — completion date: 2026-04-19
 - [x] Phase 4: gRPC Endpoint Slice and Partial-Resolution Semantics — completion date: 2026-04-19
-- [ ] Phase 5: Matchability Fingerprints and Outbound Breadcrumbs
+- [x] Phase 5: Matchability Fingerprints and Outbound Breadcrumbs — completion date: 2026-04-19
 - [ ] Phase 6: Publication Hardening, Determinism, and Performance
 
 ---
@@ -108,10 +108,10 @@ Add deterministic endpoint matchability fingerprints and bounded outbound call b
 
 ### Acceptance criteria
 
-- [ ] Endpoint fingerprint payload is emitted with stable, deterministic fields for later matching.
-- [ ] Outbound call breadcrumbs are emitted from endpoint method contexts with bounded scope.
-- [ ] Dependency-like breadcrumbs include declaration-context vs method-body-context tagging.
-- [ ] External dependency breadcrumbs support navigation to package-level provenance views when applicable.
+- [x] Endpoint fingerprint payload is emitted with stable, deterministic fields for later matching.
+- [x] Outbound call breadcrumbs are emitted from endpoint method contexts with bounded scope.
+- [x] Dependency-like breadcrumbs include declaration-context vs method-body-context tagging.
+- [x] External dependency breadcrumbs support navigation to package-level provenance views when applicable.
 
 ---
 
