@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Ingestion;
+using CodeLlmWiki.Ingestion.Telemetry;
 using CodeLlmWiki.Query.ProjectStructure;
 using CodeLlmWiki.Wiki.ProjectStructure;
 
@@ -11,6 +12,7 @@ namespace CodeLlmWiki.Cli.Features.Ingest;
 public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
 {
     private readonly IWikiScopedLinkInvariantValidator _wikiScopedLinkInvariantValidator;
+    private readonly IIngestionStageTelemetry _stageTelemetry;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -18,9 +20,12 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    public IngestionArtifactPublisher(IWikiScopedLinkInvariantValidator? wikiScopedLinkInvariantValidator = null)
+    public IngestionArtifactPublisher(
+        IWikiScopedLinkInvariantValidator? wikiScopedLinkInvariantValidator = null,
+        IIngestionStageTelemetry? stageTelemetry = null)
     {
         _wikiScopedLinkInvariantValidator = wikiScopedLinkInvariantValidator ?? new WikiScopedLinkInvariantValidator();
+        _stageTelemetry = stageTelemetry ?? NoOpIngestionStageTelemetry.Instance;
     }
 
     public async Task<IngestionArtifactPublishResult> PublishAsync(
@@ -46,39 +51,68 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
         {
             if (request.RunResult.RepositoryId != default && request.RunResult.Triples.Count > 0)
             {
-                var query = new ProjectStructureQueryService(request.RunResult.Triples);
-                var queryOptions = request.MetricComputationMaxDegreeOfParallelism is { } maxDegreeOfParallelism
-                    ? ProjectStructureQueryOptions.Default with
-                    {
-                        MetricComputationMaxDegreeOfParallelism = maxDegreeOfParallelism,
-                    }
-                    : ProjectStructureQueryOptions.Default;
-                var model = query.GetModel(request.RunResult.RepositoryId, queryOptions);
-                metricsSummary = BuildMetricsSummary(model);
-                var renderer = new ProjectStructureWikiRenderer();
-                var pages = renderer.Render(model, request.MaxMergeEntriesPerFile)
-                    .OrderBy(x => x.RelativePath, StringComparer.Ordinal)
-                    .ToArray();
-
-                var validation = _wikiScopedLinkInvariantValidator.Validate(
-                    new WikiScopedLinkInvariantValidationRequest(model, pages));
-                if (!validation.IsValid)
+                ProjectStructureWikiModel model;
+                using (var queryProjectionStage = _stageTelemetry.BeginStage(IngestionStageIds.QueryProjection))
                 {
-                    throw new InvalidOperationException(validation.ToFailureMessage());
+                    var query = new ProjectStructureQueryService(request.RunResult.Triples);
+                    var queryOptions = request.MetricComputationMaxDegreeOfParallelism is { } maxDegreeOfParallelism
+                        ? ProjectStructureQueryOptions.Default with
+                        {
+                            MetricComputationMaxDegreeOfParallelism = maxDegreeOfParallelism,
+                        }
+                        : ProjectStructureQueryOptions.Default;
+                    model = query.GetModel(request.RunResult.RepositoryId, queryOptions);
+                    metricsSummary = BuildMetricsSummary(model);
+                    queryProjectionStage.SetCounters(
+                        new Dictionary<string, long>
+                        {
+                            ["triple_count"] = request.RunResult.Triples.Count,
+                            ["type_count"] = model.Declarations.Types.Count,
+                            ["method_count"] = model.Declarations.Methods.Declarations.Count,
+                        });
                 }
 
-                wikiPageCount = pages.Length;
-                wikiDirectory = Path.Combine(runDirectory, "wiki");
-                WriteWikiPages(wikiDirectory, pages);
+                using (var wikiRenderStage = _stageTelemetry.BeginStage(IngestionStageIds.WikiRender))
+                {
+                    var renderer = new ProjectStructureWikiRenderer();
+                    var pages = renderer.Render(model, request.MaxMergeEntriesPerFile)
+                        .OrderBy(x => x.RelativePath, StringComparer.Ordinal)
+                        .ToArray();
+
+                    var validation = _wikiScopedLinkInvariantValidator.Validate(
+                        new WikiScopedLinkInvariantValidationRequest(model, pages));
+                    if (!validation.IsValid)
+                    {
+                        throw new InvalidOperationException(validation.ToFailureMessage());
+                    }
+
+                    wikiPageCount = pages.Length;
+                    wikiDirectory = Path.Combine(runDirectory, "wiki");
+                    WriteWikiPages(wikiDirectory, pages);
+                    wikiRenderStage.SetCounters(
+                        new Dictionary<string, long>
+                        {
+                            ["wiki_page_count"] = wikiPageCount,
+                        });
+                }
             }
 
-            var graph = GraphMlSerializer.Serialize(request.RunResult.Triples);
-            graphNodeCount = graph.NodeCount;
-            graphEdgeCount = graph.EdgeCount;
+            using (var graphMlSerializeStage = _stageTelemetry.BeginStage(IngestionStageIds.GraphMlSerialize))
+            {
+                var graph = GraphMlSerializer.Serialize(request.RunResult.Triples);
+                graphNodeCount = graph.NodeCount;
+                graphEdgeCount = graph.EdgeCount;
 
-            graphMlPath = Path.Combine(runDirectory, "graph", "graph.graphml");
-            Directory.CreateDirectory(Path.GetDirectoryName(graphMlPath)!);
-            await File.WriteAllTextAsync(graphMlPath, graph.GraphMl, cancellationToken);
+                graphMlPath = Path.Combine(runDirectory, "graph", "graph.graphml");
+                Directory.CreateDirectory(Path.GetDirectoryName(graphMlPath)!);
+                await File.WriteAllTextAsync(graphMlPath, graph.GraphMl, cancellationToken);
+                graphMlSerializeStage.SetCounters(
+                    new Dictionary<string, long>
+                    {
+                        ["graph_nodes"] = graphNodeCount,
+                        ["graph_edges"] = graphEdgeCount,
+                    });
+            }
 
             var shouldPromoteLatest = request.RunResult.Status != IngestionRunStatus.Failed;
             var manifest = BuildManifest(

@@ -37,6 +37,7 @@ public sealed class MethodCallsVerticalSliceTests
         Assert.Contains(outgoingCalls, x => x.ExternalTargetType is not null && !string.IsNullOrWhiteSpace(x.ExternalAssemblyName));
         Assert.Contains(outgoingCalls, x => x.TargetMethodId is null && x.ExternalTargetType?.ResolutionStatus == DeclarationResolutionStatus.Unresolved);
         Assert.Contains(analysis.Diagnostics, x => x.Code == "method:call:resolution:failed");
+        Assert.Contains(analysis.Diagnostics, x => x.Code == "method:call:resolution:failed:symbol-unresolved");
 
         var incomingCalls = model.Declarations.Methods.Relations
             .Where(x => x.Kind == MethodRelationKind.Calls && x.TargetMethodId == callAll.Id)
