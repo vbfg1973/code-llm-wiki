@@ -314,6 +314,12 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 files,
                 declarations,
                 options.MetricScopeFilter));
+        var hotspots = new HotspotRankingProjector().Project(
+            new HotspotRankingProjectionRequest(
+                _triples,
+                declarations,
+                structuralMetrics,
+                options.HotspotRanking));
 
         return new ProjectStructureWikiModel(repository, solutions, projects, packages, files, submodules)
         {
@@ -322,6 +328,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 declarationUnknownDependencyUsage,
                 methodBodyUnknownDependencyUsage),
             StructuralMetrics = structuralMetrics,
+            Hotspots = hotspots,
         };
     }
 
