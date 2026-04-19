@@ -9,6 +9,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 using Microsoft.Build.Construction;
 using Microsoft.Build.Evaluation;
 
@@ -362,6 +363,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         var pendingMethodParameterTypeLinks = new List<PendingMethodParameterTypeLink>();
         var memberIdByDeclarationLocation = new Dictionary<MemberDeclarationLocationKey, EntityId>();
         var methodIdByDeclarationLocation = new Dictionary<MethodDeclarationLocationKey, EntityId>();
+        var declaringTypeIdByMethodId = new Dictionary<EntityId, EntityId>();
         var externalStubIdByReference = new Dictionary<string, EntityId>(StringComparer.Ordinal);
         var unresolvedReferenceIdByText = new Dictionary<string, EntityId>(StringComparer.Ordinal);
         var unresolvedCallTargetIdByText = new Dictionary<string, EntityId>(StringComparer.Ordinal);
@@ -617,10 +619,24 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     new EntityNode(methodId),
                     CorePredicates.Arity,
                     new LiteralNode(representativeMethod.Arity.ToString())));
+                var hasAnalyzableBody = methodGroup.Any(x => x.HasAnalyzableBody);
+
                 triples.Add(new SemanticTriple(
                     new EntityNode(typeId),
                     CorePredicates.ContainsMethod,
                     new EntityNode(methodId)));
+                declaringTypeIdByMethodId[methodId] = typeId;
+                triples.Add(new SemanticTriple(
+                    new EntityNode(methodId),
+                    CorePredicates.MetricCoverageStatus,
+                    new LiteralNode(hasAnalyzableBody ? "analyzable" : "no_analyzable_body")));
+                if (!hasAnalyzableBody)
+                {
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(methodId),
+                        CorePredicates.MetricCoverageReason,
+                        new LiteralNode("missing_body")));
+                }
 
                 if (representativeMethod.IsExtensionMethod)
                 {
@@ -971,6 +987,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             sourceTextByRelativePath,
             typeIdByQualifiedName,
             methodCandidatesByTypeId,
+            declaringTypeIdByMethodId,
             memberIdByDeclarationLocation,
             methodIdByDeclarationLocation,
             externalStubIdByReference,
@@ -1136,6 +1153,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         IReadOnlyDictionary<string, string> sourceTextByRelativePath,
         IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
         IReadOnlyDictionary<EntityId, List<MethodRelationshipCandidate>> methodCandidatesByTypeId,
+        IReadOnlyDictionary<EntityId, EntityId> declaringTypeIdByMethodId,
         IReadOnlyDictionary<MemberDeclarationLocationKey, EntityId> memberIdByDeclarationLocation,
         IReadOnlyDictionary<MethodDeclarationLocationKey, EntityId> methodIdByDeclarationLocation,
         Dictionary<string, EntityId> externalStubIdByReference,
@@ -1143,7 +1161,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         List<SemanticTriple> triples,
         List<IngestionDiagnostic> diagnostics)
     {
-        if (sourceFiles.Count == 0 || methodIdByDeclarationLocation.Count == 0)
+        if (sourceFiles.Count == 0)
         {
             return;
         }
@@ -1178,6 +1196,10 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             references: references,
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
+        var declarationDependenciesByTypeId = new Dictionary<EntityId, HashSet<EntityId>>();
+        var methodBodyDependenciesByTypeId = new Dictionary<EntityId, HashSet<EntityId>>();
+        var emittedMethodMetricIds = new HashSet<EntityId>();
+
         foreach (var syntaxTree in syntaxTrees)
         {
             var semanticModel = compilation.GetSemanticModel(syntaxTree, ignoreAccessibility: true);
@@ -1186,6 +1208,14 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             {
                 continue;
             }
+
+            AddDeclarationDependenciesByType(
+                root,
+                semanticModel,
+                typeIdByQualifiedName,
+                externalStubIdByReference,
+                declarationDependenciesByTypeId,
+                triples);
 
             foreach (var methodDeclaration in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
             {
@@ -1218,13 +1248,19 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     memberIdByDeclarationLocation,
                     triples);
 
-                AddMethodBodyDependencyEdges(
+                var methodBodyDependencies = AddMethodBodyDependencyEdges(
                     methodDeclaration,
                     sourceMethodId,
                     semanticModel,
                     typeIdByQualifiedName,
                     externalStubIdByReference,
                     triples);
+                AppendTypeDependencies(methodBodyDependenciesByTypeId, declaringTypeIdByMethodId, sourceMethodId, methodBodyDependencies);
+
+                if (emittedMethodMetricIds.Add(sourceMethodId))
+                {
+                    EmitMethodMetricTriples(methodDeclaration, sourceMethodId, semanticModel, triples);
+                }
             }
 
             foreach (var constructorDeclaration in root.DescendantNodes().OfType<ConstructorDeclarationSyntax>())
@@ -1258,15 +1294,542 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     memberIdByDeclarationLocation,
                     triples);
 
-                AddMethodBodyDependencyEdges(
+                var methodBodyDependencies = AddMethodBodyDependencyEdges(
                     constructorDeclaration,
                     sourceMethodId,
                     semanticModel,
                     typeIdByQualifiedName,
                     externalStubIdByReference,
                     triples);
+                AppendTypeDependencies(methodBodyDependenciesByTypeId, declaringTypeIdByMethodId, sourceMethodId, methodBodyDependencies);
+
+                if (emittedMethodMetricIds.Add(sourceMethodId))
+                {
+                    EmitMethodMetricTriples(constructorDeclaration, sourceMethodId, semanticModel, triples);
+                }
             }
         }
+
+        EmitCboMetricsByType(typeIdByQualifiedName.Values, declarationDependenciesByTypeId, methodBodyDependenciesByTypeId, triples);
+    }
+
+    private static void AppendTypeDependencies(
+        Dictionary<EntityId, HashSet<EntityId>> dependenciesByTypeId,
+        IReadOnlyDictionary<EntityId, EntityId> declaringTypeIdByMethodId,
+        EntityId sourceMethodId,
+        IReadOnlyCollection<EntityId> dependencyTargetIds)
+    {
+        if (dependencyTargetIds.Count == 0 || !declaringTypeIdByMethodId.TryGetValue(sourceMethodId, out var declaringTypeId))
+        {
+            return;
+        }
+
+        if (!dependenciesByTypeId.TryGetValue(declaringTypeId, out var targets))
+        {
+            targets = [];
+            dependenciesByTypeId[declaringTypeId] = targets;
+        }
+
+        foreach (var targetId in dependencyTargetIds)
+        {
+            targets.Add(targetId);
+        }
+    }
+
+    private void AddDeclarationDependenciesByType(
+        CompilationUnitSyntax root,
+        SemanticModel semanticModel,
+        IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
+        Dictionary<string, EntityId> externalStubIdByReference,
+        Dictionary<EntityId, HashSet<EntityId>> declarationDependenciesByTypeId,
+        List<SemanticTriple> triples)
+    {
+        foreach (var declaration in root.DescendantNodes().OfType<BaseTypeDeclarationSyntax>())
+        {
+            var declaredSymbol = semanticModel.GetDeclaredSymbol(declaration);
+            if (declaredSymbol is not INamedTypeSymbol typeSymbol)
+            {
+                continue;
+            }
+
+            var qualifiedTypeName = GetTypeQualifiedName(typeSymbol);
+            if (!typeIdByQualifiedName.TryGetValue(qualifiedTypeName, out var typeId))
+            {
+                continue;
+            }
+
+            if (!declarationDependenciesByTypeId.TryGetValue(typeId, out var dependencies))
+            {
+                dependencies = [];
+                declarationDependenciesByTypeId[typeId] = dependencies;
+            }
+
+            if (typeSymbol.BaseType is not null && typeSymbol.BaseType.SpecialType != SpecialType.System_Object)
+            {
+                AddCouplingDependencies(typeSymbol.BaseType, typeIdByQualifiedName, externalStubIdByReference, triples, dependencies);
+            }
+
+            foreach (var interfaceType in typeSymbol.Interfaces)
+            {
+                AddCouplingDependencies(interfaceType, typeIdByQualifiedName, externalStubIdByReference, triples, dependencies);
+            }
+
+            foreach (var member in typeSymbol.GetMembers().Where(x => !x.IsImplicitlyDeclared))
+            {
+                switch (member)
+                {
+                    case IFieldSymbol field:
+                        AddCouplingDependencies(field.Type, typeIdByQualifiedName, externalStubIdByReference, triples, dependencies);
+                        break;
+                    case IPropertySymbol property:
+                        AddCouplingDependencies(property.Type, typeIdByQualifiedName, externalStubIdByReference, triples, dependencies);
+                        break;
+                    case IEventSymbol eventSymbol:
+                        AddCouplingDependencies(eventSymbol.Type, typeIdByQualifiedName, externalStubIdByReference, triples, dependencies);
+                        break;
+                    case IMethodSymbol method when ShouldIncludeMethodDeclarationDependencies(method):
+                        if (!method.ReturnsVoid)
+                        {
+                            AddCouplingDependencies(method.ReturnType, typeIdByQualifiedName, externalStubIdByReference, triples, dependencies);
+                        }
+
+                        foreach (var parameter in method.Parameters)
+                        {
+                            AddCouplingDependencies(parameter.Type, typeIdByQualifiedName, externalStubIdByReference, triples, dependencies);
+                        }
+
+                        break;
+                }
+            }
+        }
+    }
+
+    private static bool ShouldIncludeMethodDeclarationDependencies(IMethodSymbol method)
+    {
+        if (method.IsImplicitlyDeclared)
+        {
+            return false;
+        }
+
+        return method.MethodKind is MethodKind.Ordinary
+            or MethodKind.Constructor
+            or MethodKind.StaticConstructor
+            or MethodKind.Conversion
+            or MethodKind.UserDefinedOperator
+            or MethodKind.Destructor;
+    }
+
+    private static void EmitCboMetricsByType(
+        IEnumerable<EntityId> typeIds,
+        IReadOnlyDictionary<EntityId, HashSet<EntityId>> declarationDependenciesByTypeId,
+        IReadOnlyDictionary<EntityId, HashSet<EntityId>> methodBodyDependenciesByTypeId,
+        List<SemanticTriple> triples)
+    {
+        foreach (var typeId in typeIds.Distinct().OrderBy(x => x.Value, StringComparer.Ordinal))
+        {
+            var declarationDependencies = declarationDependenciesByTypeId.TryGetValue(typeId, out var declarationSet)
+                ? new HashSet<EntityId>(declarationSet)
+                : [];
+            var methodBodyDependencies = methodBodyDependenciesByTypeId.TryGetValue(typeId, out var methodBodySet)
+                ? new HashSet<EntityId>(methodBodySet)
+                : [];
+
+            declarationDependencies.Remove(typeId);
+            methodBodyDependencies.Remove(typeId);
+
+            var totalDependencies = new HashSet<EntityId>(declarationDependencies);
+            totalDependencies.UnionWith(methodBodyDependencies);
+
+            triples.Add(new SemanticTriple(
+                new EntityNode(typeId),
+                CorePredicates.CboDeclaration,
+                new LiteralNode(declarationDependencies.Count.ToString(CultureInfo.InvariantCulture))));
+            triples.Add(new SemanticTriple(
+                new EntityNode(typeId),
+                CorePredicates.CboMethodBody,
+                new LiteralNode(methodBodyDependencies.Count.ToString(CultureInfo.InvariantCulture))));
+            triples.Add(new SemanticTriple(
+                new EntityNode(typeId),
+                CorePredicates.CboTotal,
+                new LiteralNode(totalDependencies.Count.ToString(CultureInfo.InvariantCulture))));
+        }
+    }
+
+    private static void EmitMethodMetricTriples(
+        MemberDeclarationSyntax declaration,
+        EntityId sourceMethodId,
+        SemanticModel semanticModel,
+        List<SemanticTriple> triples)
+    {
+        var metricRoot = GetMetricRoot(declaration, semanticModel);
+        if (metricRoot is null)
+        {
+            return;
+        }
+
+        var cyclomatic = CalculateCyclomaticComplexity(metricRoot);
+        var cognitive = CalculateCognitiveComplexity(metricRoot);
+        var halstead = CalculateHalsteadMetrics(metricRoot);
+        var loc = CalculateLinesOfCode(metricRoot);
+        var maintainabilityIndex = CalculateMaintainabilityIndex(halstead.Volume, cyclomatic, Math.Max(1, loc.CodeLines));
+
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.CyclomaticComplexity, new LiteralNode(cyclomatic.ToString(CultureInfo.InvariantCulture))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.CognitiveComplexity, new LiteralNode(cognitive.ToString(CultureInfo.InvariantCulture))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.HalsteadDistinctOperators, new LiteralNode(halstead.DistinctOperators.ToString(CultureInfo.InvariantCulture))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.HalsteadDistinctOperands, new LiteralNode(halstead.DistinctOperands.ToString(CultureInfo.InvariantCulture))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.HalsteadTotalOperators, new LiteralNode(halstead.TotalOperators.ToString(CultureInfo.InvariantCulture))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.HalsteadTotalOperands, new LiteralNode(halstead.TotalOperands.ToString(CultureInfo.InvariantCulture))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.HalsteadVocabulary, new LiteralNode(halstead.Vocabulary.ToString(CultureInfo.InvariantCulture))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.HalsteadLength, new LiteralNode(halstead.Length.ToString(CultureInfo.InvariantCulture))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.HalsteadVolume, new LiteralNode(FormatDouble(halstead.Volume))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.HalsteadDifficulty, new LiteralNode(FormatDouble(halstead.Difficulty))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.HalsteadEffort, new LiteralNode(FormatDouble(halstead.Effort))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.HalsteadEstimatedBugs, new LiteralNode(FormatDouble(halstead.EstimatedBugs))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.HalsteadEstimatedTimeSeconds, new LiteralNode(FormatDouble(halstead.EstimatedTimeSeconds))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.LocTotalLines, new LiteralNode(loc.TotalLines.ToString(CultureInfo.InvariantCulture))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.LocCodeLines, new LiteralNode(loc.CodeLines.ToString(CultureInfo.InvariantCulture))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.LocCommentLines, new LiteralNode(loc.CommentLines.ToString(CultureInfo.InvariantCulture))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.LocBlankLines, new LiteralNode(loc.BlankLines.ToString(CultureInfo.InvariantCulture))));
+        triples.Add(new SemanticTriple(new EntityNode(sourceMethodId), CorePredicates.MaintainabilityIndex, new LiteralNode(FormatDouble(maintainabilityIndex))));
+    }
+
+    private static SyntaxNode? GetMetricRoot(MemberDeclarationSyntax declaration, SemanticModel semanticModel)
+    {
+        return declaration switch
+        {
+            MethodDeclarationSyntax method when method.Body is not null => method.Body,
+            MethodDeclarationSyntax method when method.ExpressionBody is not null
+                => semanticModel.GetOperation(method.ExpressionBody.Expression)?.Syntax,
+            ConstructorDeclarationSyntax ctor when ctor.Body is not null => ctor.Body,
+            ConstructorDeclarationSyntax ctor when ctor.ExpressionBody is not null
+                => semanticModel.GetOperation(ctor.ExpressionBody.Expression)?.Syntax,
+            _ => null,
+        };
+    }
+
+    private static int CalculateCyclomaticComplexity(SyntaxNode root)
+    {
+        var decisionPoints = root.DescendantNodesAndSelf().Count(node =>
+            node is IfStatementSyntax
+                or ForStatementSyntax
+                or ForEachStatementSyntax
+                or WhileStatementSyntax
+                or DoStatementSyntax
+                or CatchClauseSyntax
+                or ConditionalExpressionSyntax
+                or SwitchExpressionArmSyntax
+                or CaseSwitchLabelSyntax
+                or CasePatternSwitchLabelSyntax
+                or ConditionalAccessExpressionSyntax
+                || (node is BinaryExpressionSyntax binary
+                    && (binary.IsKind(SyntaxKind.LogicalAndExpression)
+                        || binary.IsKind(SyntaxKind.LogicalOrExpression))));
+
+        return 1 + decisionPoints;
+    }
+
+    private static int CalculateCognitiveComplexity(SyntaxNode root)
+    {
+        var score = 0;
+
+        void Visit(SyntaxNode node, int nesting)
+        {
+            switch (node)
+            {
+                case IfStatementSyntax ifStatement:
+                    score += 1 + nesting;
+                    score += CountLogicalOperators(ifStatement.Condition);
+                    Visit(ifStatement.Statement, nesting + 1);
+                    if (ifStatement.Else is not null)
+                    {
+                        if (ifStatement.Else.Statement is IfStatementSyntax elseIf)
+                        {
+                            Visit(elseIf, nesting);
+                        }
+                        else
+                        {
+                            Visit(ifStatement.Else.Statement, nesting + 1);
+                        }
+                    }
+                    return;
+                case ForStatementSyntax forStatement:
+                    score += 1 + nesting;
+                    if (forStatement.Condition is not null)
+                    {
+                        score += CountLogicalOperators(forStatement.Condition);
+                    }
+
+                    Visit(forStatement.Statement, nesting + 1);
+                    return;
+                case ForEachStatementSyntax forEachStatement:
+                    score += 1 + nesting;
+                    Visit(forEachStatement.Statement, nesting + 1);
+                    return;
+                case WhileStatementSyntax whileStatement:
+                    score += 1 + nesting;
+                    score += CountLogicalOperators(whileStatement.Condition);
+                    Visit(whileStatement.Statement, nesting + 1);
+                    return;
+                case DoStatementSyntax doStatement:
+                    score += 1 + nesting;
+                    score += CountLogicalOperators(doStatement.Condition);
+                    Visit(doStatement.Statement, nesting + 1);
+                    return;
+                case SwitchStatementSyntax switchStatement:
+                    score += 1 + nesting;
+                    foreach (var section in switchStatement.Sections)
+                    {
+                        foreach (var label in section.Labels.Where(label => label is not DefaultSwitchLabelSyntax))
+                        {
+                            _ = label;
+                            score += 1;
+                        }
+
+                        foreach (var statement in section.Statements)
+                        {
+                            Visit(statement, nesting + 1);
+                        }
+                    }
+
+                    return;
+                case SwitchExpressionSyntax switchExpression:
+                    score += 1 + nesting;
+                    foreach (var arm in switchExpression.Arms)
+                    {
+                        score += 1 + nesting;
+                        Visit(arm.Expression, nesting + 1);
+                    }
+
+                    return;
+                case CatchClauseSyntax catchClause:
+                    score += 1 + nesting;
+                    if (catchClause.Filter is not null)
+                    {
+                        score += CountLogicalOperators(catchClause.Filter.FilterExpression);
+                    }
+
+                    Visit(catchClause.Block, nesting + 1);
+                    return;
+                case ConditionalExpressionSyntax conditionalExpression:
+                    score += 1 + nesting;
+                    score += CountLogicalOperators(conditionalExpression.Condition);
+                    Visit(conditionalExpression.WhenTrue, nesting + 1);
+                    Visit(conditionalExpression.WhenFalse, nesting + 1);
+                    return;
+                case ParenthesizedLambdaExpressionSyntax lambdaExpression:
+                    Visit(lambdaExpression.Body, nesting + 1);
+                    return;
+                case SimpleLambdaExpressionSyntax simpleLambdaExpression:
+                    Visit(simpleLambdaExpression.Body, nesting + 1);
+                    return;
+                case LocalFunctionStatementSyntax localFunction:
+                    score += 1 + nesting;
+                    if (localFunction.Body is not null)
+                    {
+                        Visit(localFunction.Body, nesting + 1);
+                    }
+                    else if (localFunction.ExpressionBody is not null)
+                    {
+                        Visit(localFunction.ExpressionBody.Expression, nesting + 1);
+                    }
+                    return;
+            }
+
+            foreach (var child in node.ChildNodes())
+            {
+                Visit(child, nesting);
+            }
+        }
+
+        Visit(root, 0);
+        return score;
+    }
+
+    private static int CountLogicalOperators(ExpressionSyntax expression)
+    {
+        return expression
+            .DescendantNodesAndSelf()
+            .OfType<BinaryExpressionSyntax>()
+            .Count(binary => binary.IsKind(SyntaxKind.LogicalAndExpression)
+                || binary.IsKind(SyntaxKind.LogicalOrExpression));
+    }
+
+    private static HalsteadMetricSnapshot CalculateHalsteadMetrics(SyntaxNode root)
+    {
+        var distinctOperators = new HashSet<string>(StringComparer.Ordinal);
+        var distinctOperands = new HashSet<string>(StringComparer.Ordinal);
+        var totalOperators = 0;
+        var totalOperands = 0;
+
+        foreach (var token in root.DescendantTokens(descendIntoTrivia: false))
+        {
+            if (IsOperandToken(token))
+            {
+                totalOperands++;
+                distinctOperands.Add(token.ValueText);
+                continue;
+            }
+
+            if (IsOperatorToken(token))
+            {
+                totalOperators++;
+                distinctOperators.Add(token.Text);
+            }
+        }
+
+        var n1 = distinctOperators.Count;
+        var n2 = distinctOperands.Count;
+        var n = n1 + n2;
+        var n1Safe = Math.Max(1, n1);
+        var n2Safe = Math.Max(1, n2);
+        var length = totalOperators + totalOperands;
+        var volume = length <= 0 || n <= 0 ? 0d : length * Math.Log2(n);
+        var difficulty = (n1Safe / 2d) * (totalOperands / (double)n2Safe);
+        var effort = difficulty * volume;
+        var estimatedBugs = volume / 3000d;
+        var estimatedTimeSeconds = effort / 18d;
+
+        return new HalsteadMetricSnapshot(
+            DistinctOperators: n1,
+            DistinctOperands: n2,
+            TotalOperators: totalOperators,
+            TotalOperands: totalOperands,
+            Vocabulary: n,
+            Length: length,
+            Volume: volume,
+            Difficulty: difficulty,
+            Effort: effort,
+            EstimatedBugs: estimatedBugs,
+            EstimatedTimeSeconds: estimatedTimeSeconds);
+    }
+
+    private static bool IsOperandToken(SyntaxToken token)
+    {
+        return token.Kind() is SyntaxKind.IdentifierToken
+            or SyntaxKind.NumericLiteralToken
+            or SyntaxKind.StringLiteralToken
+            or SyntaxKind.CharacterLiteralToken
+            or SyntaxKind.TrueKeyword
+            or SyntaxKind.FalseKeyword
+            or SyntaxKind.NullKeyword;
+    }
+
+    private static bool IsOperatorToken(SyntaxToken token)
+    {
+        return token.Kind() is SyntaxKind.PlusToken
+            or SyntaxKind.MinusToken
+            or SyntaxKind.AsteriskToken
+            or SyntaxKind.SlashToken
+            or SyntaxKind.PercentToken
+            or SyntaxKind.AmpersandToken
+            or SyntaxKind.BarToken
+            or SyntaxKind.CaretToken
+            or SyntaxKind.TildeToken
+            or SyntaxKind.ExclamationToken
+            or SyntaxKind.EqualsToken
+            or SyntaxKind.LessThanToken
+            or SyntaxKind.GreaterThanToken
+            or SyntaxKind.LessThanEqualsToken
+            or SyntaxKind.GreaterThanEqualsToken
+            or SyntaxKind.EqualsEqualsToken
+            or SyntaxKind.ExclamationEqualsToken
+            or SyntaxKind.AmpersandAmpersandToken
+            or SyntaxKind.BarBarToken
+            or SyntaxKind.PlusPlusToken
+            or SyntaxKind.MinusMinusToken
+            or SyntaxKind.MinusGreaterThanToken
+            or SyntaxKind.QuestionToken
+            or SyntaxKind.QuestionQuestionToken
+            or SyntaxKind.QuestionQuestionEqualsToken
+            or SyntaxKind.PlusEqualsToken
+            or SyntaxKind.MinusEqualsToken
+            or SyntaxKind.AsteriskEqualsToken
+            or SyntaxKind.SlashEqualsToken
+            or SyntaxKind.PercentEqualsToken
+            or SyntaxKind.AmpersandEqualsToken
+            or SyntaxKind.BarEqualsToken
+            or SyntaxKind.CaretEqualsToken
+            or SyntaxKind.LessThanLessThanToken
+            or SyntaxKind.GreaterThanGreaterThanToken
+            or SyntaxKind.LessThanLessThanEqualsToken
+            or SyntaxKind.GreaterThanGreaterThanEqualsToken
+            or SyntaxKind.IfKeyword
+            or SyntaxKind.ElseKeyword
+            or SyntaxKind.SwitchKeyword
+            or SyntaxKind.CaseKeyword
+            or SyntaxKind.ForKeyword
+            or SyntaxKind.ForEachKeyword
+            or SyntaxKind.WhileKeyword
+            or SyntaxKind.DoKeyword
+            or SyntaxKind.ReturnKeyword
+            or SyntaxKind.NewKeyword
+            or SyntaxKind.ThrowKeyword
+            or SyntaxKind.TryKeyword
+            or SyntaxKind.CatchKeyword
+            or SyntaxKind.FinallyKeyword
+            or SyntaxKind.LockKeyword
+            or SyntaxKind.UsingKeyword
+            or SyntaxKind.AwaitKeyword
+            or SyntaxKind.IsKeyword
+            or SyntaxKind.AsKeyword;
+    }
+
+    private static LocMetricSnapshot CalculateLinesOfCode(SyntaxNode root)
+    {
+        var sourceText = root.SyntaxTree.GetText();
+        var lineSpan = root.GetLocation().GetLineSpan();
+        var startLine = lineSpan.StartLinePosition.Line;
+        var endLine = lineSpan.EndLinePosition.Line;
+
+        var total = 0;
+        var blank = 0;
+        var comment = 0;
+        var code = 0;
+
+        for (var lineIndex = startLine; lineIndex <= endLine; lineIndex++)
+        {
+            var lineText = sourceText.Lines[lineIndex].ToString();
+            var trimmed = lineText.Trim();
+            total++;
+
+            if (string.IsNullOrWhiteSpace(trimmed))
+            {
+                blank++;
+                continue;
+            }
+
+            if (trimmed.StartsWith("//", StringComparison.Ordinal)
+                || trimmed.StartsWith("/*", StringComparison.Ordinal)
+                || trimmed.StartsWith("*", StringComparison.Ordinal)
+                || trimmed.StartsWith("*/", StringComparison.Ordinal))
+            {
+                comment++;
+                continue;
+            }
+
+            code++;
+        }
+
+        return new LocMetricSnapshot(total, code, comment, blank);
+    }
+
+    private static double CalculateMaintainabilityIndex(double halsteadVolume, int cyclomaticComplexity, int locCodeLines)
+    {
+        var safeVolume = Math.Max(1d, halsteadVolume);
+        var safeLoc = Math.Max(1d, locCodeLines);
+        var index = (171d
+                    - (5.2d * Math.Log(safeVolume))
+                    - (0.23d * cyclomaticComplexity)
+                    - (16.2d * Math.Log(safeLoc)))
+                    * 100d
+                    / 171d;
+
+        return Math.Clamp(index, 0d, 100d);
+    }
+
+    private static string FormatDouble(double value)
+    {
+        return value.ToString("G17", CultureInfo.InvariantCulture);
     }
 
     private void AddCallEdgesForInvocations(
@@ -1435,7 +1998,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         }
     }
 
-    private void AddMethodBodyDependencyEdges(
+    private IReadOnlyCollection<EntityId> AddMethodBodyDependencyEdges(
         MemberDeclarationSyntax declaration,
         EntityId sourceMethodId,
         SemanticModel semanticModel,
@@ -1446,10 +2009,11 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         var operationRoot = GetOperationRootForBody(declaration, semanticModel);
         if (operationRoot is null)
         {
-            return;
+            return [];
         }
 
         var emittedDependencyTargetIds = new HashSet<EntityId>();
+        var methodBodyCouplingTargetIds = new HashSet<EntityId>();
         foreach (var operation in EnumerateOperations(operationRoot))
         {
             if (IsWithinNameof(operation))
@@ -1480,6 +2044,13 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     CorePredicates.DependsOnTypeInMethodBody,
                     new EntityNode(dependencyTargetId)));
             }
+
+            AddCouplingDependencies(
+                candidateType,
+                typeIdByQualifiedName,
+                externalStubIdByReference,
+                triples,
+                methodBodyCouplingTargetIds);
         }
 
         foreach (var typeSyntax in EnumerateMethodBodyDependencyTypeSyntax(declaration))
@@ -1513,7 +2084,16 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     CorePredicates.DependsOnTypeInMethodBody,
                     new EntityNode(dependencyTargetId)));
             }
+
+            AddCouplingDependencies(
+                candidateType,
+                typeIdByQualifiedName,
+                externalStubIdByReference,
+                triples,
+                methodBodyCouplingTargetIds);
         }
+
+        return methodBodyCouplingTargetIds;
     }
 
     private static IEnumerable<TypeSyntax> EnumerateMethodBodyDependencyTypeSyntax(MemberDeclarationSyntax declaration)
@@ -1635,6 +2215,148 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         }
 
         return null;
+    }
+
+    private void AddCouplingDependencies(
+        ITypeSymbol candidateType,
+        IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
+        Dictionary<string, EntityId> externalStubIdByReference,
+        List<SemanticTriple> triples,
+        HashSet<EntityId> targetIds)
+    {
+        foreach (var couplingType in EnumerateCouplingTypeSymbols(candidateType))
+        {
+            if (!TryResolveCouplingTargetId(
+                    couplingType,
+                    typeIdByQualifiedName,
+                    externalStubIdByReference,
+                    triples,
+                    out var targetId))
+            {
+                continue;
+            }
+
+            targetIds.Add(targetId);
+        }
+    }
+
+    private bool TryResolveCouplingTargetId(
+        ITypeSymbol candidateType,
+        IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
+        Dictionary<string, EntityId> externalStubIdByReference,
+        List<SemanticTriple> triples,
+        out EntityId targetId)
+    {
+        var qualifiedTypeName = GetTypeQualifiedName(candidateType);
+        if (typeIdByQualifiedName.TryGetValue(qualifiedTypeName, out var internalTypeId))
+        {
+            targetId = internalTypeId;
+            return true;
+        }
+
+        var normalizedReferenceName = NormalizeTypeReferenceName(
+            candidateType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat));
+        if (!IsExternalStubCandidate(normalizedReferenceName))
+        {
+            targetId = default;
+            return false;
+        }
+
+        targetId = GetOrCreateExternalStubId(normalizedReferenceName, externalStubIdByReference, triples);
+        return true;
+    }
+
+    private static IReadOnlyList<ITypeSymbol> EnumerateCouplingTypeSymbols(ITypeSymbol? typeSymbol)
+    {
+        var collected = new List<ITypeSymbol>();
+        var seenKeys = new HashSet<string>(StringComparer.Ordinal);
+
+        void Visit(ITypeSymbol? symbol)
+        {
+            if (symbol is null)
+            {
+                return;
+            }
+
+            switch (symbol)
+            {
+                case IDynamicTypeSymbol:
+                case ITypeParameterSymbol:
+                    return;
+                case IArrayTypeSymbol arrayType:
+                    Visit(arrayType.ElementType);
+                    return;
+                case IPointerTypeSymbol pointerType:
+                    Visit(pointerType.PointedAtType);
+                    return;
+                case IFunctionPointerTypeSymbol functionPointerType:
+                    Visit(functionPointerType.Signature.ReturnType);
+                    foreach (var parameter in functionPointerType.Signature.Parameters)
+                    {
+                        Visit(parameter.Type);
+                    }
+                    return;
+                case INamedTypeSymbol namedType:
+                    if (namedType.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T
+                        && namedType.TypeArguments.Length == 1)
+                    {
+                        Visit(namedType.TypeArguments[0]);
+                        return;
+                    }
+
+                    if (namedType.IsTupleType)
+                    {
+                        foreach (var element in namedType.TupleElements)
+                        {
+                            Visit(element.Type);
+                        }
+
+                        return;
+                    }
+
+                    var container = namedType.OriginalDefinition;
+                    if (!IsBuiltInType(container))
+                    {
+                        var key = container.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                        if (seenKeys.Add(key))
+                        {
+                            collected.Add(container);
+                        }
+                    }
+
+                    foreach (var typeArgument in namedType.TypeArguments)
+                    {
+                        Visit(typeArgument);
+                    }
+
+                    return;
+                default:
+                    if (!IsBuiltInType(symbol))
+                    {
+                        var key = symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                        if (seenKeys.Add(key))
+                        {
+                            collected.Add(symbol);
+                        }
+                    }
+
+                    return;
+            }
+        }
+
+        Visit(typeSymbol);
+        return collected;
+    }
+
+    private static bool IsBuiltInType(ITypeSymbol symbol)
+    {
+        if (symbol.SpecialType != SpecialType.None)
+        {
+            return true;
+        }
+
+        return symbol.TypeKind == TypeKind.Pointer
+               || symbol.TypeKind == TypeKind.FunctionPointer;
     }
 
     private static void EmitMemberReadWriteTriples(
@@ -2319,6 +3041,25 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         int Arity,
         IReadOnlyList<string> ParameterTypeSignatures,
         bool IsOverride);
+
+    private sealed record HalsteadMetricSnapshot(
+        int DistinctOperators,
+        int DistinctOperands,
+        int TotalOperators,
+        int TotalOperands,
+        int Vocabulary,
+        int Length,
+        double Volume,
+        double Difficulty,
+        double Effort,
+        double EstimatedBugs,
+        double EstimatedTimeSeconds);
+
+    private sealed record LocMetricSnapshot(
+        int TotalLines,
+        int CodeLines,
+        int CommentLines,
+        int BlankLines);
 
     private static void AddEntityTriples(
         List<SemanticTriple> triples,

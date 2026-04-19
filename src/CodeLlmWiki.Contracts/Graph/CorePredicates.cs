@@ -74,4 +74,27 @@ public static class CorePredicates
     public static readonly PredicateId DependsOnTypeInMethodBody = new("core:dependsOnTypeInMethodBody");
     public static readonly PredicateId ExternalAssemblyName = new("core:externalAssemblyName");
     public static readonly PredicateId ResolutionReason = new("core:resolutionReason");
+    public static readonly PredicateId CyclomaticComplexity = new("core:cyclomaticComplexity");
+    public static readonly PredicateId CognitiveComplexity = new("core:cognitiveComplexity");
+    public static readonly PredicateId HalsteadDistinctOperators = new("core:halsteadDistinctOperators");
+    public static readonly PredicateId HalsteadDistinctOperands = new("core:halsteadDistinctOperands");
+    public static readonly PredicateId HalsteadTotalOperators = new("core:halsteadTotalOperators");
+    public static readonly PredicateId HalsteadTotalOperands = new("core:halsteadTotalOperands");
+    public static readonly PredicateId HalsteadVocabulary = new("core:halsteadVocabulary");
+    public static readonly PredicateId HalsteadLength = new("core:halsteadLength");
+    public static readonly PredicateId HalsteadVolume = new("core:halsteadVolume");
+    public static readonly PredicateId HalsteadDifficulty = new("core:halsteadDifficulty");
+    public static readonly PredicateId HalsteadEffort = new("core:halsteadEffort");
+    public static readonly PredicateId HalsteadEstimatedBugs = new("core:halsteadEstimatedBugs");
+    public static readonly PredicateId HalsteadEstimatedTimeSeconds = new("core:halsteadEstimatedTimeSeconds");
+    public static readonly PredicateId LocTotalLines = new("core:locTotalLines");
+    public static readonly PredicateId LocCodeLines = new("core:locCodeLines");
+    public static readonly PredicateId LocCommentLines = new("core:locCommentLines");
+    public static readonly PredicateId LocBlankLines = new("core:locBlankLines");
+    public static readonly PredicateId MaintainabilityIndex = new("core:maintainabilityIndex");
+    public static readonly PredicateId MetricCoverageStatus = new("core:metricCoverageStatus");
+    public static readonly PredicateId MetricCoverageReason = new("core:metricCoverageReason");
+    public static readonly PredicateId CboDeclaration = new("core:cboDeclaration");
+    public static readonly PredicateId CboMethodBody = new("core:cboMethodBody");
+    public static readonly PredicateId CboTotal = new("core:cboTotal");
 }
