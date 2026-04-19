@@ -1515,6 +1515,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         IReadOnlyDictionary<EntityId, EntityMetadata> metadataById,
         DeclarationCatalog declarations)
     {
+        _ = declarations;
+
         var containsEndpointEdges = BuildEntityEdges(triples, CorePredicates.ContainsEndpoint);
         var containsEndpointGroupEdges = BuildEntityEdges(triples, CorePredicates.ContainsEndpointGroup);
         var declaresEndpointEdges = BuildEntityEdges(triples, CorePredicates.DeclaresEndpoint);
@@ -1530,6 +1532,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         var authoredRouteByEntityId = BuildStringLiteralMap(triples, CorePredicates.AuthoredRouteText);
         var normalizedRouteByEntityId = BuildStringLiteralMap(triples, CorePredicates.NormalizedRouteKey);
         var confidenceByEntityId = BuildStringLiteralMap(triples, CorePredicates.EndpointConfidence);
+        var resolutionReasonByEntityId = BuildStringLiteralMap(triples, CorePredicates.ResolutionReason);
         var ruleIdByEntityId = BuildStringLiteralMap(triples, CorePredicates.RuleId);
         var ruleVersionByEntityId = BuildStringLiteralMap(triples, CorePredicates.RuleVersion);
         var ruleSourceByEntityId = BuildStringLiteralMap(triples, CorePredicates.RuleSource);
@@ -1594,16 +1597,6 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             .GroupBy(x => x.Subject)
             .ToDictionary(x => x.Key, x => x.First().Object);
 
-        var endpointDeclarationIds = declarations.Methods.Declarations
-            .Select(x => x.Id)
-            .ToHashSet();
-        var typeIds = declarations.Types
-            .Select(x => x.Id)
-            .ToHashSet();
-        var namespaceIds = declarations.Namespaces
-            .Select(x => x.Id)
-            .ToHashSet();
-
         var groups = endpointGroupIds
             .Select(groupId =>
             {
@@ -1627,8 +1620,8 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     CanonicalKey: meta.Path,
                     AuthoredRoutePrefix: routePrefixByEntityId.TryGetValue(groupId, out var prefix) ? prefix : string.Empty,
                     NormalizedRoutePrefix: normalizedRouteByEntityId.TryGetValue(groupId, out var normalizedPrefix) ? normalizedPrefix : string.Empty,
-                    DeclaringTypeId: typeIds.Contains(declaringTypeId) ? declaringTypeId : null,
-                    NamespaceId: namespaceIds.Contains(namespaceId) ? namespaceId : null,
+                    DeclaringTypeId: declaringTypeByEntity.ContainsKey(groupId) ? declaringTypeId : null,
+                    NamespaceId: namespaceByEntity.ContainsKey(groupId) ? namespaceId : null,
                     DeclarationFileIds: declarationFileIds,
                     EndpointIds: groupedEndpointIds);
             })
@@ -1665,13 +1658,16 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     Confidence: confidenceByEntityId.TryGetValue(endpointId, out var confidence)
                         ? ParseEndpointConfidence(confidence)
                         : EndpointConfidence.Unknown,
+                    ResolutionReason: resolutionReasonByEntityId.TryGetValue(endpointId, out var resolutionReason)
+                        ? resolutionReason
+                        : string.Empty,
                     RuleId: ruleIdByEntityId.TryGetValue(endpointId, out var ruleId) ? ruleId : string.Empty,
                     RuleVersion: ruleVersionByEntityId.TryGetValue(endpointId, out var ruleVersion) ? ruleVersion : string.Empty,
                     RuleSource: ruleSourceByEntityId.TryGetValue(endpointId, out var ruleSource) ? ruleSource : string.Empty,
-                    DeclaringMethodId: endpointDeclarationIds.Contains(declaringMethodId) ? declaringMethodId : null,
-                    DeclaringTypeId: typeIds.Contains(declaringTypeId) ? declaringTypeId : null,
-                    NamespaceId: namespaceIds.Contains(namespaceId) ? namespaceId : null,
-                    GroupId: endpointGroupIds.Contains(groupId) ? groupId : null,
+                    DeclaringMethodId: declaringMethodByEndpoint.ContainsKey(endpointId) ? declaringMethodId : null,
+                    DeclaringTypeId: declaringTypeByEntity.ContainsKey(endpointId) ? declaringTypeId : null,
+                    NamespaceId: namespaceByEntity.ContainsKey(endpointId) ? namespaceId : null,
+                    GroupId: endpointGroupByEndpoint.ContainsKey(endpointId) ? groupId : null,
                     DeclarationFileIds: declarationFileIds);
             })
             .OrderBy(x => x.Family, StringComparer.Ordinal)
@@ -1681,7 +1677,18 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
             .ToArray();
 
-        return new EndpointCatalog(groups, endpoints);
+        var endpointDiagnostics = endpoints
+            .Where(x => !string.IsNullOrWhiteSpace(x.ResolutionReason))
+            .GroupBy(x => (x.Family, x.ResolutionReason))
+            .Select(group => new EndpointDiagnosticCountNode(
+                Family: group.Key.Family,
+                Reason: group.Key.ResolutionReason,
+                Count: group.Count()))
+            .OrderBy(x => x.Family, StringComparer.Ordinal)
+            .ThenBy(x => x.Reason, StringComparer.Ordinal)
+            .ToArray();
+
+        return new EndpointCatalog(groups, endpoints, endpointDiagnostics);
     }
 
     private static EndpointConfidence ParseEndpointConfidence(string value)

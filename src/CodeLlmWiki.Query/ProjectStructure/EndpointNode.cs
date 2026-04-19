@@ -12,6 +12,7 @@ public sealed record EndpointNode(
     string AuthoredRouteTemplate,
     string NormalizedRouteKey,
     EndpointConfidence Confidence,
+    string ResolutionReason,
     string RuleId,
     string RuleVersion,
     string RuleSource,
