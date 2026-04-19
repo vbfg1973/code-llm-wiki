@@ -6,7 +6,7 @@
 
 - [x] Phase 1: Diagnostics Taxonomy and Stage Telemetry Baseline — completion date: 2026-04-19
 - [x] Phase 2: Project-Scoped Semantic Call Resolution Slice — completion date: 2026-04-19
-- [ ] Phase 3: Override Resolution and Type-Fallback Noise Reduction
+- [x] Phase 3: Override Resolution and Type-Fallback Noise Reduction — completion date: 2026-04-19
 - [ ] Phase 4: Quality Gate Policy and Run Status Integration
 - [ ] Phase 5: Bounded Parallelism and Deterministic Merge Hardening
 - [ ] Phase 6: Docs Runbook, Contracts, and Regression Hardening
@@ -74,10 +74,10 @@ Extend project-scoped semantic resolution to override relationships and introduc
 
 ### Acceptance criteria
 
-- [ ] Override relationships resolve through project-scoped semantic contexts.
-- [ ] Nullable and array type references are normalized before fallback classification.
-- [ ] Fallback diagnostic dedupe reduces repeated noise while preserving evidence.
-- [ ] Tests verify override resolution and normalized fallback behavior stability.
+- [x] Override relationships resolve through project-scoped semantic contexts.
+- [x] Nullable and array type references are normalized before fallback classification.
+- [x] Fallback diagnostic dedupe reduces repeated noise while preserving evidence.
+- [x] Tests verify override resolution and normalized fallback behavior stability.
 
 ---
 

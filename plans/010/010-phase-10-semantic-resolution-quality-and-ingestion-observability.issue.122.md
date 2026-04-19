@@ -3,9 +3,12 @@
 > Parent PRD: [PRD 010](/home/vbfg/dev/dotnet-llm-wiki/plans/010/010-phase-10-semantic-resolution-quality-and-ingestion-observability.prd.md)
 
 - Issue: [#122](https://github.com/vbfg1973/code-llm-wiki/issues/122)
-- [ ] Status: open
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
+
+- Completed in [PR #128](https://github.com/vbfg1973/code-llm-wiki/pull/128) and merged to `develop`.
 
 ## Parent PRD
 
@@ -17,10 +20,10 @@ Extend project-scoped semantics to override relationship resolution and reduce f
 
 ## Acceptance criteria
 
-- [ ] Override relationships resolve through project-scoped semantic contexts.
-- [ ] Nullable and array type references are normalized before fallback classification.
-- [ ] Fallback diagnostic dedupe reduces repeated low-signal noise while preserving evidence.
-- [ ] Tests verify override resolution and normalized fallback behavior stability.
+- [x] Override relationships resolve through project-scoped semantic contexts.
+- [x] Nullable and array type references are normalized before fallback classification.
+- [x] Fallback diagnostic dedupe reduces repeated low-signal noise while preserving evidence.
+- [x] Tests verify override resolution and normalized fallback behavior stability.
 
 ## Blocked by
 
