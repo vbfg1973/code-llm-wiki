@@ -7,7 +7,7 @@
 - [x] Phase 1: Endpoint Core Contracts and Controller Baseline — completion date: 2026-04-19
 - [x] Phase 2: Minimal API Endpoint Slice — completion date: 2026-04-19
 - [x] Phase 3: Message Handler and CLI Endpoint Slice — completion date: 2026-04-19
-- [ ] Phase 4: gRPC Endpoint Slice and Partial-Resolution Semantics
+- [x] Phase 4: gRPC Endpoint Slice and Partial-Resolution Semantics — completion date: 2026-04-19
 - [ ] Phase 5: Matchability Fingerprints and Outbound Breadcrumbs
 - [ ] Phase 6: Publication Hardening, Determinism, and Performance
 
@@ -91,10 +91,10 @@ Add gRPC endpoint discovery from registration/service semantics and implement th
 
 ### Acceptance criteria
 
-- [ ] gRPC endpoints are discovered from service registration semantics and projected into standard endpoint contracts.
-- [ ] Partial/unresolved detections are retained and rendered with explicit reason codes.
-- [ ] Confidence values are assigned consistently across resolved and unresolved states.
-- [ ] Diagnostics are queryable/countable by endpoint family and reason.
+- [x] gRPC endpoints are discovered from service registration semantics and projected into standard endpoint contracts.
+- [x] Partial/unresolved detections are retained and rendered with explicit reason codes.
+- [x] Confidence values are assigned consistently across resolved and unresolved states.
+- [x] Diagnostics are queryable/countable by endpoint family and reason.
 
 ---
 

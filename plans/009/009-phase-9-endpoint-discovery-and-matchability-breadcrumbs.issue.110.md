@@ -3,7 +3,8 @@
 > Parent PRD: [PRD 009](/home/vbfg/dev/dotnet-llm-wiki/plans/009/009-phase-9-endpoint-discovery-and-matchability-breadcrumbs.prd.md)
 
 - Issue: [#110](https://github.com/vbfg1973/code-llm-wiki/issues/110)
-- [ ] Status: open
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -17,10 +18,10 @@ Add gRPC endpoint discovery from registration/service semantics and implement sh
 
 ## Acceptance criteria
 
-- [ ] gRPC endpoints are discovered from service registration semantics and projected into standard endpoint contracts.
-- [ ] Partial/unresolved detections are retained and rendered with explicit reason codes.
-- [ ] Confidence values are assigned consistently across resolved and unresolved states.
-- [ ] Diagnostics are queryable/countable by endpoint family and reason.
+- [x] gRPC endpoints are discovered from service registration semantics and projected into standard endpoint contracts.
+- [x] Partial/unresolved detections are retained and rendered with explicit reason codes.
+- [x] Confidence values are assigned consistently across resolved and unresolved states.
+- [x] Diagnostics are queryable/countable by endpoint family and reason.
 
 ## Blocked by
 
