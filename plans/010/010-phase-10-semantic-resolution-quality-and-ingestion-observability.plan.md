@@ -4,7 +4,7 @@
 
 ## Execution checklist
 
-- [ ] Phase 1: Diagnostics Taxonomy and Stage Telemetry Baseline
+- [x] Phase 1: Diagnostics Taxonomy and Stage Telemetry Baseline — completion date: 2026-04-19
 - [ ] Phase 2: Project-Scoped Semantic Call Resolution Slice
 - [ ] Phase 3: Override Resolution and Type-Fallback Noise Reduction
 - [ ] Phase 4: Quality Gate Policy and Run Status Integration
@@ -40,10 +40,10 @@ Deliver a complete vertical slice that introduces cause-level call-resolution di
 
 ### Acceptance criteria
 
-- [ ] Call-resolution diagnostics are emitted with explicit cause-level subcodes.
-- [ ] Aggregate `method:call:resolution:failed` compatibility is preserved in summaries.
-- [ ] Stage timing events are emitted to stderr at stage boundaries using approved stage identifiers.
-- [ ] Stage timing output is stable and parse-safe across reruns.
+- [x] Call-resolution diagnostics are emitted with explicit cause-level subcodes.
+- [x] Aggregate `method:call:resolution:failed` compatibility is preserved in summaries.
+- [x] Stage timing events are emitted to stderr at stage boundaries using approved stage identifiers.
+- [x] Stage timing output is stable and parse-safe across reruns.
 
 ---
 

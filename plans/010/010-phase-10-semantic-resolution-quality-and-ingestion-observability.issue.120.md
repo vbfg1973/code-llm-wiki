@@ -3,9 +3,12 @@
 > Parent PRD: [PRD 010](/home/vbfg/dev/dotnet-llm-wiki/plans/010/010-phase-10-semantic-resolution-quality-and-ingestion-observability.prd.md)
 
 - Issue: [#120](https://github.com/vbfg1973/code-llm-wiki/issues/120)
-- [ ] Status: open
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
+
+- Completed in [PR #126](https://github.com/vbfg1973/code-llm-wiki/pull/126) and merged to `develop`.
 
 ## Parent PRD
 
@@ -17,10 +20,10 @@ Deliver the baseline quality-observability slice: introduce cause-level method-c
 
 ## Acceptance criteria
 
-- [ ] Call-resolution diagnostics are emitted with explicit cause-level subcodes.
-- [ ] Aggregate `method:call:resolution:failed` compatibility is preserved in summary outputs.
-- [ ] Stage timing events are emitted to stderr at stage boundaries using approved stage identifiers.
-- [ ] Stage timing output is deterministic and parse-safe across reruns.
+- [x] Call-resolution diagnostics are emitted with explicit cause-level subcodes.
+- [x] Aggregate `method:call:resolution:failed` compatibility is preserved in summary outputs.
+- [x] Stage timing events are emitted to stderr at stage boundaries using approved stage identifiers.
+- [x] Stage timing output is deterministic and parse-safe across reruns.
 
 ## Blocked by
 
