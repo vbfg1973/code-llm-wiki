@@ -1007,7 +1007,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             methodIdByDeclarationLocation,
             declaringTypeIdByMethodId,
             fileIdByRelativePath,
-            triples);
+            triples,
+            diagnostics);
 
         foreach (var pendingMemberTypeLink in pendingMemberTypeLinks)
         {
@@ -1171,7 +1172,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         IReadOnlyDictionary<MethodDeclarationLocationKey, EntityId> methodIdByDeclarationLocation,
         IReadOnlyDictionary<EntityId, EntityId> declaringTypeIdByMethodId,
         IReadOnlyDictionary<string, EntityId> fileIdByRelativePath,
-        List<SemanticTriple> triples)
+        List<SemanticTriple> triples,
+        List<IngestionDiagnostic> diagnostics)
     {
         if (sourceFiles.Count == 0)
         {
@@ -1204,7 +1206,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         var compilation = CSharpCompilation.Create(
             assemblyName: "CodeLlmWiki.EndpointDiscovery",
             syntaxTrees: syntaxTrees,
-            references: BuildCompilationReferences(new List<IngestionDiagnostic>()),
+            references: BuildCompilationReferences(diagnostics),
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         var emittedEndpointGroupIds = new HashSet<EntityId>();
@@ -1252,48 +1254,66 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     routePrefixTemplates = [string.Empty];
                 }
 
-                var authoredRoutePrefix = routePrefixTemplates[0];
-                var normalizedRoutePrefix = NormalizeRouteKey(ExpandRouteTokens(authoredRoutePrefix, controllerTokenValue, string.Empty));
-                var endpointGroupKey = $"{declaringTypeId.Value}:controller:{normalizedRoutePrefix}";
-                var endpointGroupId = _stableIdGenerator.Create(new EntityKey("endpoint-group", endpointGroupKey));
+                var groupContexts = routePrefixTemplates
+                    .Select(routePrefixTemplate =>
+                    {
+                        var normalizedRoutePrefix = NormalizeRouteKey(ExpandRouteTokens(routePrefixTemplate, controllerTokenValue, string.Empty));
+                        var endpointGroupKey = $"{declaringTypeId.Value}:controller:{normalizedRoutePrefix}";
+                        var endpointGroupId = _stableIdGenerator.Create(new EntityKey("endpoint-group", endpointGroupKey));
+                        return new
+                        {
+                            AuthoredRoutePrefix = routePrefixTemplate,
+                            NormalizedRoutePrefix = normalizedRoutePrefix,
+                            GroupKey = endpointGroupKey,
+                            GroupId = endpointGroupId,
+                        };
+                    })
+                    .GroupBy(x => x.GroupId)
+                    .Select(x => x.First())
+                    .ToArray();
 
-                if (emittedEndpointGroupIds.Add(endpointGroupId))
+                foreach (var groupContext in groupContexts)
                 {
+                    if (!emittedEndpointGroupIds.Add(groupContext.GroupId))
+                    {
+                        continue;
+                    }
+
                     AddEntityTriples(
                         triples,
-                        endpointGroupId,
+                        groupContext.GroupId,
                         "endpoint-group",
                         controllerName,
-                        endpointGroupKey);
+                        groupContext.GroupKey);
                     triples.Add(new SemanticTriple(
-                        new EntityNode(endpointGroupId),
+                        new EntityNode(groupContext.GroupId),
                         CorePredicates.EndpointFamily,
                         new LiteralNode("controller")));
                     triples.Add(new SemanticTriple(
-                        new EntityNode(endpointGroupId),
+                        new EntityNode(groupContext.GroupId),
                         CorePredicates.RoutePrefix,
-                        new LiteralNode(authoredRoutePrefix)));
+                        new LiteralNode(groupContext.AuthoredRoutePrefix)));
                     triples.Add(new SemanticTriple(
-                        new EntityNode(endpointGroupId),
+                        new EntityNode(groupContext.GroupId),
                         CorePredicates.NormalizedRouteKey,
-                        new LiteralNode(normalizedRoutePrefix)));
+                        new LiteralNode(groupContext.NormalizedRoutePrefix)));
                     triples.Add(new SemanticTriple(
-                        new EntityNode(endpointGroupId),
+                        new EntityNode(groupContext.GroupId),
                         CorePredicates.HasDeclaringType,
                         new EntityNode(declaringTypeId)));
                     triples.Add(new SemanticTriple(
                         new EntityNode(repositoryId),
                         CorePredicates.ContainsEndpointGroup,
-                        new EntityNode(endpointGroupId)));
+                        new EntityNode(groupContext.GroupId)));
                     triples.Add(new SemanticTriple(
                         new EntityNode(declaringTypeId),
                         CorePredicates.ContainsEndpointGroup,
-                        new EntityNode(endpointGroupId)));
+                        new EntityNode(groupContext.GroupId)));
 
                     if (namespaceIdByTypeId.TryGetValue(declaringTypeId, out var namespaceId))
                     {
                         triples.Add(new SemanticTriple(
-                            new EntityNode(endpointGroupId),
+                            new EntityNode(groupContext.GroupId),
                             CorePredicates.HasNamespace,
                             new EntityNode(namespaceId)));
                     }
@@ -1303,7 +1323,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                         triples.Add(new SemanticTriple(
                             new EntityNode(declarationFileId),
                             CorePredicates.DeclaresEndpointGroup,
-                            new EntityNode(endpointGroupId)));
+                            new EntityNode(groupContext.GroupId)));
                     }
                 }
 
@@ -1321,100 +1341,103 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                         continue;
                     }
 
-                    var endpointCandidates = ExtractControllerEndpointCandidates(
-                        methodDeclaration,
-                        routePrefixTemplates,
-                        controllerTokenValue);
-                    foreach (var endpointCandidate in endpointCandidates)
+                    foreach (var groupContext in groupContexts)
                     {
-                        var canonicalSignature = $"{endpointCandidate.HttpMethod} {endpointCandidate.NormalizedRouteKey} {methodId.Value}";
-                        var endpointId = _stableIdGenerator.Create(new EntityKey("endpoint", canonicalSignature));
-                        if (!emittedEndpointIds.Add(endpointId))
+                        var endpointCandidates = ExtractControllerEndpointCandidates(
+                            methodDeclaration,
+                            groupContext.AuthoredRoutePrefix,
+                            controllerTokenValue);
+                        foreach (var endpointCandidate in endpointCandidates)
                         {
-                            continue;
-                        }
+                            var canonicalSignature = $"{endpointCandidate.HttpMethod} {endpointCandidate.NormalizedRouteKey} {methodId.Value}";
+                            var endpointId = _stableIdGenerator.Create(new EntityKey("endpoint", canonicalSignature));
+                            if (!emittedEndpointIds.Add(endpointId))
+                            {
+                                continue;
+                            }
 
-                        AddEntityTriples(
-                            triples,
-                            endpointId,
-                            "endpoint",
-                            $"{endpointCandidate.HttpMethod} {endpointCandidate.NormalizedRouteKey}",
-                            canonicalSignature);
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(endpointId),
-                            CorePredicates.EndpointKind,
-                            new LiteralNode("controller-action")));
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(endpointId),
-                            CorePredicates.EndpointFamily,
-                            new LiteralNode("controller")));
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(endpointId),
-                            CorePredicates.EndpointHttpMethod,
-                            new LiteralNode(endpointCandidate.HttpMethod)));
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(endpointId),
-                            CorePredicates.AuthoredRouteText,
-                            new LiteralNode(endpointCandidate.AuthoredRouteText)));
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(endpointId),
-                            CorePredicates.NormalizedRouteKey,
-                            new LiteralNode(endpointCandidate.NormalizedRouteKey)));
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(endpointId),
-                            CorePredicates.EndpointConfidence,
-                            new LiteralNode(endpointCandidate.Confidence)));
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(endpointId),
-                            CorePredicates.RuleId,
-                            new LiteralNode("aspnetcore.controller.attribute-route")));
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(endpointId),
-                            CorePredicates.RuleVersion,
-                            new LiteralNode("1")));
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(endpointId),
-                            CorePredicates.RuleSource,
-                            new LiteralNode("code-defined")));
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(endpointId),
-                            CorePredicates.HasEndpointGroup,
-                            new EntityNode(endpointGroupId)));
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(endpointId),
-                            CorePredicates.HasDeclaringMethod,
-                            new EntityNode(methodId)));
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(endpointId),
-                            CorePredicates.HasDeclaringType,
-                            new EntityNode(declaringTypeId)));
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(repositoryId),
-                            CorePredicates.ContainsEndpoint,
-                            new EntityNode(endpointId)));
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(declaringTypeId),
-                            CorePredicates.ContainsEndpoint,
-                            new EntityNode(endpointId)));
-                        triples.Add(new SemanticTriple(
-                            new EntityNode(endpointGroupId),
-                            CorePredicates.ContainsEndpoint,
-                            new EntityNode(endpointId)));
-
-                        if (namespaceIdByTypeId.TryGetValue(declaringTypeId, out var namespaceId))
-                        {
+                            AddEntityTriples(
+                                triples,
+                                endpointId,
+                                "endpoint",
+                                $"{endpointCandidate.HttpMethod} {endpointCandidate.NormalizedRouteKey}",
+                                canonicalSignature);
                             triples.Add(new SemanticTriple(
                                 new EntityNode(endpointId),
-                                CorePredicates.HasNamespace,
-                                new EntityNode(namespaceId)));
-                        }
-
-                        if (declarationFileId != default)
-                        {
+                                CorePredicates.EndpointKind,
+                                new LiteralNode("controller-action")));
                             triples.Add(new SemanticTriple(
-                                new EntityNode(declarationFileId),
-                                CorePredicates.DeclaresEndpoint,
+                                new EntityNode(endpointId),
+                                CorePredicates.EndpointFamily,
+                                new LiteralNode("controller")));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.EndpointHttpMethod,
+                                new LiteralNode(endpointCandidate.HttpMethod)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.AuthoredRouteText,
+                                new LiteralNode(endpointCandidate.AuthoredRouteText)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.NormalizedRouteKey,
+                                new LiteralNode(endpointCandidate.NormalizedRouteKey)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.EndpointConfidence,
+                                new LiteralNode(endpointCandidate.Confidence)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.RuleId,
+                                new LiteralNode("aspnetcore.controller.attribute-route")));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.RuleVersion,
+                                new LiteralNode("1")));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.RuleSource,
+                                new LiteralNode("code-defined")));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.HasEndpointGroup,
+                                new EntityNode(groupContext.GroupId)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.HasDeclaringMethod,
+                                new EntityNode(methodId)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(endpointId),
+                                CorePredicates.HasDeclaringType,
+                                new EntityNode(declaringTypeId)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(repositoryId),
+                                CorePredicates.ContainsEndpoint,
                                 new EntityNode(endpointId)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(declaringTypeId),
+                                CorePredicates.ContainsEndpoint,
+                                new EntityNode(endpointId)));
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(groupContext.GroupId),
+                                CorePredicates.ContainsEndpoint,
+                                new EntityNode(endpointId)));
+
+                            if (namespaceIdByTypeId.TryGetValue(declaringTypeId, out var namespaceId))
+                            {
+                                triples.Add(new SemanticTriple(
+                                    new EntityNode(endpointId),
+                                    CorePredicates.HasNamespace,
+                                    new EntityNode(namespaceId)));
+                            }
+
+                            if (declarationFileId != default)
+                            {
+                                triples.Add(new SemanticTriple(
+                                    new EntityNode(declarationFileId),
+                                    CorePredicates.DeclaresEndpoint,
+                                    new EntityNode(endpointId)));
+                            }
                         }
                     }
                 }
@@ -1452,7 +1475,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
     private static List<ControllerEndpointCandidate> ExtractControllerEndpointCandidates(
         MethodDeclarationSyntax methodDeclaration,
-        IReadOnlyList<string> routePrefixTemplates,
+        string routePrefixTemplate,
         string controllerTokenValue)
     {
         var candidates = new List<ControllerEndpointCandidate>();
@@ -1472,21 +1495,18 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             }
 
             var routeSuffix = ExtractFirstStringLiteralArgument(attribute);
-            foreach (var routePrefix in routePrefixTemplates)
+            var authoredRoute = CombineRouteTemplates(routePrefixTemplate, routeSuffix);
+            var normalizedRoute = NormalizeRouteKey(ExpandRouteTokens(authoredRoute, controllerTokenValue, actionTokenValue));
+            if (string.IsNullOrWhiteSpace(normalizedRoute))
             {
-                var authoredRoute = CombineRouteTemplates(routePrefix, routeSuffix);
-                var normalizedRoute = NormalizeRouteKey(ExpandRouteTokens(authoredRoute, controllerTokenValue, actionTokenValue));
-                if (string.IsNullOrWhiteSpace(normalizedRoute))
-                {
-                    normalizedRoute = NormalizeRouteKey(ExpandRouteTokens(routePrefix, controllerTokenValue, actionTokenValue));
-                }
-
-                candidates.Add(new ControllerEndpointCandidate(
-                    HttpMethod: httpMethod,
-                    AuthoredRouteText: authoredRoute,
-                    NormalizedRouteKey: normalizedRoute,
-                    Confidence: "high"));
+                normalizedRoute = NormalizeRouteKey(ExpandRouteTokens(routePrefixTemplate, controllerTokenValue, actionTokenValue));
             }
+
+            candidates.Add(new ControllerEndpointCandidate(
+                HttpMethod: httpMethod,
+                AuthoredRouteText: authoredRoute,
+                NormalizedRouteKey: normalizedRoute,
+                Confidence: "high"));
         }
 
         return candidates;
