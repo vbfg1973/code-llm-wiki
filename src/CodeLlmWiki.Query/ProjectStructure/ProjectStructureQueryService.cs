@@ -14,6 +14,11 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
 
     public ProjectStructureWikiModel GetModel(EntityId repositoryId)
     {
+        return GetModel(repositoryId, ProjectStructureQueryOptions.Default);
+    }
+
+    public ProjectStructureWikiModel GetModel(EntityId repositoryId, ProjectStructureQueryOptions options)
+    {
         var metadataById = BuildEntityMetadata(_triples);
         var contains = BuildContainsEdges(_triples);
         var packageReferences = BuildPackageReferences(_triples, metadataById);
@@ -301,6 +306,14 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             repoMeta.Path,
             repoMeta.HeadBranch,
             repoMeta.MainlineBranch);
+        var structuralMetrics = new StructuralMetricRollupProjector().Project(
+            new StructuralMetricRollupProjectionRequest(
+                repositoryId,
+                _triples,
+                projects,
+                files,
+                declarations,
+                options.MetricScopeFilter));
 
         return new ProjectStructureWikiModel(repository, solutions, projects, packages, files, submodules)
         {
@@ -308,6 +321,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
             DependencyAttribution = new DependencyAttributionCatalog(
                 declarationUnknownDependencyUsage,
                 methodBodyUnknownDependencyUsage),
+            StructuralMetrics = structuralMetrics,
         };
     }
 
