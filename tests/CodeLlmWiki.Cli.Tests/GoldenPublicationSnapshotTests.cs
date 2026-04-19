@@ -271,7 +271,7 @@ public sealed class GoldenPublicationSnapshotTests
 
         ValidateRequiredFields(frontMatter, "common", "entity_id", "entity_type", "repository_id");
         Assert.True(
-            frontMatter["entity_type"] is "repository" or "solution" or "project" or "package" or "namespace" or "type" or "method" or "file" or "index",
+            frontMatter["entity_type"] is "repository" or "solution" or "project" or "package" or "namespace" or "type" or "method" or "file" or "index" or "hotspot",
             $"Invalid entity_type '{frontMatter["entity_type"]}' in {relativePath}");
 
         if (relativePath.StartsWith("repositories/", StringComparison.Ordinal))
@@ -396,6 +396,11 @@ public sealed class GoldenPublicationSnapshotTests
         else if (relativePath.StartsWith("index/", StringComparison.Ordinal))
         {
             ValidateAllowedFields(frontMatter, "entity_id", "entity_type", "repository_id");
+        }
+        else if (relativePath.StartsWith("hotspots/", StringComparison.Ordinal))
+        {
+            ValidateRequiredFields(frontMatter, "hotspot", "hotspot_kind");
+            ValidateAllowedFields(frontMatter, "entity_id", "entity_type", "repository_id", "hotspot_kind");
         }
 
         ValidateTimestampLines(lines, relativePath);

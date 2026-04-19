@@ -40,6 +40,7 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
         var wikiPageCount = 0;
         var graphNodeCount = 0;
         var graphEdgeCount = 0;
+        RunMetricsSummary? metricsSummary = null;
 
         try
         {
@@ -47,6 +48,7 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
             {
                 var query = new ProjectStructureQueryService(request.RunResult.Triples);
                 var model = query.GetModel(request.RunResult.RepositoryId);
+                metricsSummary = BuildMetricsSummary(model);
                 var renderer = new ProjectStructureWikiRenderer();
                 var pages = renderer.Render(model, request.MaxMergeEntriesPerFile)
                     .OrderBy(x => x.RelativePath, StringComparer.Ordinal)
@@ -81,7 +83,8 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
                 graphNodeCount,
                 graphEdgeCount,
                 wikiDirectory,
-                graphMlPath);
+                graphMlPath,
+                metricsSummary);
 
             await WriteManifestAsync(manifestPath, manifest, cancellationToken);
 
@@ -129,7 +132,8 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
         int graphNodeCount,
         int graphEdgeCount,
         string? wikiDirectory,
-        string? graphMlPath)
+        string? graphMlPath,
+        RunMetricsSummary? metricsSummary)
     {
         var duration = request.CompletedAtUtc - request.StartedAtUtc;
 
@@ -162,7 +166,47 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
                 Wiki: wikiDirectory is null ? null : "wiki",
                 GraphMl: graphMlPath is null ? null : "graph/graph.graphml",
                 Manifest: "manifest.json"),
-            LatestPromoted: latestPromoted);
+            LatestPromoted: latestPromoted,
+            Metrics: metricsSummary);
+    }
+
+    private static RunMetricsSummary BuildMetricsSummary(ProjectStructureWikiModel model)
+    {
+        var effectiveWeights = model.Hotspots.EffectiveConfig.CompositeWeights
+            .OrderBy(x => x.Key.ToString(), StringComparer.Ordinal)
+            .Select(x => new MetricWeightSummary(
+                Metric: x.Key.ToString(),
+                Weight: x.Value))
+            .ToArray();
+        var effectiveThresholds = model.Hotspots.EffectiveConfig.Thresholds
+            .OrderBy(x => x.Key.ToString(), StringComparer.Ordinal)
+            .Select(x => new MetricThresholdSummary(
+                Metric: x.Key.ToString(),
+                Low: x.Value.Low,
+                Medium: x.Value.Medium,
+                High: x.Value.High,
+                Critical: x.Value.Critical))
+            .ToArray();
+
+        return new RunMetricsSummary(
+            PrimaryRankingCount: model.Hotspots.PrimaryRankings.Count,
+            CompositeRankingCount: model.Hotspots.CompositeRankings.Count,
+            RankedRowCount:
+                model.Hotspots.PrimaryRankings.Sum(x => x.Rows.Count)
+                + model.Hotspots.CompositeRankings.Sum(x => x.Rows.Count),
+            EffectiveConfig: new MetricsEffectiveConfigSummary(
+                TopN: model.Hotspots.EffectiveConfig.EffectiveTopN,
+                Unbounded: model.Hotspots.EffectiveConfig.Unbounded,
+                CompositeWeights: effectiveWeights,
+                Thresholds: effectiveThresholds),
+            Coverage: new MetricsCoverageSummary(
+                AnalyzableMethodCount: model.StructuralMetrics.Repository.Rollup.Coverage.AnalyzableMethods,
+                NonAnalyzableMethodCount: model.StructuralMetrics.Repository.Rollup.Coverage.NonAnalyzableMethods,
+                TypesWithCboCount: model.StructuralMetrics.Repository.Rollup.Coverage.TypesWithCbo,
+                InsufficientFileScopeCount: model.StructuralMetrics.Files.Count(x => x.Rollup.Severity == StructuralMetricSeverity.None),
+                InsufficientNamespaceScopeCount: model.StructuralMetrics.Namespaces.Count(x => x.Recursive.Severity == StructuralMetricSeverity.None),
+                InsufficientProjectScopeCount: model.StructuralMetrics.Projects.Count(x => x.Rollup.Severity == StructuralMetricSeverity.None),
+                RepositoryScopeInsufficient: model.StructuralMetrics.Repository.Rollup.Severity == StructuralMetricSeverity.None));
     }
 
     private static string GetRepositoryBranch(
@@ -288,9 +332,41 @@ public sealed class IngestionArtifactPublisher : IIngestionArtifactPublisher
         int GraphMlEdgeCount,
         IReadOnlyList<DiagnosticSummary> DiagnosticsSummary,
         ArtifactReferences Artifacts,
-        bool LatestPromoted);
+        bool LatestPromoted,
+        RunMetricsSummary? Metrics);
 
     private sealed record ArtifactReferences(string? Wiki, string? GraphMl, string Manifest);
 
     private sealed record DiagnosticSummary(string Code, int Count);
+
+    private sealed record RunMetricsSummary(
+        int PrimaryRankingCount,
+        int CompositeRankingCount,
+        int RankedRowCount,
+        MetricsEffectiveConfigSummary EffectiveConfig,
+        MetricsCoverageSummary Coverage);
+
+    private sealed record MetricsEffectiveConfigSummary(
+        int TopN,
+        bool Unbounded,
+        IReadOnlyList<MetricWeightSummary> CompositeWeights,
+        IReadOnlyList<MetricThresholdSummary> Thresholds);
+
+    private sealed record MetricWeightSummary(string Metric, double Weight);
+
+    private sealed record MetricThresholdSummary(
+        string Metric,
+        double Low,
+        double Medium,
+        double High,
+        double Critical);
+
+    private sealed record MetricsCoverageSummary(
+        int AnalyzableMethodCount,
+        int NonAnalyzableMethodCount,
+        int TypesWithCboCount,
+        int InsufficientFileScopeCount,
+        int InsufficientNamespaceScopeCount,
+        int InsufficientProjectScopeCount,
+        bool RepositoryScopeInsufficient);
 }

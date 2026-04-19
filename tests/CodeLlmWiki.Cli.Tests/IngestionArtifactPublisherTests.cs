@@ -58,6 +58,8 @@ public sealed class IngestionArtifactPublisherTests
         Assert.Contains(Directory.GetFiles(Path.Combine(first.RunDirectory, "wiki", "projects"), "*.md"), _ => true);
         Assert.Contains(Directory.GetFiles(Path.Combine(first.RunDirectory, "wiki", "packages"), "*.md"), _ => true);
         Assert.Contains(Directory.GetFiles(Path.Combine(first.RunDirectory, "wiki", "files"), "*.md"), _ => true);
+        Assert.True(Directory.Exists(Path.Combine(first.RunDirectory, "wiki", "hotspots")));
+        Assert.Equal(6, Directory.GetFiles(Path.Combine(first.RunDirectory, "wiki", "hotspots"), "*.md").Length);
 
         var graphMl = await File.ReadAllTextAsync(Path.Combine(first.RunDirectory, "graph", "graph.graphml"));
         Assert.Contains("<graphml", graphMl, StringComparison.Ordinal);
@@ -81,6 +83,17 @@ public sealed class IngestionArtifactPublisherTests
         Assert.True(latestManifest.RootElement.GetProperty("DiagnosticsSummary").GetArrayLength() >= 0);
         Assert.Equal("wiki", latestManifest.RootElement.GetProperty("Artifacts").GetProperty("Wiki").GetString());
         Assert.Equal("graph/graph.graphml", latestManifest.RootElement.GetProperty("Artifacts").GetProperty("GraphMl").GetString());
+        var metrics = latestManifest.RootElement.GetProperty("Metrics");
+        Assert.True(metrics.GetProperty("PrimaryRankingCount").GetInt32() >= 0);
+        Assert.True(metrics.GetProperty("CompositeRankingCount").GetInt32() >= 0);
+        Assert.True(metrics.GetProperty("RankedRowCount").GetInt32() >= 0);
+        var effectiveConfig = metrics.GetProperty("EffectiveConfig");
+        Assert.True(effectiveConfig.GetProperty("TopN").GetInt32() > 0);
+        Assert.True(effectiveConfig.GetProperty("CompositeWeights").GetArrayLength() > 0);
+        Assert.True(effectiveConfig.GetProperty("Thresholds").GetArrayLength() > 0);
+        var coverage = metrics.GetProperty("Coverage");
+        Assert.True(coverage.GetProperty("AnalyzableMethodCount").GetInt32() >= 0);
+        Assert.True(coverage.GetProperty("TypesWithCboCount").GetInt32() >= 0);
     }
 
     [Fact]

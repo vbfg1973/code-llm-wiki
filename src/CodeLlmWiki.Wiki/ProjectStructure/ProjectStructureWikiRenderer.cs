@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Query.ProjectStructure;
@@ -269,6 +270,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 fileById,
                 resolver)));
         pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, namespaceBacklinksByFileId, typeBacklinksByFileId, memberBacklinksByFileId, methodBacklinksByFileId, resolver, maxMergeEntriesPerFile)));
+        pages.AddRange(RenderHotspotPages(model, resolver));
 
         pages.Add(RenderIndexPage(model, resolver, indexPath));
 
@@ -294,6 +296,14 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine($"- Files: {model.Files.Count}");
         sb.AppendLine($"- Submodules: {model.Submodules.Count}");
         sb.AppendLine($"- Index: {ToWikiLink("index/repository-index", "Repository Index")}");
+        sb.AppendLine();
+        sb.AppendLine("## Hotspots");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("hotspots/methods.md", "Methods")}");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("hotspots/types.md", "Types")}");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("hotspots/files.md", "Files")}");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("hotspots/namespaces.md", "Namespaces")}");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("hotspots/projects.md", "Projects")}");
+        sb.AppendLine($"- {resolver.ToMarkdownLink("hotspots/repository.md", "Repository")}");
         sb.AppendLine();
         sb.AppendLine("## Solutions");
 
@@ -1974,6 +1984,164 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             : DateTimeOffset.MinValue;
     }
 
+    private static IReadOnlyList<WikiPage> RenderHotspotPages(ProjectStructureWikiModel model, WikiPathResolver resolver)
+    {
+        return GetHotspotPageDescriptors()
+            .Select(descriptor => RenderHotspotPage(model, resolver, descriptor.Kind, descriptor.Title, descriptor.RelativePath, descriptor.KindSlug))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<IndexRow> BuildHotspotIndexRows(string repositoryId, WikiPathResolver resolver)
+    {
+        return GetHotspotPageDescriptors()
+            .Select(descriptor => new IndexRow(
+                Name: descriptor.Title,
+                Path: descriptor.RelativePath,
+                EntityId: $"hotspot:{descriptor.KindSlug}:{repositoryId}",
+                PageLink: resolver.ToMarkdownLink(descriptor.RelativePath, descriptor.Title)))
+            .ToArray();
+    }
+
+    private static WikiPage RenderHotspotPage(
+        ProjectStructureWikiModel model,
+        WikiPathResolver resolver,
+        HotspotTargetKind targetKind,
+        string title,
+        string relativePath,
+        string kindSlug)
+    {
+        var primaryRankings = model.Hotspots.PrimaryRankings
+            .Where(x => x.TargetKind == targetKind)
+            .OrderBy(x => x.MetricKind)
+            .ToArray();
+        var compositeRanking = model.Hotspots.CompositeRankings
+            .FirstOrDefault(x => x.TargetKind == targetKind);
+        var effectiveConfig = model.Hotspots.EffectiveConfig;
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"# Hotspots: {title}");
+        sb.AppendLine();
+        sb.AppendLine("## Effective Config");
+        sb.AppendLine($"- Top N: `{effectiveConfig.EffectiveTopN}`");
+        sb.AppendLine($"- Unbounded: `{effectiveConfig.Unbounded.ToString().ToLowerInvariant()}`");
+        sb.AppendLine();
+        sb.AppendLine("| metric | composite_weight | low | medium | high | critical |");
+        sb.AppendLine("| --- | --- | --- | --- | --- | --- |");
+
+        foreach (var metric in primaryRankings.Select(x => x.MetricKind).Distinct().OrderBy(x => x))
+        {
+            effectiveConfig.CompositeWeights.TryGetValue(metric, out var weight);
+            effectiveConfig.Thresholds.TryGetValue(metric, out var thresholds);
+            thresholds ??= new HotspotSeverityThresholds(0d, 0d, 0d, 0d);
+
+            sb.AppendLine($"| {EscapePipes(FormatHotspotMetricKind(metric))} | `{weight.ToString("0.####", CultureInfo.InvariantCulture)}` | `{thresholds.Low.ToString("0.####", CultureInfo.InvariantCulture)}` | `{thresholds.Medium.ToString("0.####", CultureInfo.InvariantCulture)}` | `{thresholds.High.ToString("0.####", CultureInfo.InvariantCulture)}` | `{thresholds.Critical.ToString("0.####", CultureInfo.InvariantCulture)}` |");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Primary Rankings");
+
+        if (primaryRankings.Length == 0)
+        {
+            sb.AppendLine("- none");
+        }
+        else
+        {
+            foreach (var ranking in primaryRankings)
+            {
+                sb.AppendLine($"### {FormatHotspotMetricKind(ranking.MetricKind)}");
+                sb.AppendLine("| rank | entity | raw_value | normalized_score | severity |");
+                sb.AppendLine("| --- | --- | --- | --- | --- |");
+
+                foreach (var row in ranking.Rows)
+                {
+                    var entityLink = TryCreateHotspotEntityLink(resolver, row.EntityId, row.DisplayName);
+                    sb.AppendLine($"| `{row.Rank}` | {EscapePipes(entityLink)} | `{row.RawValue.ToString("0.####", CultureInfo.InvariantCulture)}` | `{row.NormalizedScore.ToString("0.####", CultureInfo.InvariantCulture)}` | `{row.Severity.ToString().ToLowerInvariant()}` |");
+                }
+
+                if (ranking.Rows.Count == 0)
+                {
+                    sb.AppendLine("| `-` | none | `-` | `-` | `none` |");
+                }
+
+                sb.AppendLine();
+            }
+        }
+
+        sb.AppendLine("## Composite Ranking");
+        sb.AppendLine("| rank | entity | composite_score | severity |");
+        sb.AppendLine("| --- | --- | --- | --- |");
+
+        if (compositeRanking is null || compositeRanking.Rows.Count == 0)
+        {
+            sb.AppendLine("| `-` | none | `-` | `none` |");
+        }
+        else
+        {
+            foreach (var row in compositeRanking.Rows)
+            {
+                var entityLink = TryCreateHotspotEntityLink(resolver, row.EntityId, row.DisplayName);
+                sb.AppendLine($"| `{row.Rank}` | {EscapePipes(entityLink)} | `{row.CompositeScore.ToString("0.####", CultureInfo.InvariantCulture)}` | `{row.Severity.ToString().ToLowerInvariant()}` |");
+            }
+        }
+
+        return new WikiPage(
+            RelativePath: relativePath,
+            Title: $"Hotspots {title}",
+            Markdown: WithFrontMatter(
+                [
+                    KeyValue("entity_id", $"hotspot:{kindSlug}:{model.Repository.Id.Value}"),
+                    KeyValue("entity_type", "hotspot"),
+                    KeyValue("repository_id", model.Repository.Id.Value),
+                    KeyValue("hotspot_kind", kindSlug),
+                ],
+                sb.ToString().TrimEnd()));
+    }
+
+    private static string TryCreateHotspotEntityLink(WikiPathResolver resolver, EntityId entityId, string displayName)
+    {
+        try
+        {
+            return resolver.ToMarkdownLink(entityId, displayName);
+        }
+        catch (InvalidOperationException)
+        {
+            return displayName;
+        }
+    }
+
+    private static string FormatHotspotMetricKind(HotspotMetricKind metricKind)
+    {
+        return metricKind switch
+        {
+            HotspotMetricKind.MethodCyclomaticComplexity => "method_cyclomatic_complexity",
+            HotspotMetricKind.MethodCognitiveComplexity => "method_cognitive_complexity",
+            HotspotMetricKind.MethodHalsteadVolume => "method_halstead_volume",
+            HotspotMetricKind.MethodMaintainabilityIndex => "method_maintainability_index",
+            HotspotMetricKind.TypeCboDeclaration => "type_cbo_declaration",
+            HotspotMetricKind.TypeCboMethodBody => "type_cbo_method_body",
+            HotspotMetricKind.TypeCboTotal => "type_cbo_total",
+            HotspotMetricKind.ScopeAverageCyclomaticComplexity => "scope_average_cyclomatic_complexity",
+            HotspotMetricKind.ScopeAverageCognitiveComplexity => "scope_average_cognitive_complexity",
+            HotspotMetricKind.ScopeAverageMaintainabilityIndex => "scope_average_maintainability_index",
+            HotspotMetricKind.ScopeAverageCboTotal => "scope_average_cbo_total",
+            HotspotMetricKind.Composite => "composite",
+            _ => "unknown",
+        };
+    }
+
+    private static IReadOnlyList<(HotspotTargetKind Kind, string Title, string RelativePath, string KindSlug)> GetHotspotPageDescriptors()
+    {
+        return
+        [
+            (HotspotTargetKind.Method, "Methods", "hotspots/methods.md", "methods"),
+            (HotspotTargetKind.Type, "Types", "hotspots/types.md", "types"),
+            (HotspotTargetKind.File, "Files", "hotspots/files.md", "files"),
+            (HotspotTargetKind.Namespace, "Namespaces", "hotspots/namespaces.md", "namespaces"),
+            (HotspotTargetKind.Project, "Projects", "hotspots/projects.md", "projects"),
+            (HotspotTargetKind.Repository, "Repository", "hotspots/repository.md", "repository"),
+        ];
+    }
+
     private static WikiPage RenderIndexPage(
         ProjectStructureWikiModel model,
         WikiPathResolver resolver,
@@ -2054,6 +2222,11 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     return new IndexRow(FormatMethodLinkAlias(x), $"{declaringTypePath}::{x.Signature}", x.Id.Value, resolver.ToMarkdownLink(x.Id, FormatMethodLinkAlias(x)));
                 })
                 .ToArray());
+
+        AppendTable(
+            sb,
+            "Hotspots",
+            BuildHotspotIndexRows(model.Repository.Id.Value, resolver));
 
         AppendTable(
             sb,
