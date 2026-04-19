@@ -215,6 +215,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     .Distinct(StringComparer.Ordinal)
                     .OrderBy(v => v, StringComparer.Ordinal)
                     .ToArray());
+        var inheritedPackageTypeUsageByPackageId = BuildInheritedPackageTypeUsageByPackageId(model.Declarations.Types, orderedPackages);
 
         var pages = new List<WikiPage>
         {
@@ -227,6 +228,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             RenderPackagePage(
                 model.Repository.Id.Value,
                 package,
+                inheritedPackageTypeUsageByPackageId,
                 externalCallTargetsByPackageId,
                 resolver)));
         if (model.DependencyAttribution.DeclarationUnknown.UsageCount > 0
@@ -429,6 +431,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
     private static WikiPage RenderPackagePage(
         string repositoryId,
         PackageNode package,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<InheritedPackageTypeUsageNode>> inheritedPackageTypeUsageByPackageId,
         IReadOnlyDictionary<EntityId, IReadOnlyList<string>> externalCallTargetsByPackageId,
         WikiPathResolver resolver)
     {
@@ -482,6 +485,28 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 {
                     var internalTypeDisplay = resolver.ToWikiLink(internalType.InternalTypeId, internalType.InternalTypeName);
                     sb.AppendLine($"  - {internalTypeDisplay} ({internalType.UsageCount})");
+                }
+            }
+        }
+
+        if (inheritedPackageTypeUsageByPackageId.TryGetValue(package.Id, out var inheritedPackageTypes) && inheritedPackageTypes.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Inherited Package Types");
+
+            foreach (var inheritedPackageType in inheritedPackageTypes)
+            {
+                var anchor = WikiPathResolver.BuildPackageExternalTypeAnchor(package.CanonicalKey, inheritedPackageType.ExternalTypeDisplayName);
+                if (emittedAnchorIds.Add(anchor))
+                {
+                    sb.AppendLine($"<a id=\"{anchor}\"></a>");
+                }
+
+                sb.AppendLine($"- `{inheritedPackageType.ExternalTypeDisplayName}` ({inheritedPackageType.UsageCount})");
+
+                foreach (var internalType in inheritedPackageType.InternalTypes)
+                {
+                    sb.AppendLine($"  - {resolver.ToWikiLink(internalType.InternalTypeId, internalType.InternalTypeName)} ({internalType.UsageCount})");
                 }
             }
         }
@@ -599,6 +624,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             return;
         }
 
+        var unknownMethodRows = new List<(EntityId MethodId, string MethodAlias, string TargetTypeName, string AttributionReason, string? TargetResolutionReason, int UsageCount)>();
+
         foreach (var namespaceUsage in catalog.Namespaces)
         {
             var namespaceDisplay = namespaceUsage.NamespaceId is { } namespaceId
@@ -622,7 +649,44 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                         : $", resolution: {methodUsage.TargetResolutionReason}";
                     sb.AppendLine(
                         $"    - {methodDisplay} -> `{methodUsage.TargetTypeName}` (attribution: {methodUsage.AttributionReason}{reasonSuffix}) ({methodUsage.UsageCount})");
+
+                    unknownMethodRows.Add((
+                        MethodId: methodUsage.MethodId,
+                        MethodAlias: methodAlias,
+                        TargetTypeName: methodUsage.TargetTypeName,
+                        AttributionReason: methodUsage.AttributionReason,
+                        TargetResolutionReason: methodUsage.TargetResolutionReason,
+                        UsageCount: methodUsage.UsageCount));
                 }
+            }
+        }
+
+        var unresolvedReasonBuckets = unknownMethodRows
+            .Where(x => !string.IsNullOrWhiteSpace(x.TargetResolutionReason))
+            .GroupBy(x => x.TargetResolutionReason!, StringComparer.Ordinal)
+            .OrderBy(x => x.Key, StringComparer.Ordinal)
+            .ToArray();
+
+        if (unresolvedReasonBuckets.Length == 0)
+        {
+            return;
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("### Unresolved External Targets");
+
+        foreach (var unresolvedReasonBucket in unresolvedReasonBuckets)
+        {
+            var reasonUsageCount = unresolvedReasonBucket.Sum(x => x.UsageCount);
+            sb.AppendLine($"- {unresolvedReasonBucket.Key} ({reasonUsageCount})");
+
+            foreach (var unresolvedUsage in unresolvedReasonBucket
+                         .OrderBy(x => x.TargetTypeName, StringComparer.Ordinal)
+                         .ThenBy(x => x.MethodAlias, StringComparer.Ordinal)
+                         .ThenBy(x => x.MethodId.Value, StringComparer.Ordinal))
+            {
+                var unresolvedMethodDisplay = resolver.ToWikiLink(unresolvedUsage.MethodId, unresolvedUsage.MethodAlias);
+                sb.AppendLine($"  - {unresolvedMethodDisplay} -> `{unresolvedUsage.TargetTypeName}` ({unresolvedUsage.UsageCount})");
             }
         }
     }
@@ -1409,6 +1473,88 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         return false;
     }
 
+    private static bool TryResolvePackageForExternalTypeName(
+        string externalTypeName,
+        IReadOnlyList<PackageNode> packages,
+        out PackageNode package)
+    {
+        var matches = packages
+            .Select(candidate => new
+            {
+                Package = candidate,
+                Score = GetExternalTargetPackageMatchScore(candidate, null, externalTypeName),
+            })
+            .Where(candidate => candidate.Score > 0)
+            .OrderByDescending(candidate => candidate.Score)
+            .ThenByDescending(candidate => candidate.Package.Name.Length)
+            .ThenBy(candidate => candidate.Package.Name, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Package.Id.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        if (matches.Length == 0)
+        {
+            package = null!;
+            return false;
+        }
+
+        var topScore = matches[0].Score;
+        var topMatches = matches
+            .Where(candidate => candidate.Score == topScore)
+            .ToArray();
+
+        if (topMatches.Length == 1)
+        {
+            package = topMatches[0].Package;
+            return true;
+        }
+
+        package = null!;
+        return false;
+    }
+
+    private static IReadOnlyDictionary<EntityId, IReadOnlyList<InheritedPackageTypeUsageNode>> BuildInheritedPackageTypeUsageByPackageId(
+        IReadOnlyList<TypeDeclarationNode> types,
+        IReadOnlyList<PackageNode> packages)
+    {
+        var rows = types
+            .SelectMany(type => type.DirectBaseTypes
+                .Where(baseType =>
+                    baseType.ResolutionStatus == DeclarationResolutionStatus.ExternalStub
+                    && !string.IsNullOrWhiteSpace(baseType.DisplayText))
+                .Select(baseType => TryResolvePackageForExternalTypeName(baseType.DisplayText, packages, out var package)
+                    ? new InheritedPackageTypeUsageRow(
+                        PackageId: package.Id,
+                        ExternalTypeDisplayName: baseType.DisplayText,
+                        InternalTypeId: type.Id,
+                        InternalTypeName: type.Name,
+                        UsageCount: 1)
+                    : null))
+            .Where(x => x is not null)
+            .Select(x => x!)
+            .ToArray();
+
+        return rows
+            .GroupBy(x => x.PackageId)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<InheritedPackageTypeUsageNode>)x
+                    .GroupBy(v => v.ExternalTypeDisplayName)
+                    .Select(group => new InheritedPackageTypeUsageNode(
+                        ExternalTypeDisplayName: group.Key,
+                        UsageCount: group.Sum(v => v.UsageCount),
+                        InternalTypes: group
+                            .GroupBy(v => (v.InternalTypeId, v.InternalTypeName))
+                            .Select(internalType => new InheritedPackageInternalTypeUsageNode(
+                                InternalTypeId: internalType.Key.InternalTypeId,
+                                InternalTypeName: internalType.Key.InternalTypeName,
+                                UsageCount: internalType.Sum(v => v.UsageCount)))
+                            .OrderBy(v => v.InternalTypeName, StringComparer.Ordinal)
+                            .ThenBy(v => v.InternalTypeId.Value, StringComparer.Ordinal)
+                            .ToArray()))
+                    .OrderBy(v => v.ExternalTypeDisplayName, StringComparer.Ordinal)
+                    .ToArray());
+    }
+
     private static int GetExternalTargetPackageMatchScore(PackageNode package, string? assemblyName, string externalTypeName)
     {
         if (!string.IsNullOrWhiteSpace(assemblyName))
@@ -1979,6 +2125,23 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.Append(body);
         return sb.ToString();
     }
+
+    private sealed record InheritedPackageTypeUsageRow(
+        EntityId PackageId,
+        string ExternalTypeDisplayName,
+        EntityId InternalTypeId,
+        string InternalTypeName,
+        int UsageCount);
+
+    private sealed record InheritedPackageTypeUsageNode(
+        string ExternalTypeDisplayName,
+        int UsageCount,
+        IReadOnlyList<InheritedPackageInternalTypeUsageNode> InternalTypes);
+
+    private sealed record InheritedPackageInternalTypeUsageNode(
+        EntityId InternalTypeId,
+        string InternalTypeName,
+        int UsageCount);
 
     private sealed record IndexRow(string Name, string Path, string EntityId, string PageLink);
 }
