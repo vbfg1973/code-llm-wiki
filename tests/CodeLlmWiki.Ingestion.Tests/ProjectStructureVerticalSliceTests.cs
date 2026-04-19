@@ -117,8 +117,14 @@ public sealed class ProjectStructureVerticalSliceTests
         Assert.Contains("<a id=\"recipe-hotspot-triage\"></a>", contract.Markdown, StringComparison.Ordinal);
         Assert.Contains("<a id=\"recipe-dependency-trace\"></a>", contract.Markdown, StringComparison.Ordinal);
         Assert.Contains("## Capability Matrix", contract.Markdown, StringComparison.Ordinal);
-        Assert.Contains("[BL-013]", contract.Markdown, StringComparison.Ordinal);
-        Assert.Contains("[BL-014]", contract.Markdown, StringComparison.Ordinal);
+
+        var headBranchLine = contract.Markdown
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .First(line => line.StartsWith("head_branch:", StringComparison.Ordinal));
+        var headBranch = headBranchLine["head_branch:".Length..].Trim();
+
+        Assert.Contains($"[BL-013](https://github.com/vbfg1973/code-llm-wiki/blob/{headBranch}/plans/BACKLOG.md#bl-013-domain-term-extraction-and-linking)", contract.Markdown, StringComparison.Ordinal);
+        Assert.Contains($"[BL-014](https://github.com/vbfg1973/code-llm-wiki/blob/{headBranch}/plans/BACKLOG.md#bl-014-endpoint-discovery-and-behavior-metadata)", contract.Markdown, StringComparison.Ordinal);
     }
 
     private sealed class ProjectStructureFixture

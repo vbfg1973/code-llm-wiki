@@ -475,13 +475,13 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine("## Capability Matrix");
         sb.AppendLine("| backlog_item | status | reference |");
         sb.AppendLine("| --- | --- | --- |");
-        sb.AppendLine("| [BL-001](https://github.com/vbfg1973/code-llm-wiki/blob/develop/plans/BACKLOG.md) | available | repository structure ingestion |");
-        sb.AppendLine("| [BL-008](https://github.com/vbfg1973/code-llm-wiki/blob/develop/plans/BACKLOG.md) | available | method declarations and pages |");
-        sb.AppendLine("| [BL-011](https://github.com/vbfg1973/code-llm-wiki/blob/develop/plans/BACKLOG.md) | available | dependency usage mapping |");
-        sb.AppendLine("| [BL-013](https://github.com/vbfg1973/code-llm-wiki/blob/develop/plans/BACKLOG.md) | deferred | domain term extraction and linking |");
-        sb.AppendLine("| [BL-014](https://github.com/vbfg1973/code-llm-wiki/blob/develop/plans/BACKLOG.md) | deferred | endpoint discovery and metadata |");
-        sb.AppendLine("| [BL-016](https://github.com/vbfg1973/code-llm-wiki/blob/develop/plans/BACKLOG.md) | deferred | cross-system dependency tracing |");
-        sb.AppendLine("| [BL-018](https://github.com/vbfg1973/code-llm-wiki/blob/develop/plans/BACKLOG.md) | deferred | multi-language analyzer expansion |");
+        sb.AppendLine($"| {BuildBacklogItemMarkdownLink("BL-001", "bl-001-repository-structure-ingestion", headBranch)} | available | repository structure ingestion |");
+        sb.AppendLine($"| {BuildBacklogItemMarkdownLink("BL-008", "bl-008-method-declarations", headBranch)} | available | method declarations and pages |");
+        sb.AppendLine($"| {BuildBacklogItemMarkdownLink("BL-011", "bl-011-dependency-usage-mapping", headBranch)} | available | dependency usage mapping |");
+        sb.AppendLine($"| {BuildBacklogItemMarkdownLink("BL-013", "bl-013-domain-term-extraction-and-linking", headBranch)} | deferred | domain term extraction and linking |");
+        sb.AppendLine($"| {BuildBacklogItemMarkdownLink("BL-014", "bl-014-endpoint-discovery-and-behavior-metadata", headBranch)} | deferred | endpoint discovery and metadata |");
+        sb.AppendLine($"| {BuildBacklogItemMarkdownLink("BL-016", "bl-016-cross-system-dependency-tracing", headBranch)} | deferred | cross-system dependency tracing |");
+        sb.AppendLine($"| {BuildBacklogItemMarkdownLink("BL-018", "bl-018-multi-language-analyzer-expansion", headBranch)} | deferred | multi-language analyzer expansion |");
 
         return new WikiPage(
             RelativePath: "guidance/llm-contract.md",
@@ -2525,6 +2525,12 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
     private static string ToWikiLink(string target, string alias)
     {
         return $"[[{target}|{alias}]]";
+    }
+
+    private static string BuildBacklogItemMarkdownLink(string backlogId, string backlogAnchor, string headBranch)
+    {
+        var branch = string.IsNullOrWhiteSpace(headBranch) ? "develop" : headBranch.Trim();
+        return $"[{backlogId}](https://github.com/vbfg1973/code-llm-wiki/blob/{branch}/plans/BACKLOG.md#{backlogAnchor})";
     }
 
     private static KeyValuePair<string, string> KeyValue(string key, string value) => new(key, value);
