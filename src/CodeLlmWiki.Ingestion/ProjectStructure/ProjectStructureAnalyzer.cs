@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Globalization;
 using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
+using CodeLlmWiki.Ingestion.Diagnostics;
+using CodeLlmWiki.Ingestion.Telemetry;
 using CodeLlmWiki.Query.ProjectStructure;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
@@ -19,11 +21,19 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 {
     private readonly IStableIdGenerator _stableIdGenerator;
     private readonly EndpointRuleCatalog _endpointRuleCatalog;
+    private readonly ICallResolutionDiagnosticClassifier _callResolutionDiagnosticClassifier;
+    private readonly IIngestionStageTelemetry _stageTelemetry;
 
-    public ProjectStructureAnalyzer(IStableIdGenerator stableIdGenerator, EndpointRuleCatalog? endpointRuleCatalog = null)
+    public ProjectStructureAnalyzer(
+        IStableIdGenerator stableIdGenerator,
+        EndpointRuleCatalog? endpointRuleCatalog = null,
+        ICallResolutionDiagnosticClassifier? callResolutionDiagnosticClassifier = null,
+        IIngestionStageTelemetry? stageTelemetry = null)
     {
         _stableIdGenerator = stableIdGenerator;
         _endpointRuleCatalog = endpointRuleCatalog ?? EndpointRuleCatalog.Default;
+        _callResolutionDiagnosticClassifier = callResolutionDiagnosticClassifier ?? new CallResolutionDiagnosticClassifier();
+        _stageTelemetry = stageTelemetry ?? NoOpIngestionStageTelemetry.Instance;
     }
 
     public Task<ProjectStructureAnalysisResult> AnalyzeAsync(string repositoryPath, CancellationToken cancellationToken)
@@ -37,6 +47,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             diagnostics.Add(new IngestionDiagnostic("repository:path:not-found", $"Repository path '{fullRepositoryPath}' does not exist."));
             return Task.FromResult(new ProjectStructureAnalysisResult(default, triples, diagnostics));
         }
+
+        using var projectDiscoveryStage = _stageTelemetry.BeginStage(IngestionStageIds.ProjectDiscovery);
 
         var repositoryId = _stableIdGenerator.Create(new EntityKey("repository", fullRepositoryPath));
         AddEntityTriples(triples, repositoryId, "repository", Path.GetFileName(fullRepositoryPath), ".");
@@ -237,6 +249,15 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             triples.Add(new SemanticTriple(new EntityNode(repositoryId), CorePredicates.Contains, new EntityNode(fileId)));
         }
 
+        projectDiscoveryStage.SetCounters(
+            new Dictionary<string, long>
+            {
+                ["solutions"] = solutions.Count,
+                ["projects"] = orderedProjects.Length,
+                ["git_tracked_files"] = gitTrackedFiles.Count,
+                ["dotnet_source_files"] = dotNetSourceFiles.Count,
+            });
+
         IngestNamespaces(
             repositoryId,
             fullRepositoryPath,
@@ -265,27 +286,50 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             return;
         }
 
-        var sourceTextByRelativePath = BuildHeadSourceSnapshot(repositoryRoot, sourceFiles, diagnostics);
+        Dictionary<string, string> sourceTextByRelativePath;
+        using (var sourceSnapshotStage = _stageTelemetry.BeginStage(IngestionStageIds.SourceSnapshot))
+        {
+            sourceTextByRelativePath = BuildHeadSourceSnapshot(repositoryRoot, sourceFiles, diagnostics);
+            sourceSnapshotStage.SetCounters(
+                new Dictionary<string, long>
+                {
+                    ["source_files"] = sourceFiles.Count,
+                    ["snapshotted_files"] = sourceTextByRelativePath.Count,
+                });
+        }
 
         NamespaceDiscoveryResult discovery;
-        try
+        using (var declarationScanStage = _stageTelemetry.BeginStage(IngestionStageIds.DeclarationScan))
         {
-            discovery = CSharpDeclarationScanner.Discover(
-                repositoryRoot,
-                sourceFiles,
-                cancellationToken,
-                sourceTextByRelativePath);
-        }
-        catch (Exception ex)
-        {
-            diagnostics.Add(new IngestionDiagnostic(
-                "namespace:discovery:failed",
-                $"Failed to discover namespaces from source files: {ex.Message}"));
-            return;
+            try
+            {
+                discovery = CSharpDeclarationScanner.Discover(
+                    repositoryRoot,
+                    sourceFiles,
+                    cancellationToken,
+                    sourceTextByRelativePath);
+            }
+            catch (Exception ex)
+            {
+                diagnostics.Add(new IngestionDiagnostic(
+                    "namespace:discovery:failed",
+                    $"Failed to discover namespaces from source files: {ex.Message}"));
+                return;
+            }
+
+            declarationScanStage.SetCounters(
+                new Dictionary<string, long>
+                {
+                    ["namespaces"] = discovery.Namespaces.Count,
+                    ["types"] = discovery.Types.Count,
+                });
         }
 
         if (discovery.Namespaces.Count == 0)
         {
+            using var endpointExtractionStage = _stageTelemetry.BeginStage(IngestionStageIds.EndpointExtraction);
+            var endpointCountBefore = CountPredicateOccurrences(triples, CorePredicates.EndpointKind);
+
             CaptureMinimalApiEndpoints(
                 repositoryId,
                 repositoryRoot,
@@ -294,6 +338,15 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 fileIdByRelativePath,
                 triples,
                 diagnostics);
+
+            var endpointCountAfter = CountPredicateOccurrences(triples, CorePredicates.EndpointKind);
+            endpointExtractionStage.SetCounters(
+                new Dictionary<string, long>
+                {
+                    ["source_files"] = sourceFiles.Count,
+                    ["endpoint_count"] = endpointCountAfter,
+                    ["endpoint_added"] = Math.Max(0, endpointCountAfter - endpointCountBefore),
+                });
             return;
         }
 
@@ -993,65 +1046,91 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             }
         }
 
-        CaptureMethodCalls(
-            repositoryRoot,
-            sourceFiles,
-            sourceTextByRelativePath,
-            typeIdByQualifiedName,
-            methodCandidatesByTypeId,
-            declaringTypeIdByMethodId,
-            memberIdByDeclarationLocation,
-            methodIdByDeclarationLocation,
-            externalStubIdByReference,
-            unresolvedCallTargetIdByText,
-            triples,
-            diagnostics);
+        using (var semanticCallGraphStage = _stageTelemetry.BeginStage(IngestionStageIds.SemanticCallGraph))
+        {
+            var callEdgeCountBefore = CountPredicateOccurrences(triples, CorePredicates.Calls);
+            CaptureMethodCalls(
+                repositoryRoot,
+                sourceFiles,
+                sourceTextByRelativePath,
+                typeIdByQualifiedName,
+                methodCandidatesByTypeId,
+                declaringTypeIdByMethodId,
+                memberIdByDeclarationLocation,
+                methodIdByDeclarationLocation,
+                externalStubIdByReference,
+                unresolvedCallTargetIdByText,
+                triples,
+                diagnostics);
+            var callEdgeCountAfter = CountPredicateOccurrences(triples, CorePredicates.Calls);
+            semanticCallGraphStage.SetCounters(
+                new Dictionary<string, long>
+                {
+                    ["method_count"] = methodIdByDeclarationLocation.Count,
+                    ["call_edges"] = callEdgeCountAfter,
+                    ["call_edges_added"] = Math.Max(0, callEdgeCountAfter - callEdgeCountBefore),
+                });
+        }
 
-        CaptureControllerEndpoints(
-            repositoryId,
-            repositoryRoot,
-            sourceFiles,
-            sourceTextByRelativePath,
-            typeIdByQualifiedName,
-            namespaceIdByTypeId,
-            methodIdByDeclarationLocation,
-            declaringTypeIdByMethodId,
-            fileIdByRelativePath,
-            triples,
-            diagnostics);
+        using (var endpointExtractionStage = _stageTelemetry.BeginStage(IngestionStageIds.EndpointExtraction))
+        {
+            var endpointCountBefore = CountPredicateOccurrences(triples, CorePredicates.EndpointKind);
 
-        CaptureHandlerAndCliEndpoints(
-            repositoryId,
-            repositoryRoot,
-            sourceFiles,
-            sourceTextByRelativePath,
-            typeIdByQualifiedName,
-            namespaceIdByTypeId,
-            methodIdByDeclarationLocation,
-            fileIdByRelativePath,
-            triples,
-            diagnostics);
+            CaptureControllerEndpoints(
+                repositoryId,
+                repositoryRoot,
+                sourceFiles,
+                sourceTextByRelativePath,
+                typeIdByQualifiedName,
+                namespaceIdByTypeId,
+                methodIdByDeclarationLocation,
+                declaringTypeIdByMethodId,
+                fileIdByRelativePath,
+                triples,
+                diagnostics);
 
-        CaptureGrpcEndpoints(
-            repositoryId,
-            repositoryRoot,
-            sourceFiles,
-            sourceTextByRelativePath,
-            typeIdByQualifiedName,
-            namespaceIdByTypeId,
-            methodIdByDeclarationLocation,
-            fileIdByRelativePath,
-            triples,
-            diagnostics);
+            CaptureHandlerAndCliEndpoints(
+                repositoryId,
+                repositoryRoot,
+                sourceFiles,
+                sourceTextByRelativePath,
+                typeIdByQualifiedName,
+                namespaceIdByTypeId,
+                methodIdByDeclarationLocation,
+                fileIdByRelativePath,
+                triples,
+                diagnostics);
 
-        CaptureMinimalApiEndpoints(
-            repositoryId,
-            repositoryRoot,
-            sourceFiles,
-            sourceTextByRelativePath,
-            fileIdByRelativePath,
-            triples,
-            diagnostics);
+            CaptureGrpcEndpoints(
+                repositoryId,
+                repositoryRoot,
+                sourceFiles,
+                sourceTextByRelativePath,
+                typeIdByQualifiedName,
+                namespaceIdByTypeId,
+                methodIdByDeclarationLocation,
+                fileIdByRelativePath,
+                triples,
+                diagnostics);
+
+            CaptureMinimalApiEndpoints(
+                repositoryId,
+                repositoryRoot,
+                sourceFiles,
+                sourceTextByRelativePath,
+                fileIdByRelativePath,
+                triples,
+                diagnostics);
+
+            var endpointCountAfter = CountPredicateOccurrences(triples, CorePredicates.EndpointKind);
+            endpointExtractionStage.SetCounters(
+                new Dictionary<string, long>
+                {
+                    ["source_files"] = sourceFiles.Count,
+                    ["endpoint_count"] = endpointCountAfter,
+                    ["endpoint_added"] = Math.Max(0, endpointCountAfter - endpointCountBefore),
+                });
+        }
 
         foreach (var pendingMemberTypeLink in pendingMemberTypeLinks)
         {
@@ -3783,6 +3862,11 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         return value.ToString("G17", CultureInfo.InvariantCulture);
     }
 
+    private static int CountPredicateOccurrences(IReadOnlyList<SemanticTriple> triples, PredicateId predicate)
+    {
+        return triples.Count(x => x.Predicate == predicate);
+    }
+
     private void AddCallEdgesForInvocations(
         MemberDeclarationSyntax declaration,
         EntityId sourceMethodId,
@@ -3822,9 +3906,14 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     new EntityNode(sourceMethodId),
                     CorePredicates.Calls,
                     new EntityNode(unresolvedTargetId)));
-                diagnostics.Add(new IngestionDiagnostic(
-                    "method:call:resolution:failed",
-                    $"Failed to resolve invocation '{invocation}' in method '{sourceMethodId.Value}'."));
+                foreach (var diagnostic in _callResolutionDiagnosticClassifier.Classify(
+                             new CallResolutionFailureContext(
+                                 CallResolutionFailureCause.SymbolUnresolved,
+                                 sourceMethodId.Value,
+                                 invocation.ToString().Trim())))
+                {
+                    diagnostics.Add(diagnostic);
+                }
                 continue;
             }
 
@@ -3846,9 +3935,14 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     new EntityNode(sourceMethodId),
                     CorePredicates.Calls,
                     new EntityNode(unresolvedTargetId)));
-                diagnostics.Add(new IngestionDiagnostic(
-                    "method:call:resolution:failed",
-                    $"Invocation target has no containing type for '{targetSymbol.Name}' in method '{sourceMethodId.Value}'."));
+                foreach (var diagnostic in _callResolutionDiagnosticClassifier.Classify(
+                             new CallResolutionFailureContext(
+                                 CallResolutionFailureCause.MissingContainingType,
+                                 sourceMethodId.Value,
+                                 invocation.ToString().Trim())))
+                {
+                    diagnostics.Add(diagnostic);
+                }
                 continue;
             }
 

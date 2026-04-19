@@ -1,9 +1,11 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using CodeLlmWiki.Cli.Features.Ingest;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Ingestion;
 using CodeLlmWiki.Ingestion.ProjectStructure;
+using CodeLlmWiki.Ingestion.Telemetry;
 
 namespace CodeLlmWiki.Cli.Tests;
 
@@ -12,7 +14,7 @@ public sealed class IngestionArtifactPublisherTests
     [Fact]
     public async Task PublishAsync_EmitsDeterministicWikiAndGraphMl_RunManifest_AndPromotesLatestOnSuccess()
     {
-        var fixture = await PublisherFixture.CreateAsync();
+        var fixture = await PublisherFixture.CreateAsync(includeLongMethodSignature: true);
         var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
         var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
 
@@ -168,6 +170,50 @@ public sealed class IngestionArtifactPublisherTests
             .DefaultIfEmpty(0)
             .Max();
         Assert.True(longestMethodFileNameLength <= 123, $"Unexpectedly long method wiki filename length: {longestMethodFileNameLength}");
+    }
+
+    [Fact]
+    public async Task PublishAsync_EmitsApprovedStageIds_ToStderrTelemetry()
+    {
+        var fixture = await PublisherFixture.CreateAsync(includeLongMethodSignature: true);
+        var telemetryWriter = new StringWriter(CultureInfo.InvariantCulture);
+        var stageTelemetry = new StderrIngestionStageTelemetry(telemetryWriter);
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator(), stageTelemetry: stageTelemetry);
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+
+        var runResult = new IngestionRunResult(
+            Status: IngestionRunStatus.SucceededWithDiagnostics,
+            ExitCode: 0,
+            Diagnostics: analysis.Diagnostics,
+            RepositoryId: analysis.RepositoryId,
+            Triples: analysis.Triples);
+
+        var outputRoot = Path.Combine(Path.GetTempPath(), $"codellmwiki-artifacts-stage-telemetry-{Guid.NewGuid():N}");
+        var publisher = new IngestionArtifactPublisher(stageTelemetry: stageTelemetry);
+
+        var result = await publisher.PublishAsync(
+            new IngestionArtifactPublishRequest(
+                RepositoryPath: fixture.RepositoryPath,
+                OutputRootPath: outputRoot,
+                StartedAtUtc: new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                CompletedAtUtc: new DateTimeOffset(2026, 1, 1, 0, 0, 5, TimeSpan.Zero),
+                RunResult: runResult),
+            CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.FailureReason);
+        var startStages = telemetryWriter
+            .ToString()
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(x => x.StartsWith("ingest_stage|event=start|stage=", StringComparison.Ordinal))
+            .Select(x => x["ingest_stage|event=start|stage=".Length..])
+            .ToArray();
+
+        foreach (var stageId in IngestionStageIds.All)
+        {
+            Assert.True(
+                startStages.Contains(stageId, StringComparer.Ordinal),
+                $"Missing stage '{stageId}'. Observed: {string.Join(", ", startStages)}");
+        }
     }
 
     [Fact]
