@@ -5,6 +5,7 @@ using CodeLlmWiki.Ontology;
 using CodeLlmWiki.Query.ProjectStructure;
 using CodeLlmWiki.Wiki.ProjectStructure;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace CodeLlmWiki.Ingestion.Tests;
 
@@ -204,9 +205,14 @@ public sealed class PackageDependencyVerticalSliceTests
         var serializeMethodPage = pages.Single(page =>
             page.RelativePath.StartsWith("methods/App/WithAssets/BodyUsageFacade/", StringComparison.Ordinal)
             && page.Markdown.Contains("method_name: Serialize", StringComparison.Ordinal));
+        var packagePage = pages.Single(page => page.RelativePath == "packages/Newtonsoft.Json.md");
 
         Assert.Contains("## Calls", serializeMethodPage.Markdown, StringComparison.Ordinal);
         Assert.Contains("(packages/Newtonsoft.Json.md#ext-newtonsoft-json-linq-jtoken-", serializeMethodPage.Markdown, StringComparison.Ordinal);
+        var match = Regex.Match(serializeMethodPage.Markdown, @"packages/Newtonsoft\.Json\.md#(?<anchor>[^\)\s]+)", RegexOptions.CultureInvariant);
+        Assert.True(match.Success);
+        var anchor = match.Groups["anchor"].Value;
+        Assert.Contains($"<a id=\"{anchor}\"></a>", packagePage.Markdown, StringComparison.Ordinal);
     }
 
     [Fact]

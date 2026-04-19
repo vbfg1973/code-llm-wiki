@@ -183,6 +183,26 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         var typeBacklinksByFileId = BuildTypeBacklinksByFileId(model.Declarations.Types, fileById);
         var memberBacklinksByFileId = BuildMemberBacklinksByFileId(model.Declarations.Members, fileById);
         var methodBacklinksByFileId = BuildMethodBacklinksByFileId(orderedMethods, fileById);
+        var externalCallTargetsByPackageId = model.Declarations.Methods.Relations
+            .Where(x => x.Kind == MethodRelationKind.Calls && x.ExternalTargetType is not null)
+            .Select(relation => TryResolveExternalTargetPackage(relation, orderedPackages, out var package)
+                ? new
+                {
+                    package.Id,
+                    TargetDisplayText = relation.ExternalTargetType!.DisplayText,
+                }
+                : null)
+            .Where(x => x is not null)
+            .Select(x => x!)
+            .GroupBy(x => x.Id)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<string>)x
+                    .Select(v => v.TargetDisplayText)
+                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                    .Distinct(StringComparer.Ordinal)
+                    .OrderBy(v => v, StringComparer.Ordinal)
+                    .ToArray());
 
         var pages = new List<WikiPage>
         {
@@ -191,7 +211,13 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
 
         pages.AddRange(orderedSolutions.Select(solution => RenderSolutionPage(model.Repository.Id.Value, solution, projectById, resolver)));
         pages.AddRange(orderedProjects.Select(project => RenderProjectPage(model.Repository.Id.Value, project, packageById, resolver)));
-        pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, methodById, resolver)));
+        pages.AddRange(orderedPackages.Select(package =>
+            RenderPackagePage(
+                model.Repository.Id.Value,
+                package,
+                methodById,
+                externalCallTargetsByPackageId,
+                resolver)));
         if (model.DependencyAttribution.DeclarationUnknown.UsageCount > 0
             || model.DependencyAttribution.MethodBodyUnknown.UsageCount > 0)
         {
@@ -391,6 +417,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         string repositoryId,
         PackageNode package,
         IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<string>> externalCallTargetsByPackageId,
         WikiPathResolver resolver)
     {
         var sb = new StringBuilder();
@@ -478,6 +505,18 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                         sb.AppendLine($"    - {methodDisplay} ({methodUsage.UsageCount})");
                     }
                 }
+            }
+        }
+
+        if (externalCallTargetsByPackageId.TryGetValue(package.Id, out var externalCallTargets) && externalCallTargets.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## External Type Anchors");
+            foreach (var externalCallTarget in externalCallTargets)
+            {
+                var anchor = WikiPathResolver.BuildPackageExternalTypeAnchor(package.CanonicalKey, externalCallTarget);
+                sb.AppendLine($"<a id=\"{anchor}\"></a>");
+                sb.AppendLine($"- `{externalCallTarget}`");
             }
         }
 
