@@ -91,13 +91,13 @@ Purpose: Track durable product capabilities from the original specification (not
   - Planned in:
     - PRD TBD
 
-- [ ] `BL-014` Endpoint discovery and behavior metadata
+- [x] `BL-014` Endpoint discovery and behavior metadata
   - Detail: API endpoints, CLI entry points, message handlers, gRPC endpoints, attributes and attribute property metadata.
   - Planned in:
     - [PRD 009](/home/vbfg/dev/dotnet-llm-wiki/plans/009/009-phase-9-endpoint-discovery-and-matchability-breadcrumbs.prd.md)
     - Plan: [PRD 009 plan](/home/vbfg/dev/dotnet-llm-wiki/plans/009/009-phase-9-endpoint-discovery-and-matchability-breadcrumbs.plan.md)
-    - Parent GitHub issue (open): `#106`
-    - Implementation issues (mixed): `#107` (closed), `#108` (closed), `#109` (closed), `#110` (closed), `#111` (closed), `#112` (open)
+    - Parent GitHub issue (closed): `#106`
+    - Implementation issues (closed): `#107`, `#108`, `#109`, `#110`, `#111`, `#112`
 
 - [ ] `BL-015` Hotspot analysis
   - Detail: combine complexity, coupling, edit frequency, and (future) test coverage to rank hotspots.

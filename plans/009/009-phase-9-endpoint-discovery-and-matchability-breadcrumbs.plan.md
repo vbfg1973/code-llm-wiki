@@ -9,7 +9,7 @@
 - [x] Phase 3: Message Handler and CLI Endpoint Slice — completion date: 2026-04-19
 - [x] Phase 4: gRPC Endpoint Slice and Partial-Resolution Semantics — completion date: 2026-04-19
 - [x] Phase 5: Matchability Fingerprints and Outbound Breadcrumbs — completion date: 2026-04-19
-- [ ] Phase 6: Publication Hardening, Determinism, and Performance
+- [x] Phase 6: Publication Hardening, Determinism, and Performance — completion date: 2026-04-19
 
 ---
 
@@ -125,7 +125,7 @@ Harden endpoint extraction/publication with deterministic ordering contracts, go
 
 ### Acceptance criteria
 
-- [ ] Endpoint pages and indexes are deterministically ordered and stable across reruns.
-- [ ] Publication tests enforce front matter minima, anchor/link contracts, and family-grouped navigation invariants.
-- [ ] Golden snapshots cover endpoint family outputs and partial/unresolved rendering.
-- [ ] Extraction and publication overhead remain within approved performance budget envelopes.
+- [x] Endpoint pages and indexes are deterministically ordered and stable across reruns.
+- [x] Publication tests enforce front matter minima, anchor/link contracts, and family-grouped navigation invariants.
+- [x] Golden snapshots cover endpoint family outputs and partial/unresolved rendering.
+- [x] Extraction and publication overhead remain within approved performance budget envelopes.
