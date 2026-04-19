@@ -382,6 +382,45 @@ public sealed class PackageDependencyVerticalSliceTests
     }
 
     [Fact]
+    public async Task Render_PackagePage_RendersInheritedPackageTypes_OnlyWhenEvidenceExists()
+    {
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+
+        var baselineFixture = await PackageDependencyFixture.CreateAsync();
+        var baselineAnalysis = await analyzer.AnalyzeAsync(baselineFixture.RepositoryPath, CancellationToken.None);
+        var baselineModel = new ProjectStructureQueryService(baselineAnalysis.Triples).GetModel(baselineAnalysis.RepositoryId);
+        var baselinePackagePage = new ProjectStructureWikiRenderer()
+            .Render(baselineModel)
+            .Single(page => page.RelativePath == "packages/Newtonsoft.Json.md");
+        Assert.DoesNotContain("## Inherited Package Types", baselinePackagePage.Markdown, StringComparison.Ordinal);
+
+        var inheritanceFixture = await PackageDependencyFixture.CreateAsync(includePackageInheritanceInWithAssets: true);
+        var inheritanceAnalysis = await analyzer.AnalyzeAsync(inheritanceFixture.RepositoryPath, CancellationToken.None);
+        var inheritanceModel = new ProjectStructureQueryService(inheritanceAnalysis.Triples).GetModel(inheritanceAnalysis.RepositoryId);
+        var inheritancePackagePage = new ProjectStructureWikiRenderer()
+            .Render(inheritanceModel)
+            .Single(page => page.RelativePath == "packages/Newtonsoft.Json.md");
+        Assert.Contains("## Inherited Package Types", inheritancePackagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("InheritsJObject", inheritancePackagePage.Markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Render_UnknownPackageAttributionPage_GroupsUnresolvedTargetsIntoReasonBuckets()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync(includeUnresolvedSignatureInNoAssets: true);
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var unknownPage = new ProjectStructureWikiRenderer()
+            .Render(model)
+            .Single(page => page.RelativePath == "packages/unknown-package-attribution.md");
+
+        Assert.Contains("### Unresolved External Targets", unknownPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("- type-resolution-fallback (", unknownPage.Markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Query_TypeDependencyRollups_PreserveDeclarationAndMethodBodySplit()
     {
         var fixture = await PackageDependencyFixture.CreateAsync();
@@ -463,7 +502,8 @@ public sealed class PackageDependencyVerticalSliceTests
 
         public static async Task<PackageDependencyFixture> CreateAsync(
             bool includeAmbiguousPackageInNoAssets = false,
-            bool includeUnresolvedSignatureInNoAssets = false)
+            bool includeUnresolvedSignatureInNoAssets = false,
+            bool includePackageInheritanceInWithAssets = false)
         {
             var root = Path.Combine(Path.GetTempPath(), $"codellmwiki-packages-{Guid.NewGuid():N}", "package-repo");
             Directory.CreateDirectory(root);
@@ -518,6 +558,18 @@ public sealed class PackageDependencyVerticalSliceTests
                     }
                 }
                 """);
+
+            if (includePackageInheritanceInWithAssets)
+            {
+                await File.WriteAllTextAsync(Path.Combine(withAssetsDir, "InheritanceUsage.cs"),
+                    """
+                    namespace App.WithAssets;
+
+                    public class InheritsJObject : Newtonsoft.Json.Linq.JObject
+                    {
+                    }
+                    """);
+            }
 
             var withAssetsObj = Path.Combine(withAssetsDir, "obj");
             Directory.CreateDirectory(withAssetsObj);
