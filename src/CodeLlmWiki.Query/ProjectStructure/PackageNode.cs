@@ -11,5 +11,6 @@ public sealed record PackageNode(
     IReadOnlyList<PackageProjectMembershipNode> ProjectMemberships)
 {
     public PackageDeclarationDependencyUsageCatalog DeclarationDependencyUsage { get; init; } = PackageDeclarationDependencyUsageCatalog.Empty;
+    public PackageDeclarationDependencyTargetFirstCatalog DeclarationDependencyTargetFirst { get; init; } = PackageDeclarationDependencyTargetFirstCatalog.Empty;
     public PackageMethodBodyDependencyUsageCatalog MethodBodyDependencyUsage { get; init; } = PackageMethodBodyDependencyUsageCatalog.Empty;
 }

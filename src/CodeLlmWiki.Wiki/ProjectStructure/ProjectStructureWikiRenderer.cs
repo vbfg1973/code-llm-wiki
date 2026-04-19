@@ -450,31 +450,21 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 $"| {resolver.ToMarkdownLink(membership.ProjectId, membership.ProjectName)} | `{membership.ProjectPath}` | `{declaredVersion}` | `{resolvedVersion}` |");
         }
 
-        if (package.DeclarationDependencyUsage.UsageCount > 0)
+        if (package.DeclarationDependencyTargetFirst.UsageCount > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("## Declaration Dependency Usage");
+            sb.AppendLine("## Declaration Dependencies (External Type -> Internal Type)");
 
-            foreach (var namespaceUsage in package.DeclarationDependencyUsage.Namespaces)
+            foreach (var externalType in package.DeclarationDependencyTargetFirst.ExternalTypes)
             {
-                var namespaceDisplay = namespaceUsage.NamespaceId is { } namespaceId
-                    ? resolver.ToWikiLink(namespaceId, namespaceUsage.NamespaceName)
-                    : namespaceUsage.NamespaceName;
-                sb.AppendLine($"- {namespaceDisplay} ({namespaceUsage.UsageCount})");
+                var anchor = WikiPathResolver.BuildPackageExternalTypeAnchor(package.CanonicalKey, externalType.ExternalTypeDisplayName);
+                sb.AppendLine($"<a id=\"{anchor}\"></a>");
+                sb.AppendLine($"- `{externalType.ExternalTypeDisplayName}` ({externalType.UsageCount})");
 
-                foreach (var typeUsage in namespaceUsage.Types)
+                foreach (var internalType in externalType.InternalTypes)
                 {
-                    var typeDisplay = resolver.ToWikiLink(typeUsage.TypeId, typeUsage.TypeName);
-                    sb.AppendLine($"  - {typeDisplay} ({typeUsage.UsageCount})");
-
-                    foreach (var methodUsage in typeUsage.Methods)
-                    {
-                        var methodAlias = methodById.TryGetValue(methodUsage.MethodId, out var method)
-                            ? FormatMethodLinkAlias(method)
-                            : methodUsage.MethodSignature;
-                        var methodDisplay = resolver.ToWikiLink(methodUsage.MethodId, methodAlias);
-                        sb.AppendLine($"    - {methodDisplay} ({methodUsage.UsageCount})");
-                    }
+                    var internalTypeDisplay = resolver.ToWikiLink(internalType.InternalTypeId, internalType.InternalTypeName);
+                    sb.AppendLine($"  - {internalTypeDisplay} ({internalType.UsageCount})");
                 }
             }
         }
