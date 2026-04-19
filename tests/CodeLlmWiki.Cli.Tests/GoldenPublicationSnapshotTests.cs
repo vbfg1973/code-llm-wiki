@@ -183,6 +183,46 @@ public sealed class GoldenPublicationSnapshotTests
         Assert.ThrowsAny<Exception>(() => ValidateFrontMatterDocument("types/Sample/Thing.md", markdown));
     }
 
+    [Fact]
+    public void FrontMatterValidation_Fails_OnGuidanceMissingHeadBranch()
+    {
+        var markdown =
+            """
+            ---
+            entity_id: guidance:llm:repo-1
+            entity_type: guidance
+            repository_id: repo-1
+            guidance_kind: llm
+            ---
+
+            # LLM Contract
+            """;
+
+        Assert.ThrowsAny<Exception>(() => ValidateFrontMatterDocument("guidance/llm-contract.md", markdown));
+    }
+
+    [Fact]
+    public void BodyValidation_Fails_OnGuidanceContractMissingRequiredSections()
+    {
+        var markdown =
+            """
+            ---
+            entity_id: guidance:llm-contract:repo-1
+            entity_type: guidance
+            repository_id: repo-1
+            guidance_kind: llm
+            head_branch: develop
+            ---
+
+            # LLM Contract
+
+            ## Start Here
+            - [Repository Index](index/repository-index.md)
+            """;
+
+        Assert.ThrowsAny<Exception>(() => ValidateFrontMatterDocument("guidance/llm-contract.md", markdown));
+    }
+
     private static async Task<PublicationSnapshot> BuildPublicationSnapshotAsync(GoldenFixture fixture)
     {
         var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
@@ -465,7 +505,36 @@ public sealed class GoldenPublicationSnapshotTests
     {
         if (relativePath.StartsWith("index/", StringComparison.Ordinal))
         {
+            Assert.Contains("## Guidance", body, StringComparison.Ordinal);
+            Assert.Contains("[Human Guide](guidance/human.md)", body, StringComparison.Ordinal);
+            Assert.Contains("[LLM Contract](guidance/llm-contract.md)", body, StringComparison.Ordinal);
             return;
+        }
+
+        if (relativePath.StartsWith("repositories/", StringComparison.Ordinal))
+        {
+            Assert.Contains("## Guidance", body, StringComparison.Ordinal);
+            Assert.Contains("[Human Guide](guidance/human.md)", body, StringComparison.Ordinal);
+            Assert.Contains("[LLM Contract](guidance/llm-contract.md)", body, StringComparison.Ordinal);
+        }
+
+        if (relativePath == "guidance/human.md")
+        {
+            Assert.Contains("## Start Here", body, StringComparison.Ordinal);
+        }
+
+        if (relativePath == "guidance/llm-contract.md")
+        {
+            Assert.Contains("## Contract Rules", body, StringComparison.Ordinal);
+            Assert.Contains("## Response Template", body, StringComparison.Ordinal);
+            Assert.Contains("## Link Policy", body, StringComparison.Ordinal);
+            Assert.Contains("## Evidence Policy", body, StringComparison.Ordinal);
+            Assert.Contains("## Guardrails", body, StringComparison.Ordinal);
+            Assert.Contains("## Named Recipes", body, StringComparison.Ordinal);
+            Assert.Contains("## Capability Matrix", body, StringComparison.Ordinal);
+            Assert.Contains("<a id=\"recipe-structure-survey\"></a>", body, StringComparison.Ordinal);
+            Assert.Contains("<a id=\"recipe-hotspot-triage\"></a>", body, StringComparison.Ordinal);
+            Assert.Contains("<a id=\"recipe-dependency-trace\"></a>", body, StringComparison.Ordinal);
         }
 
         Assert.DoesNotContain("entity_id", body, StringComparison.Ordinal);
