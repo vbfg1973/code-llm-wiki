@@ -18,10 +18,12 @@ namespace CodeLlmWiki.Ingestion.ProjectStructure;
 public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 {
     private readonly IStableIdGenerator _stableIdGenerator;
+    private readonly EndpointRuleCatalog _endpointRuleCatalog;
 
-    public ProjectStructureAnalyzer(IStableIdGenerator stableIdGenerator)
+    public ProjectStructureAnalyzer(IStableIdGenerator stableIdGenerator, EndpointRuleCatalog? endpointRuleCatalog = null)
     {
         _stableIdGenerator = stableIdGenerator;
+        _endpointRuleCatalog = endpointRuleCatalog ?? EndpointRuleCatalog.Default;
     }
 
     public Task<ProjectStructureAnalysisResult> AnalyzeAsync(string repositoryPath, CancellationToken cancellationToken)
@@ -1562,12 +1564,20 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     preferredMethodId = methodIds[0];
                 }
 
-                var handlerInterfaces = classSymbol.Interfaces
-                    .Where(IsHandlerInterfacePattern)
-                    .Distinct(SymbolEqualityComparer.Default)
+                var handlerInterfaceMatches = classSymbol.Interfaces
+                    .Select(interfaceSymbol =>
+                    {
+                        var isMatch = _endpointRuleCatalog.TryMatchHandlerInterface(interfaceSymbol.Name, out var rule);
+                        return (InterfaceSymbol: interfaceSymbol, Rule: rule, IsMatch: isMatch);
+                    })
+                    .Where(x => x.IsMatch && x.Rule is not null)
+                    .Select(x => (x.InterfaceSymbol, Rule: x.Rule!))
+                    .Distinct()
+                    .OrderBy(x => x.InterfaceSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), StringComparer.Ordinal)
+                    .ThenBy(x => x.Rule.RuleId, StringComparer.Ordinal)
                     .ToArray();
 
-                foreach (var handlerInterface in handlerInterfaces)
+                foreach (var (handlerInterface, rule) in handlerInterfaceMatches)
                 {
                     var interfaceDisplay = handlerInterface.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
                     var interfaceKey = SanitizeRouteKeyToken(interfaceDisplay);
@@ -1667,15 +1677,15 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     triples.Add(new SemanticTriple(
                         new EntityNode(endpointId),
                         CorePredicates.RuleId,
-                        new LiteralNode("dotnet.message-handler.interface-pattern")));
+                        new LiteralNode(rule.RuleId)));
                     triples.Add(new SemanticTriple(
                         new EntityNode(endpointId),
                         CorePredicates.RuleVersion,
-                        new LiteralNode("1")));
+                        new LiteralNode(rule.RuleVersion)));
                     triples.Add(new SemanticTriple(
                         new EntityNode(endpointId),
                         CorePredicates.RuleSource,
-                        new LiteralNode("code-defined")));
+                        new LiteralNode(rule.RuleSource)));
                     triples.Add(new SemanticTriple(
                         new EntityNode(endpointId),
                         CorePredicates.HasEndpointGroup,
@@ -1724,8 +1734,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
                 var verbAttributes = classDeclaration.AttributeLists
                     .SelectMany(x => x.Attributes)
-                    .Where(attribute => string.Equals(ExtractAttributeName(attribute.Name), "Verb", StringComparison.Ordinal))
-                    .Select(ExtractFirstStringLiteralArgument)
+                    .Select(attribute => TryExtractCommandLineVerb(attribute, semanticModel, out var verb) ? verb : null)
                     .Where(verb => !string.IsNullOrWhiteSpace(verb))
                     .Select(verb => verb!)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -1837,7 +1846,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     triples.Add(new SemanticTriple(
                         new EntityNode(endpointId),
                         CorePredicates.RuleSource,
-                        new LiteralNode("code-defined")));
+                        new LiteralNode("catalog:default")));
                     triples.Add(new SemanticTriple(
                         new EntityNode(endpointId),
                         CorePredicates.HasEndpointGroup,
@@ -1915,21 +1924,86 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         return false;
     }
 
-    private static bool IsHandlerInterfacePattern(INamedTypeSymbol interfaceSymbol)
+    private bool TryExtractCommandLineVerb(AttributeSyntax attribute, SemanticModel semanticModel, out string? verb)
     {
-        var name = interfaceSymbol.Name;
-        if (string.IsNullOrWhiteSpace(name))
+        verb = null;
+
+        if (ResolveAttributeTypeSymbol(attribute, semanticModel) is { } attributeTypeSymbol)
+        {
+            var isErrorType = attributeTypeSymbol.TypeKind == TypeKind.Error;
+            if (!isErrorType
+                && !string.Equals(attributeTypeSymbol.Name, _endpointRuleCatalog.CliVerbAttributeTypeName, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var namespaceName = attributeTypeSymbol.ContainingNamespace?.ToDisplayString() ?? string.Empty;
+            if (!isErrorType
+                && !string.Equals(namespaceName, _endpointRuleCatalog.CliVerbAttributeNamespace, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (!isErrorType)
+            {
+                var cliVerbFromSymbol = ExtractFirstStringLiteralArgument(attribute);
+                if (string.IsNullOrWhiteSpace(cliVerbFromSymbol))
+                {
+                    return false;
+                }
+
+                verb = cliVerbFromSymbol;
+                return true;
+            }
+        }
+
+        if (!string.Equals(ExtractAttributeName(attribute.Name), "Verb", StringComparison.Ordinal))
         {
             return false;
         }
 
-        if (name.EndsWith("Handler", StringComparison.Ordinal)
-            && name.StartsWith("I", StringComparison.Ordinal))
+        var compilationUnit = attribute.SyntaxTree.GetRoot() as CompilationUnitSyntax;
+        if (compilationUnit is null)
         {
-            return true;
+            return false;
         }
 
-        return string.Equals(name, "IConsumer", StringComparison.Ordinal);
+        var hasCommandLineUsing = compilationUnit.Usings.Any(usingDirective =>
+            usingDirective.Alias is null
+            && !usingDirective.StaticKeyword.IsKind(SyntaxKind.StaticKeyword)
+            && string.Equals(usingDirective.Name?.ToString(), _endpointRuleCatalog.CliVerbAttributeNamespace, StringComparison.Ordinal));
+        if (!hasCommandLineUsing)
+        {
+            return false;
+        }
+
+        var cliVerb = ExtractFirstStringLiteralArgument(attribute);
+        if (string.IsNullOrWhiteSpace(cliVerb))
+        {
+            return false;
+        }
+
+        verb = cliVerb;
+        return true;
+    }
+
+    private static INamedTypeSymbol? ResolveAttributeTypeSymbol(AttributeSyntax attribute, SemanticModel semanticModel)
+    {
+        var symbolInfo = semanticModel.GetSymbolInfo(attribute);
+        if (symbolInfo.Symbol is IMethodSymbol methodSymbol)
+        {
+            return methodSymbol.ContainingType;
+        }
+
+        foreach (var candidateSymbol in symbolInfo.CandidateSymbols)
+        {
+            if (candidateSymbol is IMethodSymbol candidateMethodSymbol)
+            {
+                return candidateMethodSymbol.ContainingType;
+            }
+        }
+
+        return semanticModel.GetTypeInfo(attribute).Type as INamedTypeSymbol;
     }
 
     private static EntityId ResolvePreferredHandlerMethodId(
