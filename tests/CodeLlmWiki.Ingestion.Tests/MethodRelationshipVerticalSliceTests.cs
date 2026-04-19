@@ -21,6 +21,8 @@ public sealed class MethodRelationshipVerticalSliceTests
         var implicitType = model.Declarations.Types.Single(x => x.Name == "ImplicitWorker");
         var explicitType = model.Declarations.Types.Single(x => x.Name == "ExplicitWorker");
         var overrideType = model.Declarations.Types.Single(x => x.Name == "OverrideWorker");
+        var abstractBaseType = model.Declarations.Types.Single(x => x.Name == "AbstractBaseWorker");
+        var abstractOverrideType = model.Declarations.Types.Single(x => x.Name == "AbstractOverrideWorker");
 
         var interfaceRun = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == interfaceType.Id && x.Name == "Run");
         var implicitRun = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == implicitType.Id && x.Name == "Run");
@@ -30,6 +32,8 @@ public sealed class MethodRelationshipVerticalSliceTests
             && x.Signature.Contains(".IWorker.Run()", StringComparison.Ordinal));
         var baseExecute = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == baseType.Id && x.Name == "Execute");
         var overrideExecute = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == overrideType.Id && x.Name == "Execute");
+        var abstractBaseExecute = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == abstractBaseType.Id && x.Name == "Execute");
+        var abstractOverrideExecute = model.Declarations.Methods.Declarations.Single(x => x.DeclaringTypeId == abstractOverrideType.Id && x.Name == "Execute");
 
         Assert.Contains(model.Declarations.Methods.Relations, x =>
             x.Kind == MethodRelationKind.ImplementsMethod &&
@@ -45,6 +49,11 @@ public sealed class MethodRelationshipVerticalSliceTests
             x.Kind == MethodRelationKind.OverridesMethod &&
             x.SourceMethodId == overrideExecute.Id &&
             x.TargetMethodId == baseExecute.Id);
+
+        Assert.Contains(model.Declarations.Methods.Relations, x =>
+            x.Kind == MethodRelationKind.OverridesMethod &&
+            x.SourceMethodId == abstractOverrideExecute.Id &&
+            x.TargetMethodId == abstractBaseExecute.Id);
     }
 
     [Fact]
@@ -150,6 +159,16 @@ public sealed class MethodRelationshipVerticalSliceTests
                 public class OverrideWorker : BaseWorker
                 {
                     public override void Execute() { }
+                }
+
+                public abstract class AbstractBaseWorker
+                {
+                    public abstract void Execute();
+                }
+
+                public abstract class AbstractOverrideWorker : AbstractBaseWorker
+                {
+                    public abstract override void Execute();
                 }
                 """);
 

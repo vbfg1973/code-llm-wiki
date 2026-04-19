@@ -3217,11 +3217,6 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
             foreach (var methodDeclaration in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
             {
-                if (methodDeclaration.Body is null && methodDeclaration.ExpressionBody is null)
-                {
-                    continue;
-                }
-
                 var sourceMethodId = ResolveSourceMethodId(methodDeclaration.Identifier.GetLocation(), methodIdByDeclarationLocation);
                 if (sourceMethodId == default)
                 {
@@ -3235,6 +3230,11 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     methodIdByDeclarationLocation,
                     triples,
                     diagnostics);
+
+                if (methodDeclaration.Body is null && methodDeclaration.ExpressionBody is null)
+                {
+                    continue;
+                }
 
                 AddCallEdgesForInvocations(
                     methodDeclaration,
