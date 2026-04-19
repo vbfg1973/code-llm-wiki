@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 007](./007-phase-7-complexity-and-maintainability-metrics.prd.md)
 
 - Issue: [#91](https://github.com/vbfg1973/code-llm-wiki/issues/91)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,10 +18,10 @@ Harden BL-012 for deterministic performance at scale: bounded parallel metric ex
 
 ## Acceptance criteria
 
-- [ ] Bounded parallel extraction with configurable concurrency is implemented without output nondeterminism.
-- [ ] Analyzer/metric package versions are pinned to prevent semantic drift.
-- [ ] Determinism regression suite validates stable results across reruns.
-- [ ] Performance overhead remains within the approved budget envelope on representative repositories.
+- [x] Bounded parallel extraction with configurable concurrency is implemented without output nondeterminism.
+- [x] Analyzer/metric package versions are pinned to prevent semantic drift.
+- [x] Determinism regression suite validates stable results across reruns.
+- [x] Performance overhead remains within the approved budget envelope on representative repositories.
 
 ## Blocked by
 

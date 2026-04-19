@@ -8,7 +8,7 @@
 - [x] Phase 2: Rollups and Scope Semantics (File/Namespace/Project/Repository) — completion date: 2026-04-19
 - [x] Phase 3: Hotspot Ranking and Severity Contracts — completion date: 2026-04-19
 - [x] Phase 4: Publication Surfaces (Wiki + Manifest + Front Matter) — completion date: 2026-04-19
-- [ ] Phase 5: Determinism, Parallelism, and Performance Hardening — completion date:
+- [x] Phase 5: Determinism, Parallelism, and Performance Hardening — completion date: 2026-04-19
 
 ---
 
@@ -125,7 +125,7 @@ Harden BL-012 with bounded parallel extraction, deterministic post-merge emissio
 
 ### Acceptance criteria
 
-- [ ] Bounded parallel metric computation is implemented with configurable concurrency and deterministic output stability.
-- [ ] Dependency versions and analyzer semantics are pinned for reproducible metric behavior.
-- [ ] Unit + integration fixture coverage and golden snapshots validate metric correctness and publication contracts.
-- [ ] Performance overhead remains within approved budget envelope on representative repositories.
+- [x] Bounded parallel metric computation is implemented with configurable concurrency and deterministic output stability.
+- [x] Dependency versions and analyzer semantics are pinned for reproducible metric behavior.
+- [x] Unit + integration fixture coverage and golden snapshots validate metric correctness and publication contracts.
+- [x] Performance overhead remains within approved budget envelope on representative repositories.
