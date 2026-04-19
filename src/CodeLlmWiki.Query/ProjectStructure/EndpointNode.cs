@@ -15,8 +15,8 @@ public sealed record EndpointNode(
     string RuleId,
     string RuleVersion,
     string RuleSource,
-    EntityId DeclaringMethodId,
-    EntityId DeclaringTypeId,
+    EntityId? DeclaringMethodId,
+    EntityId? DeclaringTypeId,
     EntityId? NamespaceId,
     EntityId? GroupId,
     IReadOnlyList<EntityId> DeclarationFileIds);

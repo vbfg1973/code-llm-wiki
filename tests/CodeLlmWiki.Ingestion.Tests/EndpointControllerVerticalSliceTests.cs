@@ -28,14 +28,14 @@ public sealed class EndpointControllerVerticalSliceTests
         Assert.Equal("1", endpoint.RuleVersion);
         Assert.Equal("code-defined", endpoint.RuleSource);
         Assert.Equal("api/orders/{id}", endpoint.NormalizedRouteKey);
-        Assert.Equal(controllerType.Id, endpoint.DeclaringTypeId);
+        Assert.Equal(controllerType.Id, endpoint.DeclaringTypeId!.Value);
         Assert.NotNull(endpoint.NamespaceId);
         Assert.NotNull(endpoint.GroupId);
         Assert.NotEmpty(endpoint.DeclarationFileIds);
 
         var endpointGroup = Assert.Single(model.Endpoints.Groups, x => x.Id == endpoint.GroupId!.Value);
         Assert.Equal("controller", endpointGroup.Family);
-        Assert.Equal(controllerType.Id, endpointGroup.DeclaringTypeId);
+        Assert.Equal(controllerType.Id, endpointGroup.DeclaringTypeId!.Value);
         Assert.Contains(endpoint.Id, endpointGroup.EndpointIds);
     }
 

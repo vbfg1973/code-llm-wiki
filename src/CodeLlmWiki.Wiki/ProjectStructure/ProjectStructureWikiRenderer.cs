@@ -2228,22 +2228,30 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             sb.AppendLine("- Namespace: none");
         }
 
-        if (typeById.TryGetValue(endpoint.DeclaringTypeId, out var declaringType))
+        if (endpoint.DeclaringTypeId is { } declaringTypeId && typeById.TryGetValue(declaringTypeId, out var declaringType))
         {
             sb.AppendLine($"- Declaring Type: {resolver.ToWikiLink(declaringType.Id, declaringType.Name)}");
         }
+        else if (endpoint.DeclaringTypeId is { } unresolvedDeclaringTypeId)
+        {
+            sb.AppendLine($"- Declaring Type: `{unresolvedDeclaringTypeId.Value}`");
+        }
         else
         {
-            sb.AppendLine($"- Declaring Type: `{endpoint.DeclaringTypeId.Value}`");
+            sb.AppendLine("- Declaring Type: none");
         }
 
-        if (methodById.TryGetValue(endpoint.DeclaringMethodId, out var declaringMethod))
+        if (endpoint.DeclaringMethodId is { } declaringMethodId && methodById.TryGetValue(declaringMethodId, out var declaringMethod))
         {
             sb.AppendLine($"- Declaring Method: {resolver.ToWikiLink(declaringMethod.Id, FormatMethodLinkAlias(declaringMethod))}");
         }
+        else if (endpoint.DeclaringMethodId is { } unresolvedDeclaringMethodId)
+        {
+            sb.AppendLine($"- Declaring Method: `{unresolvedDeclaringMethodId.Value}`");
+        }
         else
         {
-            sb.AppendLine($"- Declaring Method: `{endpoint.DeclaringMethodId.Value}`");
+            sb.AppendLine("- Declaring Method: none");
         }
 
         if (endpoint.GroupId is { } groupId && endpointGroupById.TryGetValue(groupId, out var endpointGroup))

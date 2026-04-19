@@ -284,6 +284,14 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
         if (discovery.Namespaces.Count == 0)
         {
+            CaptureMinimalApiEndpoints(
+                repositoryId,
+                repositoryRoot,
+                sourceFiles,
+                sourceTextByRelativePath,
+                fileIdByRelativePath,
+                triples,
+                diagnostics);
             return;
         }
 
@@ -1010,6 +1018,15 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             triples,
             diagnostics);
 
+        CaptureMinimalApiEndpoints(
+            repositoryId,
+            repositoryRoot,
+            sourceFiles,
+            sourceTextByRelativePath,
+            fileIdByRelativePath,
+            triples,
+            diagnostics);
+
         foreach (var pendingMemberTypeLink in pendingMemberTypeLinks)
         {
             var resolvedMemberTypeName = ResolveInternalTypeName(
@@ -1658,6 +1675,335 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             .ToArray();
 
         return string.Join('/', segments).ToLowerInvariant();
+    }
+
+    private void CaptureMinimalApiEndpoints(
+        EntityId repositoryId,
+        string repositoryRoot,
+        IReadOnlyList<string> sourceFiles,
+        IReadOnlyDictionary<string, string> sourceTextByRelativePath,
+        IReadOnlyDictionary<string, EntityId> fileIdByRelativePath,
+        List<SemanticTriple> triples,
+        List<IngestionDiagnostic> diagnostics)
+    {
+        if (sourceFiles.Count == 0)
+        {
+            return;
+        }
+
+        var syntaxTrees = new List<SyntaxTree>(sourceFiles.Count);
+        foreach (var relativePath in sourceFiles.OrderBy(x => x, StringComparer.Ordinal))
+        {
+            if (!sourceTextByRelativePath.TryGetValue(relativePath, out var sourceText))
+            {
+                var fullPath = Path.Combine(repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(fullPath))
+                {
+                    continue;
+                }
+
+                sourceText = File.ReadAllText(fullPath);
+            }
+
+            var syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: relativePath);
+            syntaxTrees.Add(syntaxTree);
+        }
+
+        if (syntaxTrees.Count == 0)
+        {
+            return;
+        }
+
+        var compilation = CSharpCompilation.Create(
+            assemblyName: "CodeLlmWiki.MinimalApiDiscovery",
+            syntaxTrees: syntaxTrees,
+            references: BuildCompilationReferences(diagnostics),
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var emittedEndpointGroupIds = new HashSet<EntityId>();
+        var emittedEndpointIds = new HashSet<EntityId>();
+
+        foreach (var syntaxTree in syntaxTrees)
+        {
+            var semanticModel = compilation.GetSemanticModel(syntaxTree, ignoreAccessibility: true);
+            var root = syntaxTree.GetRoot() as CompilationUnitSyntax;
+            if (root is null)
+            {
+                continue;
+            }
+
+            var relativePath = syntaxTree.FilePath;
+            fileIdByRelativePath.TryGetValue(relativePath, out var declarationFileId);
+            var groupRoutePrefixByIdentifier = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            foreach (var localDeclaration in root.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
+            {
+                foreach (var variable in localDeclaration.Declaration.Variables)
+                {
+                    if (variable.Initializer?.Value is not InvocationExpressionSyntax invocation)
+                    {
+                        continue;
+                    }
+
+                    if (!TryExtractMapGroup(invocation, out var receiverExpression, out var routePrefix))
+                    {
+                        continue;
+                    }
+
+                    var parentPrefix = ResolveMinimalApiRoutePrefix(receiverExpression, groupRoutePrefixByIdentifier);
+                    var composedPrefix = CombineRouteTemplates(parentPrefix, routePrefix);
+                    groupRoutePrefixByIdentifier[variable.Identifier.ValueText] = composedPrefix;
+                }
+            }
+
+            foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                if (!TryExtractMapEndpoint(invocation, out var receiverExpression, out var httpMethod, out var routeSuffix))
+                {
+                    continue;
+                }
+
+                var routePrefix = ResolveMinimalApiRoutePrefix(receiverExpression, groupRoutePrefixByIdentifier);
+                var authoredRoute = CombineRouteTemplates(routePrefix, routeSuffix);
+                var normalizedRoute = NormalizeRouteKey(authoredRoute);
+                if (string.IsNullOrWhiteSpace(normalizedRoute))
+                {
+                    continue;
+                }
+
+                EntityId? endpointGroupId = null;
+                var normalizedRoutePrefix = NormalizeRouteKey(routePrefix);
+                if (!string.IsNullOrWhiteSpace(normalizedRoutePrefix))
+                {
+                    var endpointGroupKey = $"{relativePath}:minimal-api:{normalizedRoutePrefix}";
+                    endpointGroupId = _stableIdGenerator.Create(new EntityKey("endpoint-group", endpointGroupKey));
+
+                    if (emittedEndpointGroupIds.Add(endpointGroupId.Value))
+                    {
+                        AddEntityTriples(
+                            triples,
+                            endpointGroupId.Value,
+                            "endpoint-group",
+                            $"Minimal API Group {normalizedRoutePrefix}",
+                            endpointGroupKey);
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(endpointGroupId.Value),
+                            CorePredicates.EndpointFamily,
+                            new LiteralNode("minimal-api")));
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(endpointGroupId.Value),
+                            CorePredicates.RoutePrefix,
+                            new LiteralNode(routePrefix)));
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(endpointGroupId.Value),
+                            CorePredicates.NormalizedRouteKey,
+                            new LiteralNode(normalizedRoutePrefix)));
+                        triples.Add(new SemanticTriple(
+                            new EntityNode(repositoryId),
+                            CorePredicates.ContainsEndpointGroup,
+                            new EntityNode(endpointGroupId.Value)));
+
+                        if (declarationFileId != default)
+                        {
+                            triples.Add(new SemanticTriple(
+                                new EntityNode(declarationFileId),
+                                CorePredicates.DeclaresEndpointGroup,
+                                new EntityNode(endpointGroupId.Value)));
+                        }
+                    }
+                }
+
+                var lineSpan = invocation.GetLocation().GetLineSpan();
+                var location = $"{relativePath}:{lineSpan.StartLinePosition.Line + 1}:{lineSpan.StartLinePosition.Character + 1}";
+                var canonicalSignature = $"{httpMethod} {normalizedRoute} {location}";
+                var endpointId = _stableIdGenerator.Create(new EntityKey("endpoint", canonicalSignature));
+                if (!emittedEndpointIds.Add(endpointId))
+                {
+                    continue;
+                }
+
+                AddEntityTriples(
+                    triples,
+                    endpointId,
+                    "endpoint",
+                    $"{httpMethod} {normalizedRoute}",
+                    canonicalSignature);
+                triples.Add(new SemanticTriple(
+                    new EntityNode(endpointId),
+                    CorePredicates.EndpointKind,
+                    new LiteralNode("minimal-api-route")));
+                triples.Add(new SemanticTriple(
+                    new EntityNode(endpointId),
+                    CorePredicates.EndpointFamily,
+                    new LiteralNode("minimal-api")));
+                triples.Add(new SemanticTriple(
+                    new EntityNode(endpointId),
+                    CorePredicates.EndpointHttpMethod,
+                    new LiteralNode(httpMethod)));
+                triples.Add(new SemanticTriple(
+                    new EntityNode(endpointId),
+                    CorePredicates.AuthoredRouteText,
+                    new LiteralNode(authoredRoute)));
+                triples.Add(new SemanticTriple(
+                    new EntityNode(endpointId),
+                    CorePredicates.NormalizedRouteKey,
+                    new LiteralNode(normalizedRoute)));
+                triples.Add(new SemanticTriple(
+                    new EntityNode(endpointId),
+                    CorePredicates.EndpointConfidence,
+                    new LiteralNode("high")));
+                triples.Add(new SemanticTriple(
+                    new EntityNode(endpointId),
+                    CorePredicates.RuleId,
+                    new LiteralNode("aspnetcore.minimalapi.map")));
+                triples.Add(new SemanticTriple(
+                    new EntityNode(endpointId),
+                    CorePredicates.RuleVersion,
+                    new LiteralNode("1")));
+                triples.Add(new SemanticTriple(
+                    new EntityNode(endpointId),
+                    CorePredicates.RuleSource,
+                    new LiteralNode("code-defined")));
+                triples.Add(new SemanticTriple(
+                    new EntityNode(repositoryId),
+                    CorePredicates.ContainsEndpoint,
+                    new EntityNode(endpointId)));
+
+                if (endpointGroupId is { } groupId)
+                {
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(endpointId),
+                        CorePredicates.HasEndpointGroup,
+                        new EntityNode(groupId)));
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(groupId),
+                        CorePredicates.ContainsEndpoint,
+                        new EntityNode(endpointId)));
+                }
+
+                if (declarationFileId != default)
+                {
+                    triples.Add(new SemanticTriple(
+                        new EntityNode(declarationFileId),
+                        CorePredicates.DeclaresEndpoint,
+                        new EntityNode(endpointId)));
+                }
+            }
+        }
+    }
+
+    private static bool TryExtractMapGroup(
+        InvocationExpressionSyntax invocation,
+        out ExpressionSyntax receiverExpression,
+        out string routePrefix)
+    {
+        receiverExpression = null!;
+        routePrefix = string.Empty;
+
+        if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
+        {
+            return false;
+        }
+
+        if (!string.Equals(memberAccess.Name.Identifier.ValueText, "MapGroup", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var routeArgument = ExtractFirstStringLiteralArgument(invocation.ArgumentList);
+        if (string.IsNullOrWhiteSpace(routeArgument))
+        {
+            return false;
+        }
+
+        receiverExpression = memberAccess.Expression;
+        routePrefix = routeArgument;
+        return true;
+    }
+
+    private static bool TryExtractMapEndpoint(
+        InvocationExpressionSyntax invocation,
+        out ExpressionSyntax receiverExpression,
+        out string httpMethod,
+        out string routeSuffix)
+    {
+        receiverExpression = null!;
+        httpMethod = string.Empty;
+        routeSuffix = string.Empty;
+
+        if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
+        {
+            return false;
+        }
+
+        switch (memberAccess.Name.Identifier.ValueText)
+        {
+            case "MapGet":
+                httpMethod = "GET";
+                break;
+            case "MapPost":
+                httpMethod = "POST";
+                break;
+            case "MapPut":
+                httpMethod = "PUT";
+                break;
+            case "MapDelete":
+                httpMethod = "DELETE";
+                break;
+            case "MapPatch":
+                httpMethod = "PATCH";
+                break;
+            default:
+                return false;
+        }
+
+        var routeArgument = ExtractFirstStringLiteralArgument(invocation.ArgumentList);
+        if (string.IsNullOrWhiteSpace(routeArgument))
+        {
+            return false;
+        }
+
+        receiverExpression = memberAccess.Expression;
+        routeSuffix = routeArgument;
+        return true;
+    }
+
+    private static string ResolveMinimalApiRoutePrefix(
+        ExpressionSyntax expression,
+        IReadOnlyDictionary<string, string> groupRoutePrefixByIdentifier)
+    {
+        switch (expression)
+        {
+            case IdentifierNameSyntax identifier:
+                return groupRoutePrefixByIdentifier.TryGetValue(identifier.Identifier.ValueText, out var prefix)
+                    ? prefix
+                    : string.Empty;
+            case InvocationExpressionSyntax invocation when TryExtractMapGroup(invocation, out var parent, out var routePrefix):
+                return CombineRouteTemplates(
+                    ResolveMinimalApiRoutePrefix(parent, groupRoutePrefixByIdentifier),
+                    routePrefix);
+            default:
+                return string.Empty;
+        }
+    }
+
+    private static string? ExtractFirstStringLiteralArgument(ArgumentListSyntax? argumentList)
+    {
+        if (argumentList is null || argumentList.Arguments.Count == 0)
+        {
+            return null;
+        }
+
+        foreach (var argument in argumentList.Arguments)
+        {
+            if (argument.Expression is LiteralExpressionSyntax literal
+                && literal.IsKind(SyntaxKind.StringLiteralExpression))
+            {
+                return literal.Token.ValueText;
+            }
+        }
+
+        return null;
     }
 
     private void CaptureMethodCalls(
