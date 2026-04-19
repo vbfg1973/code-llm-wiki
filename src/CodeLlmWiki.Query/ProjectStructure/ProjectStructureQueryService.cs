@@ -215,6 +215,15 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 declarations.Namespaces,
                 declarations.Types,
                 declarations.Methods.Declarations));
+        var declarationDependencyTargetFirstByPackageId = new DeclarationDependencyTargetFirstProjector().Project(
+            new DeclarationDependencyUsageProjectionRequest(
+                _triples,
+                projects,
+                packages,
+                files,
+                declarations.Namespaces,
+                declarations.Types,
+                declarations.Methods.Declarations));
         var methodBodyDependencyUsageByPackageId = new MethodBodyDependencyUsageProjector().Project(
             new MethodBodyDependencyUsageProjectionRequest(
                 _triples,
@@ -250,6 +259,9 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 DeclarationDependencyUsage = declarationDependencyUsageByPackageId.TryGetValue(package.Id, out var usage)
                     ? usage
                     : PackageDeclarationDependencyUsageCatalog.Empty,
+                DeclarationDependencyTargetFirst = declarationDependencyTargetFirstByPackageId.TryGetValue(package.Id, out var targetFirstUsage)
+                    ? targetFirstUsage
+                    : PackageDeclarationDependencyTargetFirstCatalog.Empty,
                 MethodBodyDependencyUsage = methodBodyDependencyUsageByPackageId.TryGetValue(package.Id, out var methodBodyUsage)
                     ? methodBodyUsage
                     : PackageMethodBodyDependencyUsageCatalog.Empty,

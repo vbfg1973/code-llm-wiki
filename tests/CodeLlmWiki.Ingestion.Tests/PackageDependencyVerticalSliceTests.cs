@@ -134,7 +134,24 @@ public sealed class PackageDependencyVerticalSliceTests
     }
 
     [Fact]
-    public async Task Render_PackagePage_IncludesDeclarationDependencyUsageSection_WhenUsageExists()
+    public async Task Query_ProjectsTargetFirstDeclarationDependencies_ByExternalTypeAndInternalType()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var package = model.Packages.Single(x => x.Name == "Newtonsoft.Json");
+        Assert.True(package.DeclarationDependencyTargetFirst.UsageCount > 0);
+        Assert.NotEmpty(package.DeclarationDependencyTargetFirst.ExternalTypes);
+
+        var jToken = package.DeclarationDependencyTargetFirst.ExternalTypes
+            .Single(x => x.ExternalTypeDisplayName == "Newtonsoft.Json.Linq.JToken");
+        Assert.Contains(jToken.InternalTypes, x => x.InternalTypeName == "SerializerFacade");
+    }
+
+    [Fact]
+    public async Task Render_PackagePage_UsesTargetFirstDeclarationDependencySection_WhenUsageExists()
     {
         var fixture = await PackageDependencyFixture.CreateAsync();
         var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
@@ -145,10 +162,11 @@ public sealed class PackageDependencyVerticalSliceTests
         var packagePage = pages.Single(page => page.RelativePath.StartsWith("packages/", StringComparison.Ordinal)
             && page.Markdown.Contains("# Package: Newtonsoft.Json", StringComparison.Ordinal));
 
-        Assert.Contains("## Declaration Dependency Usage", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("## Declaration Dependencies (External Type -> Internal Type)", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("## Declaration Dependency Usage", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("Newtonsoft.Json.Linq.JToken", packagePage.Markdown, StringComparison.Ordinal);
         Assert.Contains("SerializerFacade", packagePage.Markdown, StringComparison.Ordinal);
-        Assert.Contains("- [[methods/", packagePage.Markdown, StringComparison.Ordinal);
-        Assert.Contains("Normalize(", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("- [[types/App/WithAssets/SerializerFacade|SerializerFacade]]", packagePage.Markdown, StringComparison.Ordinal);
     }
 
     [Fact]
