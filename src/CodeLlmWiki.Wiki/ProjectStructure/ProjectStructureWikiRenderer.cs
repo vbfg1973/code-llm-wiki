@@ -215,7 +215,6 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             RenderPackagePage(
                 model.Repository.Id.Value,
                 package,
-                methodById,
                 externalCallTargetsByPackageId,
                 resolver)));
         if (model.DependencyAttribution.DeclarationUnknown.UsageCount > 0
@@ -416,7 +415,6 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
     private static WikiPage RenderPackagePage(
         string repositoryId,
         PackageNode package,
-        IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
         IReadOnlyDictionary<EntityId, IReadOnlyList<string>> externalCallTargetsByPackageId,
         WikiPathResolver resolver)
     {
@@ -450,6 +448,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 $"| {resolver.ToMarkdownLink(membership.ProjectId, membership.ProjectName)} | `{membership.ProjectPath}` | `{declaredVersion}` | `{resolvedVersion}` |");
         }
 
+        var emittedAnchorIds = new HashSet<string>(StringComparer.Ordinal);
+
         if (package.DeclarationDependencyTargetFirst.UsageCount > 0)
         {
             sb.AppendLine();
@@ -458,7 +458,10 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             foreach (var externalType in package.DeclarationDependencyTargetFirst.ExternalTypes)
             {
                 var anchor = WikiPathResolver.BuildPackageExternalTypeAnchor(package.CanonicalKey, externalType.ExternalTypeDisplayName);
-                sb.AppendLine($"<a id=\"{anchor}\"></a>");
+                if (emittedAnchorIds.Add(anchor))
+                {
+                    sb.AppendLine($"<a id=\"{anchor}\"></a>");
+                }
                 sb.AppendLine($"- `{externalType.ExternalTypeDisplayName}` ({externalType.UsageCount})");
 
                 foreach (var internalType in externalType.InternalTypes)
@@ -469,44 +472,50 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             }
         }
 
-        if (package.MethodBodyDependencyUsage.UsageCount > 0)
+        if (package.MethodBodyDependencyTargetFirst.UsageCount > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("## Method Body Dependency Usage");
+            sb.AppendLine("## Method Body Dependencies (External Type -> Internal Method)");
 
-            foreach (var namespaceUsage in package.MethodBodyDependencyUsage.Namespaces)
+            foreach (var externalType in package.MethodBodyDependencyTargetFirst.ExternalTypes)
             {
-                var namespaceDisplay = namespaceUsage.NamespaceId is { } namespaceId
-                    ? resolver.ToWikiLink(namespaceId, namespaceUsage.NamespaceName)
-                    : namespaceUsage.NamespaceName;
-                sb.AppendLine($"- {namespaceDisplay} ({namespaceUsage.UsageCount})");
-
-                foreach (var typeUsage in namespaceUsage.Types)
+                var anchor = WikiPathResolver.BuildPackageExternalTypeAnchor(package.CanonicalKey, externalType.ExternalTypeDisplayName);
+                if (emittedAnchorIds.Add(anchor))
                 {
-                    var typeDisplay = resolver.ToWikiLink(typeUsage.TypeId, typeUsage.TypeName);
-                    sb.AppendLine($"  - {typeDisplay} ({typeUsage.UsageCount})");
+                    sb.AppendLine($"<a id=\"{anchor}\"></a>");
+                }
 
-                    foreach (var methodUsage in typeUsage.Methods)
-                    {
-                        var methodAlias = methodById.TryGetValue(methodUsage.MethodId, out var method)
-                            ? FormatMethodLinkAlias(method)
-                            : methodUsage.MethodSignature;
-                        var methodDisplay = resolver.ToWikiLink(methodUsage.MethodId, methodAlias);
-                        sb.AppendLine($"    - {methodDisplay} ({methodUsage.UsageCount})");
-                    }
+                sb.AppendLine($"- `{externalType.ExternalTypeDisplayName}` ({externalType.UsageCount})");
+
+                foreach (var internalMethod in externalType.InternalMethods)
+                {
+                    var methodDisplay = resolver.ToWikiLink(internalMethod.InternalMethodId, internalMethod.InternalMethodDisplayName);
+                    sb.AppendLine($"  - {methodDisplay} ({internalMethod.UsageCount})");
                 }
             }
         }
 
         if (externalCallTargetsByPackageId.TryGetValue(package.Id, out var externalCallTargets) && externalCallTargets.Count > 0)
         {
-            sb.AppendLine();
-            sb.AppendLine("## External Type Anchors");
-            foreach (var externalCallTarget in externalCallTargets)
+            var additionalTargets = externalCallTargets
+                .Select(target => new
+                {
+                    Target = target,
+                    Anchor = WikiPathResolver.BuildPackageExternalTypeAnchor(package.CanonicalKey, target),
+                })
+                .Where(x => !emittedAnchorIds.Contains(x.Anchor))
+                .OrderBy(x => x.Target, StringComparer.Ordinal)
+                .ToArray();
+
+            if (additionalTargets.Length > 0)
             {
-                var anchor = WikiPathResolver.BuildPackageExternalTypeAnchor(package.CanonicalKey, externalCallTarget);
-                sb.AppendLine($"<a id=\"{anchor}\"></a>");
-                sb.AppendLine($"- `{externalCallTarget}`");
+                sb.AppendLine();
+                sb.AppendLine("## External Type Anchors");
+                foreach (var additionalTarget in additionalTargets)
+                {
+                    sb.AppendLine($"<a id=\"{additionalTarget.Anchor}\"></a>");
+                    sb.AppendLine($"- `{additionalTarget.Target}`");
+                }
             }
         }
 

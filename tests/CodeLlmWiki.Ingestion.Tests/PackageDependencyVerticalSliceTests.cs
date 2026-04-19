@@ -193,7 +193,25 @@ public sealed class PackageDependencyVerticalSliceTests
     }
 
     [Fact]
-    public async Task Render_PackagePage_IncludesMethodBodyDependencyUsageSection_WhenUsageExists()
+    public async Task Query_ProjectsTargetFirstMethodBodyDependencies_ByExternalTypeAndInternalMethod()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var package = model.Packages.Single(x => x.Name == "Newtonsoft.Json");
+        Assert.True(package.MethodBodyDependencyTargetFirst.UsageCount > 0);
+        Assert.NotEmpty(package.MethodBodyDependencyTargetFirst.ExternalTypes);
+
+        var jToken = package.MethodBodyDependencyTargetFirst.ExternalTypes
+            .Single(x => x.ExternalTypeDisplayName == "Newtonsoft.Json.Linq.JToken");
+        Assert.Contains(jToken.InternalMethods, x => x.InternalMethodDisplayName.Contains("BodyUsageFacade", StringComparison.Ordinal));
+        Assert.DoesNotContain(jToken.InternalMethods, x => x.InternalMethodDisplayName.Contains("TokenName(", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Render_PackagePage_UsesTargetFirstMethodBodyDependencySection_WhenUsageExists()
     {
         var fixture = await PackageDependencyFixture.CreateAsync();
         var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
@@ -204,7 +222,9 @@ public sealed class PackageDependencyVerticalSliceTests
         var packagePage = pages.Single(page => page.RelativePath.StartsWith("packages/", StringComparison.Ordinal)
             && page.Markdown.Contains("# Package: Newtonsoft.Json", StringComparison.Ordinal));
 
-        Assert.Contains("## Method Body Dependency Usage", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("## Method Body Dependencies (External Type -> Internal Method)", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("## Method Body Dependency Usage", packagePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("Newtonsoft.Json.Linq.JToken", packagePage.Markdown, StringComparison.Ordinal);
         Assert.Contains("BodyUsageFacade", packagePage.Markdown, StringComparison.Ordinal);
         Assert.Contains("- [[methods/", packagePage.Markdown, StringComparison.Ordinal);
         Assert.Contains("Serialize(", packagePage.Markdown, StringComparison.Ordinal);
