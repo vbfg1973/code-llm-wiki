@@ -8,7 +8,7 @@
 - [x] Phase 2: Project-Scoped Semantic Call Resolution Slice — completion date: 2026-04-19
 - [x] Phase 3: Override Resolution and Type-Fallback Noise Reduction — completion date: 2026-04-19
 - [x] Phase 4: Quality Gate Policy and Run Status Integration — completion date: 2026-04-19
-- [ ] Phase 5: Bounded Parallelism and Deterministic Merge Hardening
+- [x] Phase 5: Bounded Parallelism and Deterministic Merge Hardening — completion date: 2026-04-19
 - [ ] Phase 6: Docs Runbook, Contracts, and Regression Hardening
 
 ---
@@ -108,10 +108,10 @@ Add bounded parallel project processing for semantic analysis and enforce determ
 
 ### Acceptance criteria
 
-- [ ] Project processing supports bounded concurrency configuration.
-- [ ] Triple and diagnostic emission ordering is deterministic under parallel execution.
-- [ ] Parallel determinism is validated by repeat-run tests.
-- [ ] Representative large-fixture runs show stable behavior with improved throughput characteristics.
+- [x] Project processing supports bounded concurrency configuration.
+- [x] Triple and diagnostic emission ordering is deterministic under parallel execution.
+- [x] Parallel determinism is validated by repeat-run tests.
+- [x] Representative large-fixture runs show stable behavior with improved throughput characteristics.
 
 ---
 
