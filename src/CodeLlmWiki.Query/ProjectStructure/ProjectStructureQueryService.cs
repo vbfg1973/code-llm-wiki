@@ -1,5 +1,6 @@
 using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
+using System.Globalization;
 
 namespace CodeLlmWiki.Query.ProjectStructure;
 
@@ -828,6 +829,14 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         var methodWritesFieldEdges = BuildEntityEdges(triples, CorePredicates.WritesField);
         var methodExtendsTypeEdges = BuildEntityEdges(triples, CorePredicates.ExtendsType);
         var declarationLocationsByEntityId = BuildDeclarationLocationsByEntityId(triples);
+        var methodCoverageByMethodId = BuildStringLiteralMap(triples, CorePredicates.MetricCoverageStatus);
+        var cyclomaticByMethodId = BuildIntLiteralMap(triples, CorePredicates.CyclomaticComplexity);
+        var cognitiveByMethodId = BuildIntLiteralMap(triples, CorePredicates.CognitiveComplexity);
+        var halsteadByMethodId = BuildDoubleLiteralMap(triples, CorePredicates.HalsteadVolume);
+        var maintainabilityByMethodId = BuildDoubleLiteralMap(triples, CorePredicates.MaintainabilityIndex);
+        var cboDeclarationByTypeId = BuildIntLiteralMap(triples, CorePredicates.CboDeclaration);
+        var cboMethodBodyByTypeId = BuildIntLiteralMap(triples, CorePredicates.CboMethodBody);
+        var cboTotalByTypeId = BuildIntLiteralMap(triples, CorePredicates.CboTotal);
 
         var namespaceIds = metadataById
             .Where(x => x.Value.IsType("namespace"))
@@ -1060,6 +1069,52 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 memberIds ??= [];
                 methodIdsByType.TryGetValue(typeId, out var methodIds);
                 methodIds ??= [];
+                cboDeclarationByTypeId.TryGetValue(typeId, out var cboDeclaration);
+                cboMethodBodyByTypeId.TryGetValue(typeId, out var cboMethodBody);
+                cboTotalByTypeId.TryGetValue(typeId, out var cboTotal);
+                var hasCbo = cboDeclarationByTypeId.ContainsKey(typeId)
+                    || cboMethodBodyByTypeId.ContainsKey(typeId)
+                    || cboTotalByTypeId.ContainsKey(typeId);
+
+                var analyzableMethodMetricSnapshots = methodIds
+                    .Select(methodId =>
+                    {
+                        methodCoverageByMethodId.TryGetValue(methodId, out var coverage);
+                        cyclomaticByMethodId.TryGetValue(methodId, out var cyclomatic);
+                        cognitiveByMethodId.TryGetValue(methodId, out var cognitive);
+                        halsteadByMethodId.TryGetValue(methodId, out var halstead);
+                        maintainabilityByMethodId.TryGetValue(methodId, out var maintainability);
+
+                        return new
+                        {
+                            CoverageStatus = coverage ?? string.Empty,
+                            Cyclomatic = cyclomaticByMethodId.ContainsKey(methodId) ? cyclomatic : (int?)null,
+                            Cognitive = cognitiveByMethodId.ContainsKey(methodId) ? cognitive : (int?)null,
+                            Halstead = halsteadByMethodId.ContainsKey(methodId) ? halstead : (double?)null,
+                            Maintainability = maintainabilityByMethodId.ContainsKey(methodId) ? maintainability : (double?)null,
+                        };
+                    })
+                    .Where(snapshot =>
+                        snapshot.CoverageStatus.Equals("analyzable", StringComparison.OrdinalIgnoreCase)
+                        && snapshot.Cyclomatic.HasValue
+                        && snapshot.Cognitive.HasValue
+                        && snapshot.Halstead.HasValue
+                        && snapshot.Maintainability.HasValue)
+                    .ToArray();
+
+                var methodMetricCount = analyzableMethodMetricSnapshots.Length;
+                var averageCyclomatic = methodMetricCount == 0
+                    ? 0d
+                    : analyzableMethodMetricSnapshots.Average(snapshot => snapshot.Cyclomatic!.Value);
+                var averageCognitive = methodMetricCount == 0
+                    ? 0d
+                    : analyzableMethodMetricSnapshots.Average(snapshot => snapshot.Cognitive!.Value);
+                var averageHalstead = methodMetricCount == 0
+                    ? 0d
+                    : analyzableMethodMetricSnapshots.Average(snapshot => snapshot.Halstead!.Value);
+                var averageMaintainability = methodMetricCount == 0
+                    ? 0d
+                    : analyzableMethodMetricSnapshots.Average(snapshot => snapshot.Maintainability!.Value);
 
                 var typeNode = new TypeDeclarationNode(
                     typeId,
@@ -1088,12 +1143,24 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     memberIds,
                     declarationFileIds);
 
+                var typeMetrics = new TypeMetricNode(
+                    HasCbo: hasCbo,
+                    CboDeclaration: cboDeclaration,
+                    CboMethodBody: cboMethodBody,
+                    CboTotal: cboTotal,
+                    MethodMetricCount: methodMetricCount,
+                    AverageCyclomaticComplexity: averageCyclomatic,
+                    AverageCognitiveComplexity: averageCognitive,
+                    AverageHalsteadVolume: averageHalstead,
+                    AverageMaintainabilityIndex: averageMaintainability);
+
                 if (declarationLocationsByEntityId.TryGetValue(typeId, out var declarationLocations))
                 {
                     typeNode = typeNode with
                     {
                         DeclarationLocations = declarationLocations,
                         MethodIds = methodIds,
+                        Metrics = typeMetrics,
                     };
                 }
                 else
@@ -1101,6 +1168,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     typeNode = typeNode with
                     {
                         MethodIds = methodIds,
+                        Metrics = typeMetrics,
                     };
                 }
 
@@ -1292,11 +1360,36 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                     extendedType,
                     declarationFileIds);
 
+                var methodMetrics = new MethodMetricNode(
+                    CoverageStatus: methodCoverageByMethodId.TryGetValue(methodId, out var coverageStatus)
+                        ? coverageStatus
+                        : string.Empty,
+                    CyclomaticComplexity: cyclomaticByMethodId.TryGetValue(methodId, out var cyclomatic)
+                        ? cyclomatic
+                        : null,
+                    CognitiveComplexity: cognitiveByMethodId.TryGetValue(methodId, out var cognitive)
+                        ? cognitive
+                        : null,
+                    HalsteadVolume: halsteadByMethodId.TryGetValue(methodId, out var halstead)
+                        ? halstead
+                        : null,
+                    MaintainabilityIndex: maintainabilityByMethodId.TryGetValue(methodId, out var maintainability)
+                        ? maintainability
+                        : null);
+
                 if (declarationLocationsByEntityId.TryGetValue(methodId, out var declarationLocations))
                 {
                     methodNode = methodNode with
                     {
                         DeclarationLocations = declarationLocations,
+                        Metrics = methodMetrics,
+                    };
+                }
+                else
+                {
+                    methodNode = methodNode with
+                    {
+                        Metrics = methodMetrics,
                     };
                 }
 
@@ -1551,6 +1644,62 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         }
 
         return new DeclarationLocationNode(parts[0], line, column);
+    }
+
+    private static Dictionary<EntityId, string> BuildStringLiteralMap(
+        IReadOnlyList<SemanticTriple> triples,
+        PredicateId predicate)
+    {
+        return triples
+            .Where(triple => triple.Predicate == predicate)
+            .Where(triple => triple.Subject is EntityNode && triple.Object is LiteralNode)
+            .Select(triple => (
+                SubjectId: ((EntityNode)triple.Subject).Id,
+                Value: ((LiteralNode)triple.Object).Value?.ToString() ?? string.Empty))
+            .GroupBy(item => item.SubjectId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(x => x.Value).OrderBy(x => x, StringComparer.Ordinal).First());
+    }
+
+    private static Dictionary<EntityId, int> BuildIntLiteralMap(
+        IReadOnlyList<SemanticTriple> triples,
+        PredicateId predicate)
+    {
+        return triples
+            .Where(triple => triple.Predicate == predicate)
+            .Where(triple => triple.Subject is EntityNode && triple.Object is LiteralNode)
+            .Select(triple =>
+            {
+                var subjectId = ((EntityNode)triple.Subject).Id;
+                var literalValue = ((LiteralNode)triple.Object).Value?.ToString() ?? string.Empty;
+                return (SubjectId: subjectId, Value: int.TryParse(literalValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : (int?)null);
+            })
+            .Where(item => item.Value.HasValue)
+            .GroupBy(item => item.SubjectId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(x => x.Value!.Value).OrderBy(x => x).First());
+    }
+
+    private static Dictionary<EntityId, double> BuildDoubleLiteralMap(
+        IReadOnlyList<SemanticTriple> triples,
+        PredicateId predicate)
+    {
+        return triples
+            .Where(triple => triple.Predicate == predicate)
+            .Where(triple => triple.Subject is EntityNode && triple.Object is LiteralNode)
+            .Select(triple =>
+            {
+                var subjectId = ((EntityNode)triple.Subject).Id;
+                var literalValue = ((LiteralNode)triple.Object).Value?.ToString() ?? string.Empty;
+                return (SubjectId: subjectId, Value: double.TryParse(literalValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : (double?)null);
+            })
+            .Where(item => item.Value.HasValue)
+            .GroupBy(item => item.SubjectId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(x => x.Value!.Value).OrderBy(x => x).First());
     }
 
     private static IReadOnlyList<EntityEdge> BuildEntityEdges(

@@ -23,4 +23,5 @@ public sealed record MethodDeclarationNode(
     IReadOnlyList<EntityId> DeclarationFileIds)
 {
     public IReadOnlyList<DeclarationLocationNode> DeclarationLocations { get; init; } = [];
+    public MethodMetricNode Metrics { get; init; } = MethodMetricNode.Empty;
 }

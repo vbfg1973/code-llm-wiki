@@ -89,6 +89,14 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         var packageById = model.Packages.ToDictionary(x => x.Id, x => x);
         var projectById = model.Projects.ToDictionary(x => x.Id, x => x);
         var namespaceById = model.Declarations.Namespaces.ToDictionary(x => x.Id, x => x);
+        var namespaceMetricRollupByNamespaceId = model.StructuralMetrics.Namespaces
+            .GroupBy(x => x.NamespaceId)
+            .ToDictionary(
+                x => x.Key,
+                x => x
+                    .OrderByDescending(v => v.Recursive.Coverage.AnalyzableMethods)
+                    .ThenBy(v => v.Path, StringComparer.Ordinal)
+                    .First());
         var memberById = model.Declarations.Members.ToDictionary(x => x.Id, x => x);
         var methodById = orderedMethods.ToDictionary(x => x.Id, x => x);
         var implementedMethodIdsBySourceMethodId = model.Declarations.Methods.Relations
@@ -237,7 +245,14 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         {
             pages.Add(RenderUnknownPackageAttributionPage(model.Repository.Id.Value, model.DependencyAttribution, methodById, resolver));
         }
-        pages.AddRange(orderedNamespaces.Select(namespaceDeclaration => RenderNamespacePage(model.Repository.Id.Value, namespaceDeclaration, namespaceById, typeById, resolver)));
+        pages.AddRange(orderedNamespaces.Select(namespaceDeclaration =>
+            RenderNamespacePage(
+                model.Repository.Id.Value,
+                namespaceDeclaration,
+                namespaceById,
+                typeById,
+                namespaceMetricRollupByNamespaceId,
+                resolver)));
         pages.AddRange(orderedTypes.Select(typeDeclaration =>
             RenderTypePage(
                 model.Repository.Id.Value,
@@ -835,6 +850,7 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         NamespaceDeclarationNode namespaceDeclaration,
         IReadOnlyDictionary<EntityId, NamespaceDeclarationNode> namespaceById,
         IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
+        IReadOnlyDictionary<EntityId, NamespaceStructuralMetricRollupNode> namespaceMetricRollupByNamespaceId,
         WikiPathResolver resolver)
     {
         var sb = new StringBuilder();
@@ -871,6 +887,16 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             }
 
             sb.AppendLine($"- {resolver.ToWikiLink(typeDeclaration.Id, typeDeclaration.Name)} ({typeDeclaration.Kind.ToString().ToLowerInvariant()})");
+        }
+
+        if (namespaceMetricRollupByNamespaceId.TryGetValue(namespaceDeclaration.Id, out var namespaceMetrics))
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Metrics");
+            sb.AppendLine("### Direct");
+            AppendStructuralMetricScopeSummary(sb, namespaceMetrics.Direct);
+            sb.AppendLine("### Recursive");
+            AppendStructuralMetricScopeSummary(sb, namespaceMetrics.Recursive);
         }
 
         var frontMatter = new List<KeyValuePair<string, string>>
@@ -983,6 +1009,10 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             writeMethodIdsByTargetMemberId,
             MemberDeclarationKind.Field,
             resolver);
+
+        sb.AppendLine();
+        sb.AppendLine("## Metrics");
+        AppendTypeMetricsSection(sb, typeDeclaration.Metrics);
 
         sb.AppendLine();
         sb.AppendLine("## Dependency Rollup");
@@ -1234,6 +1264,97 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         {
             sb.AppendLine($"- {resolver.ToWikiLink(method.Id, FormatMethodLinkAlias(method))}");
         }
+    }
+
+    private static void AppendTypeMetricsSection(StringBuilder sb, TypeMetricNode metrics)
+    {
+        sb.AppendLine("### Coupling");
+        if (!metrics.HasCbo)
+        {
+            sb.AppendLine("- CBO: not available");
+        }
+        else
+        {
+            sb.AppendLine($"- CBO Declaration: {metrics.CboDeclaration}");
+            sb.AppendLine($"- CBO Method Body: {metrics.CboMethodBody}");
+            sb.AppendLine($"- CBO Total: {metrics.CboTotal}");
+        }
+
+        sb.AppendLine("### Method Complexity Rollup");
+        sb.AppendLine($"- Methods With Metrics: {metrics.MethodMetricCount}");
+
+        if (metrics.MethodMetricCount == 0)
+        {
+            sb.AppendLine("- Average Cyclomatic Complexity: n/a");
+            sb.AppendLine("- Average Cognitive Complexity: n/a");
+            sb.AppendLine("- Average Halstead Volume: n/a");
+            sb.AppendLine("- Average Maintainability Index: n/a");
+            return;
+        }
+
+        sb.AppendLine($"- Average Cyclomatic Complexity: {FormatMetricNumber(metrics.AverageCyclomaticComplexity)}");
+        sb.AppendLine($"- Average Cognitive Complexity: {FormatMetricNumber(metrics.AverageCognitiveComplexity)}");
+        sb.AppendLine($"- Average Halstead Volume: {FormatMetricNumber(metrics.AverageHalsteadVolume)}");
+        sb.AppendLine($"- Average Maintainability Index: {FormatMetricNumber(metrics.AverageMaintainabilityIndex)}");
+    }
+
+    private static void AppendMethodMetricsSection(StringBuilder sb, MethodMetricNode metrics)
+    {
+        var coverageStatus = string.IsNullOrWhiteSpace(metrics.CoverageStatus)
+            ? "unknown"
+            : metrics.CoverageStatus;
+        sb.AppendLine($"- Coverage Status: `{coverageStatus}`");
+        sb.AppendLine($"- Cyclomatic Complexity: {FormatOptionalIntMetric(metrics.CyclomaticComplexity)}");
+        sb.AppendLine($"- Cognitive Complexity: {FormatOptionalIntMetric(metrics.CognitiveComplexity)}");
+        sb.AppendLine($"- Halstead Volume: {FormatOptionalDoubleMetric(metrics.HalsteadVolume)}");
+        sb.AppendLine($"- Maintainability Index: {FormatOptionalDoubleMetric(metrics.MaintainabilityIndex)}");
+    }
+
+    private static void AppendStructuralMetricScopeSummary(StringBuilder sb, StructuralMetricScopeRollup rollup)
+    {
+        sb.AppendLine($"- Included In Ranking: {rollup.IncludedInRanking.ToString().ToLowerInvariant()}");
+        sb.AppendLine($"- Severity: `{rollup.Severity.ToString().ToLowerInvariant()}`");
+        sb.AppendLine($"- Methods With Metrics: {rollup.Metrics.MethodMetricCount}");
+        sb.AppendLine($"- Types With CBO: {rollup.Metrics.TypeMetricCount}");
+
+        if (rollup.Metrics.MethodMetricCount == 0)
+        {
+            sb.AppendLine("- Average Cyclomatic Complexity: n/a");
+            sb.AppendLine("- Average Cognitive Complexity: n/a");
+            sb.AppendLine("- Average Halstead Volume: n/a");
+            sb.AppendLine("- Average Maintainability Index: n/a");
+        }
+        else
+        {
+            sb.AppendLine($"- Average Cyclomatic Complexity: {FormatMetricNumber(rollup.Metrics.AverageCyclomaticComplexity)}");
+            sb.AppendLine($"- Average Cognitive Complexity: {FormatMetricNumber(rollup.Metrics.AverageCognitiveComplexity)}");
+            sb.AppendLine($"- Average Halstead Volume: {FormatMetricNumber(rollup.Metrics.AverageHalsteadVolume)}");
+            sb.AppendLine($"- Average Maintainability Index: {FormatMetricNumber(rollup.Metrics.AverageMaintainabilityIndex)}");
+        }
+
+        if (rollup.Metrics.TypeMetricCount == 0)
+        {
+            sb.AppendLine("- Average CBO Total: n/a");
+        }
+        else
+        {
+            sb.AppendLine($"- Average CBO Total: {FormatMetricNumber(rollup.Metrics.AverageCboTotal)}");
+        }
+    }
+
+    private static string FormatOptionalIntMetric(int? value)
+    {
+        return value.HasValue ? value.Value.ToString(CultureInfo.InvariantCulture) : "n/a";
+    }
+
+    private static string FormatOptionalDoubleMetric(double? value)
+    {
+        return value.HasValue ? FormatMetricNumber(value.Value) : "n/a";
+    }
+
+    private static string FormatMetricNumber(double value)
+    {
+        return value.ToString("0.###", CultureInfo.InvariantCulture);
     }
 
     private static void AppendMemberDataFlowSection(
@@ -1699,6 +1820,10 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 sb.AppendLine($"- {parameter.Name}: {parameterType}");
             }
         }
+
+        sb.AppendLine();
+        sb.AppendLine("## Metrics");
+        AppendMethodMetricsSection(sb, methodDeclaration.Metrics);
 
         sb.AppendLine();
         sb.AppendLine("## Implements");

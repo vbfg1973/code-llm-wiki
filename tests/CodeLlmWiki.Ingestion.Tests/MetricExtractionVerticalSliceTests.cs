@@ -4,6 +4,7 @@ using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Ingestion.ProjectStructure;
 using CodeLlmWiki.Query.ProjectStructure;
+using CodeLlmWiki.Wiki.ProjectStructure;
 
 namespace CodeLlmWiki.Ingestion.Tests;
 
@@ -117,6 +118,42 @@ public sealed class MetricExtractionVerticalSliceTests
         Assert.True(int.Parse(declarationCbo, CultureInfo.InvariantCulture) >= 1);
         Assert.Equal(0, int.Parse(methodBodyCbo, CultureInfo.InvariantCulture));
         Assert.True(int.Parse(totalCbo, CultureInfo.InvariantCulture) >= 1);
+    }
+
+    [Fact]
+    public async Task Render_EmitsComplexitySections_OnMethodTypeAndNamespacePages()
+    {
+        var fixture = await MetricFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+        var pages = new ProjectStructureWikiRenderer().Render(model);
+
+        var methodPage = pages.Single(x =>
+            x.RelativePath.StartsWith("methods/Acme/Metrics/Consumer/", StringComparison.Ordinal)
+            && x.Markdown.Contains("method_name: Analyze", StringComparison.Ordinal));
+        Assert.Contains("## Metrics", methodPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("- Coverage Status: `analyzable`", methodPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("- Cyclomatic Complexity: 4", methodPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("- Cognitive Complexity: 3", methodPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("- Halstead Volume:", methodPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("- Maintainability Index:", methodPage.Markdown, StringComparison.Ordinal);
+
+        var typePage = pages.Single(x => x.RelativePath == "types/Acme/Metrics/CouplingSubject.md");
+        Assert.Contains("## Metrics", typePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("### Coupling", typePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("- CBO Declaration: 3", typePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("- CBO Method Body: 3", typePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("- CBO Total: 4", typePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("### Method Complexity Rollup", typePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("- Methods With Metrics:", typePage.Markdown, StringComparison.Ordinal);
+
+        var namespacePage = pages.Single(x => x.RelativePath == "namespaces/Acme/Metrics.md");
+        Assert.Contains("## Metrics", namespacePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("### Direct", namespacePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("### Recursive", namespacePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("- Methods With Metrics:", namespacePage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("- Average Cyclomatic Complexity:", namespacePage.Markdown, StringComparison.Ordinal);
     }
 
     private static double CalculateExpectedMaintainabilityIndex(double halsteadVolume, int cyclomaticComplexity, int locCodeLines)

@@ -23,5 +23,6 @@ public sealed record TypeDeclarationNode(
 {
     public IReadOnlyList<DeclarationLocationNode> DeclarationLocations { get; init; } = [];
     public IReadOnlyList<EntityId> MethodIds { get; init; } = [];
+    public TypeMetricNode Metrics { get; init; } = TypeMetricNode.Empty;
     public TypeDependencyRollupCatalog DependencyRollup { get; init; } = TypeDependencyRollupCatalog.Empty;
 }
