@@ -382,6 +382,33 @@ public sealed class PackageDependencyVerticalSliceTests
     }
 
     [Fact]
+    public async Task Render_TargetFirstPackageDependencySections_AreDeterministicAcrossRuns()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync(
+            includeUnresolvedSignatureInNoAssets: true,
+            includePackageInheritanceInWithAssets: true);
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+
+        var first = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var firstModel = new ProjectStructureQueryService(first.Triples).GetModel(first.RepositoryId);
+        var firstPage = new ProjectStructureWikiRenderer()
+            .Render(firstModel)
+            .Single(page => page.RelativePath == "packages/Newtonsoft.Json.md");
+
+        var second = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var secondModel = new ProjectStructureQueryService(second.Triples).GetModel(second.RepositoryId);
+        var secondPage = new ProjectStructureWikiRenderer()
+            .Render(secondModel)
+            .Single(page => page.RelativePath == "packages/Newtonsoft.Json.md");
+
+        Assert.Equal(firstPage.Markdown, secondPage.Markdown);
+
+        var jObjectIndex = firstPage.Markdown.IndexOf("Newtonsoft.Json.Linq.JObject", StringComparison.Ordinal);
+        var jTokenIndex = firstPage.Markdown.IndexOf("Newtonsoft.Json.Linq.JToken", StringComparison.Ordinal);
+        Assert.True(jObjectIndex >= 0 && jTokenIndex >= 0 && jObjectIndex < jTokenIndex);
+    }
+
+    [Fact]
     public async Task Render_PackagePage_RendersInheritedPackageTypes_OnlyWhenEvidenceExists()
     {
         var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());

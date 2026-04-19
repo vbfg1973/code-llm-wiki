@@ -153,6 +153,29 @@ public sealed class TypeSymbolVerticalSliceTests
             obj.Id == sharedInterface.Id);
     }
 
+    [Fact]
+    public async Task Render_TypeRelationshipSections_AreDeterministicAcrossRuns()
+    {
+        var fixture = await TypeFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+
+        var first = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var firstModel = new ProjectStructureQueryService(first.Triples).GetModel(first.RepositoryId);
+        var firstPages = new ProjectStructureWikiRenderer().Render(firstModel);
+
+        var second = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var secondModel = new ProjectStructureQueryService(second.Triples).GetModel(second.RepositoryId);
+        var secondPages = new ProjectStructureWikiRenderer().Render(secondModel);
+
+        var firstBasePage = firstPages.Single(x => x.RelativePath == "types/Acme/Workers/BaseWorker.md");
+        var secondBasePage = secondPages.Single(x => x.RelativePath == "types/Acme/Workers/BaseWorker.md");
+        Assert.Equal(firstBasePage.Markdown, secondBasePage.Markdown);
+
+        var derivedIndex = firstBasePage.Markdown.IndexOf("DerivedWorker", StringComparison.Ordinal);
+        var innerIndex = firstBasePage.Markdown.IndexOf("Inner", StringComparison.Ordinal);
+        Assert.True(derivedIndex >= 0 && innerIndex >= 0 && derivedIndex < innerIndex);
+    }
+
     private sealed class TypeFixture
     {
         private TypeFixture(string repositoryPath)
