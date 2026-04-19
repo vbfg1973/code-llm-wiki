@@ -116,6 +116,11 @@ Purpose: Track durable product capabilities from the original specification (not
   - Planned in:
     - PRD TBD
 
+- [ ] `BL-019` LLM and user guidance documentation
+  - Detail: add explicit wiki-native guidance for LLM agents and human users, including operating instructions, navigation conventions, and task-oriented usage patterns.
+  - Planned in:
+    - PRD TBD
+
 ## Cross-Cutting Constraints (from original intent)
 
 - `HEAD` snapshot is canonical for present-state ingestion.
