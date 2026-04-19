@@ -5,7 +5,7 @@
 ## Execution checklist
 
 - [x] Phase 1: Endpoint Core Contracts and Controller Baseline — completion date: 2026-04-19
-- [ ] Phase 2: Minimal API Endpoint Slice
+- [x] Phase 2: Minimal API Endpoint Slice — completion date: 2026-04-19
 - [ ] Phase 3: Message Handler and CLI Endpoint Slice
 - [ ] Phase 4: gRPC Endpoint Slice and Partial-Resolution Semantics
 - [ ] Phase 5: Matchability Fingerprints and Outbound Breadcrumbs
@@ -57,10 +57,10 @@ Add a complete minimal-API slice that discovers `Map*` endpoint chains, composes
 
 ### Acceptance criteria
 
-- [ ] Minimal API endpoint detections are ingested with canonical endpoint identity and route normalization.
-- [ ] Group-prefix route composition is reflected in published endpoint route values.
-- [ ] Minimal API endpoints appear in family-grouped index/navigation output.
-- [ ] Fixture-based tests cover grouped mappings and deterministic rendering.
+- [x] Minimal API endpoint detections are ingested with canonical endpoint identity and route normalization.
+- [x] Group-prefix route composition is reflected in published endpoint route values.
+- [x] Minimal API endpoints appear in family-grouped index/navigation output.
+- [x] Fixture-based tests cover grouped mappings and deterministic rendering.
 
 ---
 

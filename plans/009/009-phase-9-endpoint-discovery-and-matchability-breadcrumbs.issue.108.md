@@ -3,7 +3,8 @@
 > Parent PRD: [PRD 009](/home/vbfg/dev/dotnet-llm-wiki/plans/009/009-phase-9-endpoint-discovery-and-matchability-breadcrumbs.prd.md)
 
 - Issue: [#108](https://github.com/vbfg1973/code-llm-wiki/issues/108)
-- [ ] Status: open
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -17,10 +18,10 @@ Add the minimal API vertical slice end-to-end: detect `Map*` semantics, compose 
 
 ## Acceptance criteria
 
-- [ ] Minimal API endpoint detections are ingested with canonical endpoint identity and route normalization.
-- [ ] Group-prefix route composition is reflected in published endpoint route values.
-- [ ] Minimal API endpoints appear in family-grouped index/navigation output.
-- [ ] Fixture-based tests cover grouped mappings and deterministic rendering.
+- [x] Minimal API endpoint detections are ingested with canonical endpoint identity and route normalization.
+- [x] Group-prefix route composition is reflected in published endpoint route values.
+- [x] Minimal API endpoints appear in family-grouped index/navigation output.
+- [x] Fixture-based tests cover grouped mappings and deterministic rendering.
 
 ## Blocked by
 
