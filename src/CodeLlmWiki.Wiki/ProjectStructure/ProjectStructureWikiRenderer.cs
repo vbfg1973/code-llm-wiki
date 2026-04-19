@@ -452,6 +452,36 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine("- Do not claim capabilities not present in this repository snapshot.");
         sb.AppendLine("- Do not claim cross-repository tracing in single-repository mode.");
         sb.AppendLine("- Do not expose internal IDs in narrative output.");
+        sb.AppendLine();
+        sb.AppendLine("## Named Recipes");
+        sb.AppendLine("<a id=\"recipe-structure-survey\"></a>");
+        sb.AppendLine("### Structure Survey");
+        sb.AppendLine("1. Start from Repository Index.");
+        sb.AppendLine("2. Traverse solutions, projects, namespaces, and types via links.");
+        sb.AppendLine("3. Report findings using the required response template.");
+        sb.AppendLine();
+        sb.AppendLine("<a id=\"recipe-hotspot-triage\"></a>");
+        sb.AppendLine("### Hotspot Triage");
+        sb.AppendLine("1. Start from repository hotspot pages.");
+        sb.AppendLine("2. Pivot into linked type and method pages.");
+        sb.AppendLine("3. Report top risks with evidence links.");
+        sb.AppendLine();
+        sb.AppendLine("<a id=\"recipe-dependency-trace\"></a>");
+        sb.AppendLine("### Dependency Trace");
+        sb.AppendLine("1. Start from package pages and external type anchors.");
+        sb.AppendLine("2. Pivot from package usage to linked internal types and methods.");
+        sb.AppendLine("3. Call out unknown attribution in `Gaps/Risks`.");
+        sb.AppendLine();
+        sb.AppendLine("## Capability Matrix");
+        sb.AppendLine("| backlog_item | status | reference |");
+        sb.AppendLine("| --- | --- | --- |");
+        sb.AppendLine("| [BL-001](https://github.com/vbfg1973/code-llm-wiki/blob/develop/plans/BACKLOG.md) | available | repository structure ingestion |");
+        sb.AppendLine("| [BL-008](https://github.com/vbfg1973/code-llm-wiki/blob/develop/plans/BACKLOG.md) | available | method declarations and pages |");
+        sb.AppendLine("| [BL-011](https://github.com/vbfg1973/code-llm-wiki/blob/develop/plans/BACKLOG.md) | available | dependency usage mapping |");
+        sb.AppendLine("| [BL-013](https://github.com/vbfg1973/code-llm-wiki/blob/develop/plans/BACKLOG.md) | deferred | domain term extraction and linking |");
+        sb.AppendLine("| [BL-014](https://github.com/vbfg1973/code-llm-wiki/blob/develop/plans/BACKLOG.md) | deferred | endpoint discovery and metadata |");
+        sb.AppendLine("| [BL-016](https://github.com/vbfg1973/code-llm-wiki/blob/develop/plans/BACKLOG.md) | deferred | cross-system dependency tracing |");
+        sb.AppendLine("| [BL-018](https://github.com/vbfg1973/code-llm-wiki/blob/develop/plans/BACKLOG.md) | deferred | multi-language analyzer expansion |");
 
         return new WikiPage(
             RelativePath: "guidance/llm-contract.md",
