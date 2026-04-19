@@ -123,6 +123,32 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         var methodById = orderedMethods.ToDictionary(x => x.Id, x => x);
         var endpointGroupById = orderedEndpointGroups.ToDictionary(x => x.Id, x => x);
         var endpointById = orderedEndpoints.ToDictionary(x => x.Id, x => x);
+        var endpointIdsByDeclaringTypeId = orderedEndpoints
+            .Where(x => x.DeclaringTypeId is not null)
+            .GroupBy(x => x.DeclaringTypeId!.Value)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.Id)
+                    .Distinct()
+                    .OrderBy(v => endpointById[v].Family, StringComparer.Ordinal)
+                    .ThenBy(v => endpointById[v].NormalizedRouteKey, StringComparer.Ordinal)
+                    .ThenBy(v => endpointById[v].HttpMethod, StringComparer.Ordinal)
+                    .ThenBy(v => endpointById[v].CanonicalSignature, StringComparer.Ordinal)
+                    .ToArray());
+        var endpointIdsByDeclaringMethodId = orderedEndpoints
+            .Where(x => x.DeclaringMethodId is not null)
+            .GroupBy(x => x.DeclaringMethodId!.Value)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.Id)
+                    .Distinct()
+                    .OrderBy(v => endpointById[v].Family, StringComparer.Ordinal)
+                    .ThenBy(v => endpointById[v].NormalizedRouteKey, StringComparer.Ordinal)
+                    .ThenBy(v => endpointById[v].HttpMethod, StringComparer.Ordinal)
+                    .ThenBy(v => endpointById[v].CanonicalSignature, StringComparer.Ordinal)
+                    .ToArray());
         var implementedMethodIdsBySourceMethodId = model.Declarations.Methods.Relations
             .Where(x => x.Kind == MethodRelationKind.ImplementsMethod && x.TargetMethodId is not null)
             .GroupBy(x => x.SourceMethodId)
@@ -290,6 +316,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 writeMethodIdsByTargetMemberId,
                 inheritedByTypeIdsByBaseTypeId,
                 implementedByTypeIdsByInterfaceTypeId,
+                endpointIdsByDeclaringTypeId,
+                endpointById,
                 fileById,
                 orderedProjects,
                 resolver)));
@@ -307,6 +335,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 readMemberIdsBySourceMethodId,
                 writeMemberIdsBySourceMethodId,
                 calledByMethodIdsByTargetMethodId,
+                endpointIdsByDeclaringMethodId,
+                endpointById,
                 fileById,
                 resolver)));
         pages.AddRange(orderedEndpointGroups.Select(endpointGroup =>
@@ -1106,6 +1136,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> writeMethodIdsByTargetMemberId,
         IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> inheritedByTypeIdsByBaseTypeId,
         IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> implementedByTypeIdsByInterfaceTypeId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> endpointIdsByDeclaringTypeId,
+        IReadOnlyDictionary<EntityId, EndpointNode> endpointById,
         IReadOnlyDictionary<EntityId, FileNode> fileById,
         IReadOnlyList<ProjectNode> projects,
         WikiPathResolver resolver)
@@ -1184,6 +1216,25 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             writeMethodIdsByTargetMemberId,
             MemberDeclarationKind.Field,
             resolver);
+
+        sb.AppendLine();
+        sb.AppendLine("## Endpoints");
+        if (!endpointIdsByDeclaringTypeId.TryGetValue(typeDeclaration.Id, out var endpointIds) || endpointIds.Count == 0)
+        {
+            sb.AppendLine("- none");
+        }
+        else
+        {
+            foreach (var endpointId in endpointIds)
+            {
+                if (!endpointById.TryGetValue(endpointId, out var endpoint))
+                {
+                    continue;
+                }
+
+                sb.AppendLine($"- {resolver.ToWikiLink(endpoint.Id, endpoint.Name)}");
+            }
+        }
 
         sb.AppendLine();
         sb.AppendLine("## Metrics");
@@ -1951,6 +2002,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> readMemberIdsBySourceMethodId,
         IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> writeMemberIdsBySourceMethodId,
         IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> calledByMethodIdsByTargetMethodId,
+        IReadOnlyDictionary<EntityId, IReadOnlyList<EntityId>> endpointIdsByDeclaringMethodId,
+        IReadOnlyDictionary<EntityId, EndpointNode> endpointById,
         IReadOnlyDictionary<EntityId, FileNode> fileById,
         WikiPathResolver resolver)
     {
@@ -1993,6 +2046,25 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     ? "unknown"
                     : FormatTypeReference(parameter.Type);
                 sb.AppendLine($"- {parameter.Name}: {parameterType}");
+            }
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Endpoints");
+        if (!endpointIdsByDeclaringMethodId.TryGetValue(methodDeclaration.Id, out var endpointIds) || endpointIds.Count == 0)
+        {
+            sb.AppendLine("- none");
+        }
+        else
+        {
+            foreach (var endpointId in endpointIds)
+            {
+                if (!endpointById.TryGetValue(endpointId, out var endpoint))
+                {
+                    continue;
+                }
+
+                sb.AppendLine($"- {resolver.ToWikiLink(endpoint.Id, endpoint.Name)}");
             }
         }
 
