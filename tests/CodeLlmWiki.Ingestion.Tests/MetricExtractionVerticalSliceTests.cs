@@ -20,10 +20,11 @@ public sealed class MetricExtractionVerticalSliceTests
         var analyzerMethod = model.Declarations.Methods.Declarations.Single(x => x.Name == "Analyze");
         var interfaceMethod = model.Declarations.Methods.Declarations.Single(x => x.Name == "Execute");
         var abstractMethod = model.Declarations.Methods.Declarations.Single(x => x.Name == "AbstractOp");
+        var partialMethod = model.Declarations.Methods.Declarations.Single(x => x.Name == "Hook");
 
         Assert.True(TryGetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.CyclomaticComplexity, out var cyclomatic));
         Assert.True(int.TryParse(cyclomatic, NumberStyles.Integer, CultureInfo.InvariantCulture, out var cyclomaticValue));
-        Assert.True(cyclomaticValue >= 3);
+        Assert.Equal(4, cyclomaticValue);
 
         Assert.True(TryGetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.CognitiveComplexity, out var cognitive));
         Assert.True(int.TryParse(cognitive, NumberStyles.Integer, CultureInfo.InvariantCulture, out var cognitiveValue));
@@ -36,14 +37,20 @@ public sealed class MetricExtractionVerticalSliceTests
         Assert.True(TryGetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.LocTotalLines, out var locTotal));
         Assert.True(int.TryParse(locTotal, NumberStyles.Integer, CultureInfo.InvariantCulture, out var locTotalValue));
         Assert.True(locTotalValue > 0);
+        Assert.True(TryGetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.LocCodeLines, out var locCode));
+        Assert.True(int.TryParse(locCode, NumberStyles.Integer, CultureInfo.InvariantCulture, out var locCodeValue));
+        Assert.True(locCodeValue > 0);
 
         Assert.True(TryGetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.MaintainabilityIndex, out var mi));
         Assert.True(double.TryParse(mi, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var miValue));
         Assert.InRange(miValue, 0d, 100d);
+        var expectedMi = CalculateExpectedMaintainabilityIndex(halsteadValue, cyclomaticValue, locCodeValue);
+        Assert.Equal(expectedMi, miValue, precision: 12);
 
         Assert.Equal("analyzable", GetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.MetricCoverageStatus));
         Assert.Equal("no_analyzable_body", GetLiteral(analysis.Triples, interfaceMethod.Id, CorePredicates.MetricCoverageStatus));
         Assert.Equal("no_analyzable_body", GetLiteral(analysis.Triples, abstractMethod.Id, CorePredicates.MetricCoverageStatus));
+        Assert.Equal("analyzable", GetLiteral(analysis.Triples, partialMethod.Id, CorePredicates.MetricCoverageStatus));
     }
 
     [Fact]
@@ -63,6 +70,39 @@ public sealed class MetricExtractionVerticalSliceTests
         Assert.Equal(3, declarationCbo);
         Assert.Equal(3, methodBodyCbo);
         Assert.Equal(4, totalCbo);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_EmitsCboFacts_WhenRepositoryContainsNoMethodDeclarations()
+    {
+        var fixture = await NoMethodCboFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var carrierType = model.Declarations.Types.Single(x => x.Name == "DataCarrier");
+
+        Assert.True(TryGetLiteral(analysis.Triples, carrierType.Id, CorePredicates.CboDeclaration, out var declarationCbo));
+        Assert.True(TryGetLiteral(analysis.Triples, carrierType.Id, CorePredicates.CboMethodBody, out var methodBodyCbo));
+        Assert.True(TryGetLiteral(analysis.Triples, carrierType.Id, CorePredicates.CboTotal, out var totalCbo));
+
+        Assert.True(int.Parse(declarationCbo, CultureInfo.InvariantCulture) >= 1);
+        Assert.Equal(0, int.Parse(methodBodyCbo, CultureInfo.InvariantCulture));
+        Assert.True(int.Parse(totalCbo, CultureInfo.InvariantCulture) >= 1);
+    }
+
+    private static double CalculateExpectedMaintainabilityIndex(double halsteadVolume, int cyclomaticComplexity, int locCodeLines)
+    {
+        var safeVolume = Math.Max(1d, halsteadVolume);
+        var safeLoc = Math.Max(1d, locCodeLines);
+        var index = (171d
+                    - (5.2d * Math.Log(safeVolume))
+                    - (0.23d * cyclomaticComplexity)
+                    - (16.2d * Math.Log(safeLoc)))
+                    * 100d
+                    / 171d;
+
+        return Math.Clamp(index, 0d, 100d);
     }
 
     private static bool TryGetLiteral(
@@ -178,6 +218,23 @@ public sealed class MetricExtractionVerticalSliceTests
                         return map.Count;
                     }
                 }
+
+                public partial class PartialRunner
+                {
+                    partial void Hook();
+
+                    public void Trigger()
+                    {
+                        Hook();
+                    }
+                }
+
+                public partial class PartialRunner
+                {
+                    partial void Hook()
+                    {
+                    }
+                }
                 """);
 
             RunGit(root, "init", "-b", "main");
@@ -187,6 +244,61 @@ public sealed class MetricExtractionVerticalSliceTests
             RunGit(root, "commit", "-m", "initial");
 
             return new MetricFixture(root);
+        }
+    }
+
+    private sealed class NoMethodCboFixture
+    {
+        private NoMethodCboFixture(string repositoryPath)
+        {
+            RepositoryPath = repositoryPath;
+        }
+
+        public string RepositoryPath { get; }
+
+        public static async Task<NoMethodCboFixture> CreateAsync()
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"codellmwiki-metrics-nomethods-{Guid.NewGuid():N}", "metric-repo");
+            Directory.CreateDirectory(root);
+
+            await File.WriteAllTextAsync(Path.Combine(root, "Sample.slnx"),
+                """
+                <Solution>
+                  <Project Path="src/App/App.csproj" />
+                </Solution>
+                """);
+
+            var appDir = Path.Combine(root, "src", "App");
+            Directory.CreateDirectory(appDir);
+            await File.WriteAllTextAsync(Path.Combine(appDir, "App.csproj"),
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <AssemblyName>Acme.Metrics.NoMethods</AssemblyName>
+                  </PropertyGroup>
+                </Project>
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(appDir, "DataCarrier.cs"),
+                """
+                namespace Acme.Metrics.NoMethods;
+
+                public class DependencyA { }
+
+                public class DataCarrier
+                {
+                    public DependencyA Value { get; set; } = new();
+                }
+                """);
+
+            RunGit(root, "init", "-b", "main");
+            RunGit(root, "config", "user.email", "test@example.com");
+            RunGit(root, "config", "user.name", "Test User");
+            RunGit(root, "add", ".");
+            RunGit(root, "commit", "-m", "initial");
+
+            return new NoMethodCboFixture(root);
         }
     }
 

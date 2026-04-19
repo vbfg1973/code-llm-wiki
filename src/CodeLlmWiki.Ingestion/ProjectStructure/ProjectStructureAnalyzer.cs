@@ -619,6 +619,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     new EntityNode(methodId),
                     CorePredicates.Arity,
                     new LiteralNode(representativeMethod.Arity.ToString())));
+                var hasAnalyzableBody = methodGroup.Any(x => x.HasAnalyzableBody);
+
                 triples.Add(new SemanticTriple(
                     new EntityNode(typeId),
                     CorePredicates.ContainsMethod,
@@ -627,8 +629,8 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 triples.Add(new SemanticTriple(
                     new EntityNode(methodId),
                     CorePredicates.MetricCoverageStatus,
-                    new LiteralNode(representativeMethod.HasAnalyzableBody ? "analyzable" : "no_analyzable_body")));
-                if (!representativeMethod.HasAnalyzableBody)
+                    new LiteralNode(hasAnalyzableBody ? "analyzable" : "no_analyzable_body")));
+                if (!hasAnalyzableBody)
                 {
                     triples.Add(new SemanticTriple(
                         new EntityNode(methodId),
@@ -1159,7 +1161,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         List<SemanticTriple> triples,
         List<IngestionDiagnostic> diagnostics)
     {
-        if (sourceFiles.Count == 0 || methodIdByDeclarationLocation.Count == 0)
+        if (sourceFiles.Count == 0)
         {
             return;
         }
