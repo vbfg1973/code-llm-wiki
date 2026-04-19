@@ -81,7 +81,10 @@ Purpose: Track durable product capabilities from the original specification (not
 - [ ] `BL-012` Complexity and maintainability metrics
   - Detail: cognitive complexity, cyclomatic complexity, Halstead metrics, LOC, maintainability index, coupling between objects.
   - Planned in:
-    - PRD TBD
+    - [PRD 007](/home/vbfg/dev/dotnet-llm-wiki/plans/007/007-phase-7-complexity-and-maintainability-metrics.prd.md)
+    - Plan: [PRD 007 plan](/home/vbfg/dev/dotnet-llm-wiki/plans/007/007-phase-7-complexity-and-maintainability-metrics.plan.md)
+    - Parent GitHub issue (open): `#86`
+    - Implementation issues (open): `#87`, `#88`, `#89`, `#90`, `#91`
 
 - [ ] `BL-013` Domain term extraction and linking
   - Detail: terms from type/method/parameter names, graph linkage, counts by method/type/application.
