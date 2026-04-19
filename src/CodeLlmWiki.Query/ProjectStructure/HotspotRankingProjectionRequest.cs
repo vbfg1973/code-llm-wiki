@@ -6,4 +6,5 @@ public sealed record HotspotRankingProjectionRequest(
     IReadOnlyList<SemanticTriple> Triples,
     DeclarationCatalog Declarations,
     StructuralMetricRollupCatalog StructuralMetrics,
-    HotspotRankingOptions Options);
+    HotspotRankingOptions Options,
+    int MaxDegreeOfParallelism);

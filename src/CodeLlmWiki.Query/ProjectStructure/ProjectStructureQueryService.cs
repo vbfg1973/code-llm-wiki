@@ -313,13 +313,15 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 projects,
                 files,
                 declarations,
-                options.MetricScopeFilter));
+                options.MetricScopeFilter,
+                options.MetricComputationMaxDegreeOfParallelism));
         var hotspots = new HotspotRankingProjector().Project(
             new HotspotRankingProjectionRequest(
                 _triples,
                 declarations,
                 structuralMetrics,
-                options.HotspotRanking));
+                options.HotspotRanking,
+                options.MetricComputationMaxDegreeOfParallelism));
 
         return new ProjectStructureWikiModel(repository, solutions, projects, packages, files, submodules)
         {

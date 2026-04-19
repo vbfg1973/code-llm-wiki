@@ -101,6 +101,33 @@ public sealed class StructuralMetricRollupVerticalSliceTests
         Assert.False(contractsNamespace.Direct.IncludedInRanking);
     }
 
+    [Fact]
+    public async Task Query_RollupsRemainDeterministic_AcrossConfiguredConcurrencyLevels()
+    {
+        var fixture = await StructuralMetricFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var query = new ProjectStructureQueryService(analysis.Triples);
+
+        var serialModel = query.GetModel(
+            analysis.RepositoryId,
+            new ProjectStructureQueryOptions
+            {
+                MetricComputationMaxDegreeOfParallelism = 1,
+            });
+
+        var parallelModel = query.GetModel(
+            analysis.RepositoryId,
+            new ProjectStructureQueryOptions
+            {
+                MetricComputationMaxDegreeOfParallelism = 4,
+            });
+
+        Assert.Equal(
+            BuildFingerprint(serialModel.StructuralMetrics),
+            BuildFingerprint(parallelModel.StructuralMetrics));
+    }
+
     private static string BuildFingerprint(StructuralMetricRollupCatalog catalog)
     {
         static string SerializeRollup(StructuralMetricScopeRollup rollup)

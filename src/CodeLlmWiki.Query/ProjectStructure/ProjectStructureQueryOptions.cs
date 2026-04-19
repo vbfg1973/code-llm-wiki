@@ -7,4 +7,6 @@ public sealed record ProjectStructureQueryOptions
     public StructuralMetricScopeFilter MetricScopeFilter { get; init; } = StructuralMetricScopeFilter.ProductionDefault;
 
     public HotspotRankingOptions HotspotRanking { get; init; } = HotspotRankingOptions.Default;
+
+    public int MetricComputationMaxDegreeOfParallelism { get; init; } = 1;
 }

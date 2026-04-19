@@ -172,6 +172,35 @@ public sealed class HotspotRankingVerticalSliceTests
         Assert.Contains("(hotspots/repository.md)", repositoryPage.Markdown, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Query_HotspotRankingsRemainDeterministic_AcrossConfiguredConcurrencyLevels()
+    {
+        var fixture = await HotspotRankingFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var query = new ProjectStructureQueryService(analysis.Triples);
+
+        var serialModel = query.GetModel(
+            analysis.RepositoryId,
+            new ProjectStructureQueryOptions
+            {
+                MetricScopeFilter = StructuralMetricScopeFilter.AllCodeKinds,
+                MetricComputationMaxDegreeOfParallelism = 1,
+            });
+
+        var parallelModel = query.GetModel(
+            analysis.RepositoryId,
+            new ProjectStructureQueryOptions
+            {
+                MetricScopeFilter = StructuralMetricScopeFilter.AllCodeKinds,
+                MetricComputationMaxDegreeOfParallelism = 4,
+            });
+
+        Assert.Equal(
+            BuildFingerprint(serialModel.Hotspots),
+            BuildFingerprint(parallelModel.Hotspots));
+    }
+
     private static string BuildFingerprint(HotspotRankingCatalog catalog)
     {
         var primary = catalog.PrimaryRankings
