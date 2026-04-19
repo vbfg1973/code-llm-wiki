@@ -14,7 +14,11 @@ public sealed class MethodBodyDependencyUsageProjector : IMethodBodyDependencyUs
         var typeById = request.Types.ToDictionary(x => x.Id, x => x);
         var namespaceById = request.Namespaces.ToDictionary(x => x.Id, x => x);
         var packageById = request.Packages.ToDictionary(x => x.Id, x => x);
-        var fileById = request.Files.ToDictionary(x => x.Id, x => x);
+        var packageAttributionResolver = new ProjectScopedPackageAttributionResolver(
+            request.Projects,
+            request.Packages,
+            request.Files,
+            request.Methods);
 
         var rows = request.Triples
             .Where(x => x.Predicate == CorePredicates.DependsOnTypeInMethodBody)
@@ -28,8 +32,7 @@ public sealed class MethodBodyDependencyUsageProjector : IMethodBodyDependencyUs
                 typeById,
                 namespaceById,
                 packageById,
-                fileById,
-                request.Projects,
+                packageAttributionResolver,
                 metadataById))
             .Where(x => x is not null)
             .Select(x => x!)
@@ -95,19 +98,20 @@ public sealed class MethodBodyDependencyUsageProjector : IMethodBodyDependencyUs
         IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
         IReadOnlyDictionary<EntityId, NamespaceDeclarationNode> namespaceById,
         IReadOnlyDictionary<EntityId, PackageNode> packageById,
-        IReadOnlyDictionary<EntityId, FileNode> fileById,
-        IReadOnlyList<ProjectNode> projects,
+        IProjectScopedPackageAttributionResolver packageAttributionResolver,
         IReadOnlyDictionary<EntityId, ProjectionMetadata> metadataById)
     {
         if (!methodById.TryGetValue(methodId, out var method)
             || !typeById.TryGetValue(method.DeclaringTypeId, out var declaringType)
-            || !TryResolveMethodProject(method, fileById, projects, out var project)
             || !metadataById.TryGetValue(targetTypeId, out var targetTypeMeta))
         {
             return null;
         }
 
-        if (!TryResolvePackage(project, packageById, targetTypeMeta.Name, out var package))
+        var attribution = packageAttributionResolver.Resolve(methodId, targetTypeMeta.Name);
+        if (attribution.Status != PackageAttributionStatus.Attributed
+            || attribution.PackageId is null
+            || !packageById.TryGetValue(attribution.PackageId.Value, out var package))
         {
             return null;
         }
@@ -125,84 +129,6 @@ public sealed class MethodBodyDependencyUsageProjector : IMethodBodyDependencyUs
             MethodId: method.Id,
             MethodSignature: method.Signature,
             UsageCount: 1);
-    }
-
-    private static bool TryResolveMethodProject(
-        MethodDeclarationNode method,
-        IReadOnlyDictionary<EntityId, FileNode> fileById,
-        IReadOnlyList<ProjectNode> projects,
-        out ProjectNode project)
-    {
-        var declarationFilePaths = method.DeclarationFileIds
-            .Where(fileById.ContainsKey)
-            .Select(id => fileById[id].Path)
-            .OrderBy(x => x, StringComparer.Ordinal)
-            .ToArray();
-
-        foreach (var declarationFilePath in declarationFilePaths)
-        {
-            var candidate = projects
-                .Where(p => IsFileWithinProject(p.Path, declarationFilePath))
-                .OrderBy(p => p.Path, StringComparer.Ordinal)
-                .ThenBy(p => p.Name, StringComparer.Ordinal)
-                .ThenBy(p => p.Id.Value, StringComparer.Ordinal)
-                .FirstOrDefault();
-
-            if (candidate is not null)
-            {
-                project = candidate;
-                return true;
-            }
-        }
-
-        project = default!;
-        return false;
-    }
-
-    private static bool IsFileWithinProject(string projectPath, string filePath)
-    {
-        var projectDirectory = Path.GetDirectoryName(projectPath)?.Replace('\\', '/') ?? string.Empty;
-        var normalizedFilePath = filePath.Replace('\\', '/');
-
-        return normalizedFilePath.Equals(projectDirectory, StringComparison.Ordinal)
-            || normalizedFilePath.StartsWith(projectDirectory + "/", StringComparison.Ordinal);
-    }
-
-    private static bool TryResolvePackage(
-        ProjectNode sourceProject,
-        IReadOnlyDictionary<EntityId, PackageNode> packageById,
-        string referenceName,
-        out PackageNode package)
-    {
-        var candidates = sourceProject.PackageIds
-            .Where(packageById.ContainsKey)
-            .Select(id => packageById[id])
-            .Where(p => PackageMatchesReference(p, referenceName))
-            .OrderBy(p => p.Name, StringComparer.Ordinal)
-            .ThenBy(p => p.Id.Value, StringComparer.Ordinal)
-            .ToArray();
-
-        if (candidates.Length == 1)
-        {
-            package = candidates[0];
-            return true;
-        }
-
-        package = default!;
-        return false;
-    }
-
-    private static bool PackageMatchesReference(PackageNode package, string referenceName)
-    {
-        if (string.IsNullOrWhiteSpace(referenceName))
-        {
-            return false;
-        }
-
-        return referenceName.Equals(package.Name, StringComparison.OrdinalIgnoreCase)
-               || referenceName.StartsWith(package.Name + ".", StringComparison.OrdinalIgnoreCase)
-               || referenceName.Equals(package.CanonicalKey, StringComparison.OrdinalIgnoreCase)
-               || referenceName.StartsWith(package.CanonicalKey + ".", StringComparison.OrdinalIgnoreCase);
     }
 
     private static Dictionary<EntityId, ProjectionMetadata> BuildMetadata(IReadOnlyList<SemanticTriple> triples)
