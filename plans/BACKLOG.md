@@ -122,7 +122,10 @@ Purpose: Track durable product capabilities from the original specification (not
 - [ ] `BL-019` LLM and user guidance documentation
   - Detail: add explicit wiki-native guidance for LLM agents and human users, including operating instructions, navigation conventions, and task-oriented usage patterns.
   - Planned in:
-    - PRD TBD
+    - [PRD 008](/home/vbfg/dev/dotnet-llm-wiki/plans/008/008-phase-8-llm-and-user-guidance-documentation.prd.md)
+    - Plan: [PRD 008 plan](/home/vbfg/dev/dotnet-llm-wiki/plans/008/008-phase-8-llm-and-user-guidance-documentation.plan.md)
+    - Parent GitHub issue (open): `#97`
+    - Implementation issues (open): `#98`, `#99`, `#100`, `#101`
 
 ## Cross-Cutting Constraints (from original intent)
 
