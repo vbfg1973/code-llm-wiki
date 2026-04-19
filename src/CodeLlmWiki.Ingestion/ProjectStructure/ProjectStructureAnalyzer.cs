@@ -6,6 +6,7 @@ using CodeLlmWiki.Contracts.Graph;
 using CodeLlmWiki.Contracts.Identity;
 using CodeLlmWiki.Ingestion.Diagnostics;
 using CodeLlmWiki.Ingestion.Telemetry;
+using CodeLlmWiki.Ingestion.ProjectStructure.CallResolution;
 using CodeLlmWiki.Query.ProjectStructure;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
@@ -23,17 +24,20 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
     private readonly EndpointRuleCatalog _endpointRuleCatalog;
     private readonly ICallResolutionDiagnosticClassifier _callResolutionDiagnosticClassifier;
     private readonly IIngestionStageTelemetry _stageTelemetry;
+    private readonly IProjectScopedCompilationProvider _projectScopedCompilationProvider;
 
     public ProjectStructureAnalyzer(
         IStableIdGenerator stableIdGenerator,
         EndpointRuleCatalog? endpointRuleCatalog = null,
         ICallResolutionDiagnosticClassifier? callResolutionDiagnosticClassifier = null,
-        IIngestionStageTelemetry? stageTelemetry = null)
+        IIngestionStageTelemetry? stageTelemetry = null,
+        IProjectScopedCompilationProvider? projectScopedCompilationProvider = null)
     {
         _stableIdGenerator = stableIdGenerator;
         _endpointRuleCatalog = endpointRuleCatalog ?? EndpointRuleCatalog.Default;
         _callResolutionDiagnosticClassifier = callResolutionDiagnosticClassifier ?? new CallResolutionDiagnosticClassifier();
         _stageTelemetry = stageTelemetry ?? NoOpIngestionStageTelemetry.Instance;
+        _projectScopedCompilationProvider = projectScopedCompilationProvider ?? new ProjectScopedCompilationProvider();
     }
 
     public Task<ProjectStructureAnalysisResult> AnalyzeAsync(string repositoryPath, CancellationToken cancellationToken)
@@ -1053,6 +1057,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                 repositoryRoot,
                 sourceFiles,
                 sourceTextByRelativePath,
+                projectAssemblyNameByPath,
                 typeIdByQualifiedName,
                 methodCandidatesByTypeId,
                 declaringTypeIdByMethodId,
@@ -3181,6 +3186,7 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
         string repositoryRoot,
         IReadOnlyList<string> sourceFiles,
         IReadOnlyDictionary<string, string> sourceTextByRelativePath,
+        IReadOnlyDictionary<string, string> projectAssemblyNameByPath,
         IReadOnlyDictionary<string, EntityId> typeIdByQualifiedName,
         IReadOnlyDictionary<EntityId, List<MethodRelationshipCandidate>> methodCandidatesByTypeId,
         IReadOnlyDictionary<EntityId, EntityId> declaringTypeIdByMethodId,
@@ -3196,44 +3202,29 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             return;
         }
 
-        var syntaxTrees = new List<SyntaxTree>(sourceFiles.Count);
-        foreach (var relativePath in sourceFiles.OrderBy(x => x, StringComparer.Ordinal))
-        {
-            if (!sourceTextByRelativePath.TryGetValue(relativePath, out var sourceText))
-            {
-                var fullPath = Path.Combine(repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
-                if (!File.Exists(fullPath))
-                {
-                    continue;
-                }
-
-                sourceText = File.ReadAllText(fullPath);
-            }
-
-            var syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: relativePath);
-            syntaxTrees.Add(syntaxTree);
-        }
-
-        if (syntaxTrees.Count == 0)
-        {
-            return;
-        }
-
         var references = BuildCompilationReferences(diagnostics);
-        var compilation = CSharpCompilation.Create(
-            assemblyName: "CodeLlmWiki.CallGraph",
-            syntaxTrees: syntaxTrees,
-            references: references,
-            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var semanticContext = _projectScopedCompilationProvider.Build(
+            new ProjectScopedCompilationRequest(
+                RepositoryRoot: repositoryRoot,
+                SourceFiles: sourceFiles,
+                SourceTextByRelativePath: sourceTextByRelativePath,
+                ProjectAssemblyNameByPath: projectAssemblyNameByPath,
+                ProjectPaths: projectAssemblyNameByPath.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray(),
+                References: references),
+            diagnostics);
 
         var declarationDependenciesByTypeId = new Dictionary<EntityId, HashSet<EntityId>>();
         var methodBodyDependenciesByTypeId = new Dictionary<EntityId, HashSet<EntityId>>();
         var emittedMethodMetricIds = new HashSet<EntityId>();
 
-        foreach (var syntaxTree in syntaxTrees)
+        foreach (var relativePath in sourceFiles.OrderBy(x => x, StringComparer.Ordinal))
         {
-            var semanticModel = compilation.GetSemanticModel(syntaxTree, ignoreAccessibility: true);
-            var root = syntaxTree.GetRoot() as CompilationUnitSyntax;
+            if (!semanticContext.TryGetSemanticModel(relativePath, out var semanticModel, out _))
+            {
+                continue;
+            }
+
+            var root = semanticModel.SyntaxTree.GetRoot() as CompilationUnitSyntax;
             if (root is null)
             {
                 continue;
