@@ -42,10 +42,10 @@ Implement the first end-to-end dependency slice for declaration provenance. Add 
 
 ### Acceptance criteria
 
-- [ ] Declaration provenance dependency predicate(s) are emitted from ingestion for declaration dependency evidence.
-- [ ] Query projections expose declaration dependency usage grouped as package -> namespace -> type -> method with deterministic counts/order.
-- [ ] Package wiki output includes declaration dependency usage sections with navigable links and deterministic ordering.
-- [ ] Tests verify declaration extraction behavior through public boundaries and deterministic rendering/output.
+- [x] Declaration provenance dependency predicate(s) are emitted from ingestion for declaration dependency evidence.
+- [x] Query projections expose declaration dependency usage grouped as package -> namespace -> type -> method with deterministic counts/order.
+- [x] Package wiki output includes declaration dependency usage sections with navigable links and deterministic ordering.
+- [x] Tests verify declaration extraction behavior through public boundaries and deterministic rendering/output.
 
 ---
 
@@ -59,11 +59,11 @@ Implement the second end-to-end dependency slice for method-body provenance. Cap
 
 ### Acceptance criteria
 
-- [ ] Method-body provenance dependency predicate(s) are emitted from ingestion for approved operation forms.
-- [ ] `nameof` is excluded from method-body dependency evidence in v1.
-- [ ] Query projections expose method-body dependency usage grouped as package -> namespace -> type -> method with deterministic counts/order.
-- [ ] Package wiki output includes method-body dependency usage sections with navigable links and deterministic ordering.
-- [ ] Tests verify method-body extraction/projection/render behavior through public boundaries.
+- [x] Method-body provenance dependency predicate(s) are emitted from ingestion for approved operation forms.
+- [x] `nameof` is excluded from method-body dependency evidence in v1.
+- [x] Query projections expose method-body dependency usage grouped as package -> namespace -> type -> method with deterministic counts/order.
+- [x] Package wiki output includes method-body dependency usage sections with navigable links and deterministic ordering.
+- [x] Tests verify method-body extraction/projection/render behavior through public boundaries.
 
 ---
 
@@ -77,12 +77,12 @@ Implement deterministic package attribution over external dependency usage using
 
 ### Acceptance criteria
 
-- [ ] External dependency package attribution uses source method/type project context.
-- [ ] Deterministic mapping is applied only when attribution certainty is available.
-- [ ] Unknown package attribution is emitted explicitly when deterministic mapping is unavailable.
-- [ ] Unresolved dependency entities with reason codes are emitted and queryable.
-- [ ] Package/wiki dependency views surface unknown/unresolved dependency semantics explicitly.
-- [ ] Tests cover mixed-version multi-project attribution and ambiguity/unresolved scenarios.
+- [x] External dependency package attribution uses source method/type project context.
+- [x] Deterministic mapping is applied only when attribution certainty is available.
+- [x] Unknown package attribution is emitted explicitly when deterministic mapping is unavailable.
+- [x] Unresolved dependency entities with reason codes are emitted and queryable.
+- [x] Package/wiki dependency views surface unknown/unresolved dependency semantics explicitly.
+- [x] Tests cover mixed-version multi-project attribution and ambiguity/unresolved scenarios.
 
 ---
 
@@ -96,8 +96,8 @@ Harden the BL-011 contract by finalizing derived type-level rollups from raw met
 
 ### Acceptance criteria
 
-- [ ] Type-level dependency rollups are derived in query/wiki from method-level evidence without duplicating ingestion truth.
-- [ ] Deterministic ordering/count invariants are enforced across dependency query and wiki outputs.
-- [ ] Regression coverage validates stable behavior for declaration/method-body split, attribution semantics, and unresolved semantics.
-- [ ] Golden/snapshot tests are updated only for intentional BL-011 output deltas.
-- [ ] No MCP/query-surface expansion is introduced in this phase.
+- [x] Type-level dependency rollups are derived in query/wiki from method-level evidence without duplicating ingestion truth.
+- [x] Deterministic ordering/count invariants are enforced across dependency query and wiki outputs.
+- [x] Regression coverage validates stable behavior for declaration/method-body split, attribution semantics, and unresolved semantics.
+- [x] Golden/snapshot tests are updated only for intentional BL-011 output deltas.
+- [x] No MCP/query-surface expansion is introduced in this phase.
