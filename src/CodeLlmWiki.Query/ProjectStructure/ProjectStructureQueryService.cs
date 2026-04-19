@@ -300,6 +300,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 })
                 .ToArray(),
         };
+        var endpoints = BuildEndpointCatalog(_triples, metadataById, declarations);
 
         var repository = new RepositoryNode(
             repositoryId,
@@ -327,6 +328,7 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         return new ProjectStructureWikiModel(repository, solutions, projects, packages, files, submodules)
         {
             Declarations = declarations,
+            Endpoints = endpoints,
             DependencyAttribution = new DependencyAttributionCatalog(
                 declarationUnknownDependencyUsage,
                 methodBodyUnknownDependencyUsage),
@@ -1505,6 +1507,202 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         return new DeclarationCatalog(namespaces, types, members)
         {
             Methods = new MethodCatalog(methods, relations),
+        };
+    }
+
+    private static EndpointCatalog BuildEndpointCatalog(
+        IReadOnlyList<SemanticTriple> triples,
+        IReadOnlyDictionary<EntityId, EntityMetadata> metadataById,
+        DeclarationCatalog declarations)
+    {
+        var containsEndpointEdges = BuildEntityEdges(triples, CorePredicates.ContainsEndpoint);
+        var containsEndpointGroupEdges = BuildEntityEdges(triples, CorePredicates.ContainsEndpointGroup);
+        var declaresEndpointEdges = BuildEntityEdges(triples, CorePredicates.DeclaresEndpoint);
+        var declaresEndpointGroupEdges = BuildEntityEdges(triples, CorePredicates.DeclaresEndpointGroup);
+        var hasDeclaringMethodEdges = BuildEntityEdges(triples, CorePredicates.HasDeclaringMethod);
+        var hasDeclaringTypeEdges = BuildEntityEdges(triples, CorePredicates.HasDeclaringType);
+        var hasNamespaceEdges = BuildEntityEdges(triples, CorePredicates.HasNamespace);
+        var hasEndpointGroupEdges = BuildEntityEdges(triples, CorePredicates.HasEndpointGroup);
+
+        var familyByEntityId = BuildStringLiteralMap(triples, CorePredicates.EndpointFamily);
+        var kindByEntityId = BuildStringLiteralMap(triples, CorePredicates.EndpointKind);
+        var httpMethodByEntityId = BuildStringLiteralMap(triples, CorePredicates.EndpointHttpMethod);
+        var authoredRouteByEntityId = BuildStringLiteralMap(triples, CorePredicates.AuthoredRouteText);
+        var normalizedRouteByEntityId = BuildStringLiteralMap(triples, CorePredicates.NormalizedRouteKey);
+        var confidenceByEntityId = BuildStringLiteralMap(triples, CorePredicates.EndpointConfidence);
+        var ruleIdByEntityId = BuildStringLiteralMap(triples, CorePredicates.RuleId);
+        var ruleVersionByEntityId = BuildStringLiteralMap(triples, CorePredicates.RuleVersion);
+        var ruleSourceByEntityId = BuildStringLiteralMap(triples, CorePredicates.RuleSource);
+        var routePrefixByEntityId = BuildStringLiteralMap(triples, CorePredicates.RoutePrefix);
+
+        var endpointIds = metadataById
+            .Where(x => x.Value.IsType("endpoint"))
+            .Select(x => x.Key)
+            .Concat(containsEndpointEdges.Select(x => x.Object))
+            .Distinct()
+            .OrderBy(x => metadataById.TryGetValue(x, out var meta) ? meta.Path : x.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        var endpointGroupIds = metadataById
+            .Where(x => x.Value.IsType("endpoint-group"))
+            .Select(x => x.Key)
+            .Concat(containsEndpointGroupEdges.Select(x => x.Object))
+            .Distinct()
+            .OrderBy(x => metadataById.TryGetValue(x, out var meta) ? meta.Path : x.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        var endpointIdsByGroupId = containsEndpointEdges
+            .GroupBy(x => x.Subject)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.Object)
+                    .Distinct()
+                    .OrderBy(v => metadataById.TryGetValue(v, out var endpointMeta) ? endpointMeta.Path : v.Value, StringComparer.Ordinal)
+                    .ToArray());
+
+        var declarationFileIdsByEndpoint = declaresEndpointEdges
+            .GroupBy(x => x.Object)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.Subject)
+                    .Distinct()
+                    .OrderBy(v => metadataById.TryGetValue(v, out var fileMeta) ? fileMeta.Path : v.Value, StringComparer.Ordinal)
+                    .ToArray());
+
+        var declarationFileIdsByGroup = declaresEndpointGroupEdges
+            .GroupBy(x => x.Object)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<EntityId>)x
+                    .Select(v => v.Subject)
+                    .Distinct()
+                    .OrderBy(v => metadataById.TryGetValue(v, out var fileMeta) ? fileMeta.Path : v.Value, StringComparer.Ordinal)
+                    .ToArray());
+
+        var declaringMethodByEndpoint = hasDeclaringMethodEdges
+            .GroupBy(x => x.Subject)
+            .ToDictionary(x => x.Key, x => x.First().Object);
+        var declaringTypeByEntity = hasDeclaringTypeEdges
+            .GroupBy(x => x.Subject)
+            .ToDictionary(x => x.Key, x => x.First().Object);
+        var namespaceByEntity = hasNamespaceEdges
+            .GroupBy(x => x.Subject)
+            .ToDictionary(x => x.Key, x => x.First().Object);
+        var endpointGroupByEndpoint = hasEndpointGroupEdges
+            .GroupBy(x => x.Subject)
+            .ToDictionary(x => x.Key, x => x.First().Object);
+
+        var endpointDeclarationIds = declarations.Methods.Declarations
+            .Select(x => x.Id)
+            .ToHashSet();
+        var typeIds = declarations.Types
+            .Select(x => x.Id)
+            .ToHashSet();
+        var namespaceIds = declarations.Namespaces
+            .Select(x => x.Id)
+            .ToHashSet();
+
+        var groups = endpointGroupIds
+            .Select(groupId =>
+            {
+                var meta = metadataById.TryGetValue(groupId, out var groupMeta)
+                    ? groupMeta
+                    : new EntityMetadata(groupId);
+
+                endpointIdsByGroupId.TryGetValue(groupId, out var groupedEndpointIds);
+                groupedEndpointIds ??= [];
+
+                declarationFileIdsByGroup.TryGetValue(groupId, out var declarationFileIds);
+                declarationFileIds ??= [];
+
+                declaringTypeByEntity.TryGetValue(groupId, out var declaringTypeId);
+                namespaceByEntity.TryGetValue(groupId, out var namespaceId);
+
+                return new EndpointGroupNode(
+                    Id: groupId,
+                    Family: familyByEntityId.TryGetValue(groupId, out var family) ? family : "unknown",
+                    Name: meta.Name,
+                    CanonicalKey: meta.Path,
+                    AuthoredRoutePrefix: routePrefixByEntityId.TryGetValue(groupId, out var prefix) ? prefix : string.Empty,
+                    NormalizedRoutePrefix: normalizedRouteByEntityId.TryGetValue(groupId, out var normalizedPrefix) ? normalizedPrefix : string.Empty,
+                    DeclaringTypeId: typeIds.Contains(declaringTypeId) ? declaringTypeId : null,
+                    NamespaceId: namespaceIds.Contains(namespaceId) ? namespaceId : null,
+                    DeclarationFileIds: declarationFileIds,
+                    EndpointIds: groupedEndpointIds);
+            })
+            .OrderBy(x => x.Family, StringComparer.Ordinal)
+            .ThenBy(x => x.CanonicalKey, StringComparer.Ordinal)
+            .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        var endpoints = endpointIds
+            .Select(endpointId =>
+            {
+                if (!declaringMethodByEndpoint.TryGetValue(endpointId, out var declaringMethodId)
+                    || !endpointDeclarationIds.Contains(declaringMethodId))
+                {
+                    return null;
+                }
+
+                if (!declaringTypeByEntity.TryGetValue(endpointId, out var declaringTypeId)
+                    || !typeIds.Contains(declaringTypeId))
+                {
+                    return null;
+                }
+
+                var meta = metadataById.TryGetValue(endpointId, out var endpointMeta)
+                    ? endpointMeta
+                    : new EntityMetadata(endpointId);
+
+                namespaceByEntity.TryGetValue(endpointId, out var namespaceId);
+                endpointGroupByEndpoint.TryGetValue(endpointId, out var groupId);
+
+                declarationFileIdsByEndpoint.TryGetValue(endpointId, out var declarationFileIds);
+                declarationFileIds ??= [];
+
+                return new EndpointNode(
+                    Id: endpointId,
+                    Family: familyByEntityId.TryGetValue(endpointId, out var family) ? family : "unknown",
+                    Kind: kindByEntityId.TryGetValue(endpointId, out var kind) ? kind : "unknown",
+                    Name: meta.Name,
+                    CanonicalSignature: meta.Path,
+                    HttpMethod: httpMethodByEntityId.TryGetValue(endpointId, out var httpMethod) ? httpMethod : "ANY",
+                    AuthoredRouteTemplate: authoredRouteByEntityId.TryGetValue(endpointId, out var authoredRoute) ? authoredRoute : string.Empty,
+                    NormalizedRouteKey: normalizedRouteByEntityId.TryGetValue(endpointId, out var normalizedRoute) ? normalizedRoute : string.Empty,
+                    Confidence: confidenceByEntityId.TryGetValue(endpointId, out var confidence)
+                        ? ParseEndpointConfidence(confidence)
+                        : EndpointConfidence.Unknown,
+                    RuleId: ruleIdByEntityId.TryGetValue(endpointId, out var ruleId) ? ruleId : string.Empty,
+                    RuleVersion: ruleVersionByEntityId.TryGetValue(endpointId, out var ruleVersion) ? ruleVersion : string.Empty,
+                    RuleSource: ruleSourceByEntityId.TryGetValue(endpointId, out var ruleSource) ? ruleSource : string.Empty,
+                    DeclaringMethodId: declaringMethodId,
+                    DeclaringTypeId: declaringTypeId,
+                    NamespaceId: namespaceIds.Contains(namespaceId) ? namespaceId : null,
+                    GroupId: endpointGroupIds.Contains(groupId) ? groupId : null,
+                    DeclarationFileIds: declarationFileIds);
+            })
+            .Where(x => x is not null)
+            .Select(x => x!)
+            .OrderBy(x => x.Family, StringComparer.Ordinal)
+            .ThenBy(x => x.NormalizedRouteKey, StringComparer.Ordinal)
+            .ThenBy(x => x.HttpMethod, StringComparer.Ordinal)
+            .ThenBy(x => x.CanonicalSignature, StringComparer.Ordinal)
+            .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        return new EndpointCatalog(groups, endpoints);
+    }
+
+    private static EndpointConfidence ParseEndpointConfidence(string value)
+    {
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "high" => EndpointConfidence.High,
+            "medium" => EndpointConfidence.Medium,
+            "low" => EndpointConfidence.Low,
+            _ => EndpointConfidence.Unknown,
         };
     }
 

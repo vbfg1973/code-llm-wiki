@@ -69,6 +69,64 @@ internal sealed class WikiPathResolver
         return path;
     }
 
+    public string RegisterEndpointGroup(EndpointGroupNode endpointGroup)
+    {
+        var family = SanitizePathSegment(endpointGroup.Family.ToLowerInvariant());
+        if (string.IsNullOrWhiteSpace(family))
+        {
+            family = "unknown";
+        }
+
+        var name = SanitizePathSegment(endpointGroup.Name);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = "group";
+        }
+
+        var context = SanitizePathSegment(endpointGroup.CanonicalKey.Replace('/', '-'));
+        if (string.IsNullOrWhiteSpace(context))
+        {
+            context = endpointGroup.Id.Value;
+        }
+
+        var candidate = $"endpoints/{family}/groups/{name}--{context}.md";
+        var path = ReserveWithCounter(candidate);
+        _pathByEntityId[endpointGroup.Id] = path;
+        return path;
+    }
+
+    public string RegisterEndpoint(EndpointNode endpoint)
+    {
+        var family = SanitizePathSegment(endpoint.Family.ToLowerInvariant());
+        if (string.IsNullOrWhiteSpace(family))
+        {
+            family = "unknown";
+        }
+
+        var method = SanitizePathSegment(endpoint.HttpMethod.ToLowerInvariant());
+        if (string.IsNullOrWhiteSpace(method))
+        {
+            method = "any";
+        }
+
+        var route = SanitizePathSegment(endpoint.NormalizedRouteKey.Replace('/', '-'));
+        if (string.IsNullOrWhiteSpace(route))
+        {
+            route = "root";
+        }
+
+        var context = SanitizePathSegment(endpoint.CanonicalSignature.Replace('/', '-'));
+        if (string.IsNullOrWhiteSpace(context))
+        {
+            context = endpoint.Id.Value;
+        }
+
+        var candidate = $"endpoints/{family}/{method}--{route}--{context}.md";
+        var path = ReserveWithCounter(candidate);
+        _pathByEntityId[endpoint.Id] = path;
+        return path;
+    }
+
     public string RegisterIndex()
     {
         return ReserveWithCounter("index/repository-index.md");

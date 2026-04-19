@@ -69,6 +69,22 @@ public sealed class DeclarationContractsVerticalSliceTests
         Assert.Contains("core:extendsType", predicateIds);
         Assert.Contains("core:externalAssemblyName", predicateIds);
         Assert.Contains("core:resolutionReason", predicateIds);
+        Assert.Contains("core:containsEndpointGroup", predicateIds);
+        Assert.Contains("core:containsEndpoint", predicateIds);
+        Assert.Contains("core:declaresEndpointGroup", predicateIds);
+        Assert.Contains("core:declaresEndpoint", predicateIds);
+        Assert.Contains("core:hasDeclaringMethod", predicateIds);
+        Assert.Contains("core:hasEndpointGroup", predicateIds);
+        Assert.Contains("core:endpointKind", predicateIds);
+        Assert.Contains("core:endpointFamily", predicateIds);
+        Assert.Contains("core:endpointHttpMethod", predicateIds);
+        Assert.Contains("core:authoredRouteText", predicateIds);
+        Assert.Contains("core:normalizedRouteKey", predicateIds);
+        Assert.Contains("core:endpointConfidence", predicateIds);
+        Assert.Contains("core:ruleId", predicateIds);
+        Assert.Contains("core:ruleVersion", predicateIds);
+        Assert.Contains("core:ruleSource", predicateIds);
+        Assert.Contains("core:routePrefix", predicateIds);
     }
 
     [Fact]

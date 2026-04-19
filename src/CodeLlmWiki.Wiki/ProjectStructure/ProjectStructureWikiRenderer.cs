@@ -85,6 +85,28 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             resolver.RegisterFile(file);
         }
 
+        var orderedEndpointGroups = model.Endpoints.Groups
+            .OrderBy(x => x.Family, StringComparer.Ordinal)
+            .ThenBy(x => x.CanonicalKey, StringComparer.Ordinal)
+            .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
+            .ToArray();
+        foreach (var endpointGroup in orderedEndpointGroups)
+        {
+            resolver.RegisterEndpointGroup(endpointGroup);
+        }
+
+        var orderedEndpoints = model.Endpoints.Endpoints
+            .OrderBy(x => x.Family, StringComparer.Ordinal)
+            .ThenBy(x => x.NormalizedRouteKey, StringComparer.Ordinal)
+            .ThenBy(x => x.HttpMethod, StringComparer.Ordinal)
+            .ThenBy(x => x.CanonicalSignature, StringComparer.Ordinal)
+            .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
+            .ToArray();
+        foreach (var endpoint in orderedEndpoints)
+        {
+            resolver.RegisterEndpoint(endpoint);
+        }
+
         var indexPath = resolver.RegisterIndex();
         var packageById = model.Packages.ToDictionary(x => x.Id, x => x);
         var projectById = model.Projects.ToDictionary(x => x.Id, x => x);
@@ -99,6 +121,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     .First());
         var memberById = model.Declarations.Members.ToDictionary(x => x.Id, x => x);
         var methodById = orderedMethods.ToDictionary(x => x.Id, x => x);
+        var endpointGroupById = orderedEndpointGroups.ToDictionary(x => x.Id, x => x);
+        var endpointById = orderedEndpoints.ToDictionary(x => x.Id, x => x);
         var implementedMethodIdsBySourceMethodId = model.Declarations.Methods.Relations
             .Where(x => x.Kind == MethodRelationKind.ImplementsMethod && x.TargetMethodId is not null)
             .GroupBy(x => x.SourceMethodId)
@@ -285,6 +309,25 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                 calledByMethodIdsByTargetMethodId,
                 fileById,
                 resolver)));
+        pages.AddRange(orderedEndpointGroups.Select(endpointGroup =>
+            RenderEndpointGroupPage(
+                model.Repository.Id.Value,
+                endpointGroup,
+                namespaceById,
+                typeById,
+                endpointById,
+                fileById,
+                resolver)));
+        pages.AddRange(orderedEndpoints.Select(endpoint =>
+            RenderEndpointPage(
+                model.Repository.Id.Value,
+                endpoint,
+                namespaceById,
+                typeById,
+                methodById,
+                endpointGroupById,
+                fileById,
+                resolver)));
         pages.AddRange(orderedFiles.Select(file => RenderFilePage(model.Repository, file, namespaceBacklinksByFileId, typeBacklinksByFileId, memberBacklinksByFileId, methodBacklinksByFileId, resolver, maxMergeEntriesPerFile)));
         pages.AddRange(RenderHotspotPages(model, resolver));
 
@@ -309,6 +352,8 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         sb.AppendLine($"- Namespaces: {model.Declarations.Namespaces.Count}");
         sb.AppendLine($"- Types: {model.Declarations.Types.Count}");
         sb.AppendLine($"- Methods: {model.Declarations.Methods.Declarations.Count}");
+        sb.AppendLine($"- Endpoint Groups: {model.Endpoints.Groups.Count}");
+        sb.AppendLine($"- Endpoints: {model.Endpoints.Endpoints.Count}");
         sb.AppendLine($"- Files: {model.Files.Count}");
         sb.AppendLine($"- Submodules: {model.Submodules.Count}");
         sb.AppendLine($"- Index: {ToWikiLink("index/repository-index", "Repository Index")}");
@@ -2055,6 +2100,192 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         return new WikiPage(
             RelativePath: resolver.GetPath(methodDeclaration.Id),
             Title: FormatMethodLinkAlias(methodDeclaration),
+            Markdown: WithFrontMatter(frontMatter, sb.ToString().TrimEnd()));
+    }
+
+    private static WikiPage RenderEndpointGroupPage(
+        string repositoryId,
+        EndpointGroupNode endpointGroup,
+        IReadOnlyDictionary<EntityId, NamespaceDeclarationNode> namespaceById,
+        IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
+        IReadOnlyDictionary<EntityId, EndpointNode> endpointById,
+        IReadOnlyDictionary<EntityId, FileNode> fileById,
+        WikiPathResolver resolver)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"# Endpoint Group: {endpointGroup.Name}");
+        sb.AppendLine();
+        sb.AppendLine($"- Family: `{endpointGroup.Family}`");
+        sb.AppendLine($"- Canonical Key: `{endpointGroup.CanonicalKey}`");
+        sb.AppendLine($"- Authored Route Prefix: `{endpointGroup.AuthoredRoutePrefix}`");
+        sb.AppendLine($"- Normalized Route Prefix: `{endpointGroup.NormalizedRoutePrefix}`");
+
+        sb.AppendLine();
+        sb.AppendLine("## Declaration Traceability");
+        if (endpointGroup.NamespaceId is { } namespaceId && namespaceById.TryGetValue(namespaceId, out var namespaceDeclaration))
+        {
+            sb.AppendLine($"- Namespace: {resolver.ToWikiLink(namespaceDeclaration.Id, namespaceDeclaration.Name)}");
+        }
+        else
+        {
+            sb.AppendLine("- Namespace: none");
+        }
+
+        if (endpointGroup.DeclaringTypeId is { } declaringTypeId && typeById.TryGetValue(declaringTypeId, out var declaringType))
+        {
+            sb.AppendLine($"- Declaring Type: {resolver.ToWikiLink(declaringType.Id, declaringType.Name)}");
+        }
+        else
+        {
+            sb.AppendLine("- Declaring Type: none");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Endpoints");
+        var endpoints = endpointGroup.EndpointIds
+            .Where(endpointById.ContainsKey)
+            .Select(endpointId => endpointById[endpointId])
+            .OrderBy(x => x.HttpMethod, StringComparer.Ordinal)
+            .ThenBy(x => x.NormalizedRouteKey, StringComparer.Ordinal)
+            .ThenBy(x => x.CanonicalSignature, StringComparer.Ordinal)
+            .ToArray();
+        if (endpoints.Length == 0)
+        {
+            sb.AppendLine("- none");
+        }
+        else
+        {
+            foreach (var endpoint in endpoints)
+            {
+                sb.AppendLine($"- {resolver.ToWikiLink(endpoint.Id, endpoint.Name)}");
+            }
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Declaration Files");
+        if (endpointGroup.DeclarationFileIds.Count == 0)
+        {
+            sb.AppendLine("- none");
+        }
+        else
+        {
+            foreach (var declarationFileId in endpointGroup.DeclarationFileIds)
+            {
+                if (fileById.TryGetValue(declarationFileId, out var file))
+                {
+                    sb.AppendLine($"- {resolver.ToWikiLink(file.Id, file.Path)}");
+                }
+            }
+        }
+
+        var frontMatter = new List<KeyValuePair<string, string>>
+        {
+            KeyValue("entity_id", endpointGroup.Id.Value),
+            KeyValue("entity_type", "endpoint_group"),
+            KeyValue("repository_id", repositoryId),
+            KeyValue("endpoint_family", endpointGroup.Family),
+            KeyValue("endpoint_group_key", endpointGroup.CanonicalKey),
+        };
+
+        return new WikiPage(
+            RelativePath: resolver.GetPath(endpointGroup.Id),
+            Title: endpointGroup.Name,
+            Markdown: WithFrontMatter(frontMatter, sb.ToString().TrimEnd()));
+    }
+
+    private static WikiPage RenderEndpointPage(
+        string repositoryId,
+        EndpointNode endpoint,
+        IReadOnlyDictionary<EntityId, NamespaceDeclarationNode> namespaceById,
+        IReadOnlyDictionary<EntityId, TypeDeclarationNode> typeById,
+        IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        IReadOnlyDictionary<EntityId, EndpointGroupNode> endpointGroupById,
+        IReadOnlyDictionary<EntityId, FileNode> fileById,
+        WikiPathResolver resolver)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"# Endpoint: {endpoint.Name}");
+        sb.AppendLine();
+        sb.AppendLine($"- Family: `{endpoint.Family}`");
+        sb.AppendLine($"- Kind: `{endpoint.Kind}`");
+        sb.AppendLine($"- HTTP Method: `{endpoint.HttpMethod}`");
+        sb.AppendLine($"- Authored Route: `{endpoint.AuthoredRouteTemplate}`");
+        sb.AppendLine($"- Normalized Route Key: `{endpoint.NormalizedRouteKey}`");
+        sb.AppendLine($"- Confidence: `{endpoint.Confidence.ToString().ToLowerInvariant()}`");
+        sb.AppendLine($"- Rule: `{endpoint.RuleId}`");
+        sb.AppendLine($"- Rule Version: `{endpoint.RuleVersion}`");
+        sb.AppendLine($"- Rule Source: `{endpoint.RuleSource}`");
+        sb.AppendLine($"- Signature: `{endpoint.CanonicalSignature}`");
+
+        sb.AppendLine();
+        sb.AppendLine("## Declaration Traceability");
+        if (endpoint.NamespaceId is { } namespaceId && namespaceById.TryGetValue(namespaceId, out var namespaceDeclaration))
+        {
+            sb.AppendLine($"- Namespace: {resolver.ToWikiLink(namespaceDeclaration.Id, namespaceDeclaration.Name)}");
+        }
+        else
+        {
+            sb.AppendLine("- Namespace: none");
+        }
+
+        if (typeById.TryGetValue(endpoint.DeclaringTypeId, out var declaringType))
+        {
+            sb.AppendLine($"- Declaring Type: {resolver.ToWikiLink(declaringType.Id, declaringType.Name)}");
+        }
+        else
+        {
+            sb.AppendLine($"- Declaring Type: `{endpoint.DeclaringTypeId.Value}`");
+        }
+
+        if (methodById.TryGetValue(endpoint.DeclaringMethodId, out var declaringMethod))
+        {
+            sb.AppendLine($"- Declaring Method: {resolver.ToWikiLink(declaringMethod.Id, FormatMethodLinkAlias(declaringMethod))}");
+        }
+        else
+        {
+            sb.AppendLine($"- Declaring Method: `{endpoint.DeclaringMethodId.Value}`");
+        }
+
+        if (endpoint.GroupId is { } groupId && endpointGroupById.TryGetValue(groupId, out var endpointGroup))
+        {
+            sb.AppendLine($"- Endpoint Group: {resolver.ToWikiLink(endpointGroup.Id, endpointGroup.Name)}");
+        }
+        else
+        {
+            sb.AppendLine("- Endpoint Group: none");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Declaration Files");
+        if (endpoint.DeclarationFileIds.Count == 0)
+        {
+            sb.AppendLine("- none");
+        }
+        else
+        {
+            foreach (var declarationFileId in endpoint.DeclarationFileIds)
+            {
+                if (fileById.TryGetValue(declarationFileId, out var file))
+                {
+                    sb.AppendLine($"- {resolver.ToWikiLink(file.Id, file.Path)}");
+                }
+            }
+        }
+
+        var frontMatter = new List<KeyValuePair<string, string>>
+        {
+            KeyValue("entity_id", endpoint.Id.Value),
+            KeyValue("entity_type", "endpoint"),
+            KeyValue("repository_id", repositoryId),
+            KeyValue("endpoint_family", endpoint.Family),
+            KeyValue("endpoint_kind", endpoint.Kind),
+            KeyValue("endpoint_http_method", endpoint.HttpMethod),
+            KeyValue("endpoint_route_key", endpoint.NormalizedRouteKey),
+        };
+
+        return new WikiPage(
+            RelativePath: resolver.GetPath(endpoint.Id),
+            Title: endpoint.Name,
             Markdown: WithFrontMatter(frontMatter, sb.ToString().TrimEnd()));
     }
 
