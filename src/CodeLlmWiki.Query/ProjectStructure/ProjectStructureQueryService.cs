@@ -224,6 +224,26 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
                 declarations.Namespaces,
                 declarations.Types,
                 declarations.Methods.Declarations));
+        var declarationUnknownDependencyUsage = new UnknownDependencyUsageProjector().Project(
+            new UnknownDependencyUsageProjectionRequest(
+                CorePredicates.DependsOnTypeDeclaration,
+                _triples,
+                projects,
+                packages,
+                files,
+                declarations.Namespaces,
+                declarations.Types,
+                declarations.Methods.Declarations));
+        var methodBodyUnknownDependencyUsage = new UnknownDependencyUsageProjector().Project(
+            new UnknownDependencyUsageProjectionRequest(
+                CorePredicates.DependsOnTypeInMethodBody,
+                _triples,
+                projects,
+                packages,
+                files,
+                declarations.Namespaces,
+                declarations.Types,
+                declarations.Methods.Declarations));
         packages = packages
             .Select(package => package with
             {
@@ -246,6 +266,9 @@ public sealed class ProjectStructureQueryService : IProjectStructureQueryService
         return new ProjectStructureWikiModel(repository, solutions, projects, packages, files, submodules)
         {
             Declarations = declarations,
+            DependencyAttribution = new DependencyAttributionCatalog(
+                declarationUnknownDependencyUsage,
+                methodBodyUnknownDependencyUsage),
         };
     }
 

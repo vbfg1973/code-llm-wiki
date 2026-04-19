@@ -9,4 +9,5 @@ public sealed record ProjectStructureWikiModel(
     IReadOnlyList<SubmoduleNode> Submodules)
 {
     public DeclarationCatalog Declarations { get; init; } = DeclarationCatalog.Empty;
+    public DependencyAttributionCatalog DependencyAttribution { get; init; } = DependencyAttributionCatalog.Empty;
 }

@@ -792,7 +792,11 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     }
                     else
                     {
-                        baseTypeId = GetOrCreateUnresolvedReferenceId(normalizedBaseType, unresolvedReferenceIdByText, triples);
+                        baseTypeId = GetOrCreateUnresolvedReferenceId(
+                            normalizedBaseType,
+                            "type-resolution-fallback",
+                            unresolvedReferenceIdByText,
+                            triples);
                         diagnostics.Add(new IngestionDiagnostic(
                             "type:resolution:fallback",
                             $"Unresolved base type '{baseType}' for '{representative.QualifiedName}'."));
@@ -830,7 +834,11 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     }
                     else
                     {
-                        interfaceTypeId = GetOrCreateUnresolvedReferenceId(normalizedInterfaceType, unresolvedReferenceIdByText, triples);
+                        interfaceTypeId = GetOrCreateUnresolvedReferenceId(
+                            normalizedInterfaceType,
+                            "type-resolution-fallback",
+                            unresolvedReferenceIdByText,
+                            triples);
                         diagnostics.Add(new IngestionDiagnostic(
                             "type:resolution:fallback",
                             $"Unresolved interface type '{interfaceType}' for '{representative.QualifiedName}'."));
@@ -1023,7 +1031,11 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     diagnostics.Add(new IngestionDiagnostic(
                         "type:resolution:fallback",
                         $"Unresolved return type '{pendingReturnTypeLink.ReturnTypeName}' for method '{pendingReturnTypeLink.MethodId.Value}'."));
-                    continue;
+                    resolvedReturnTypeId = GetOrCreateUnresolvedReferenceId(
+                        NormalizeTypeReferenceName(pendingReturnTypeLink.ReturnTypeName),
+                        "type-resolution-fallback",
+                        unresolvedReferenceIdByText,
+                        triples);
                 }
             }
 
@@ -1059,7 +1071,11 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     diagnostics.Add(new IngestionDiagnostic(
                         "type:resolution:fallback",
                         $"Unresolved extension target type '{pendingExtendedTypeLink.ExtendedTypeName}' for method '{pendingExtendedTypeLink.MethodId.Value}'."));
-                    continue;
+                    resolvedExtendedTypeId = GetOrCreateUnresolvedReferenceId(
+                        NormalizeTypeReferenceName(pendingExtendedTypeLink.ExtendedTypeName),
+                        "type-resolution-fallback",
+                        unresolvedReferenceIdByText,
+                        triples);
                 }
             }
 
@@ -1095,7 +1111,11 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
                     diagnostics.Add(new IngestionDiagnostic(
                         "type:resolution:fallback",
                         $"Unresolved parameter type '{pendingParameterTypeLink.DeclaredTypeName}' for parameter '{pendingParameterTypeLink.ParameterId.Value}'."));
-                    continue;
+                    resolvedParameterTypeId = GetOrCreateUnresolvedReferenceId(
+                        NormalizeTypeReferenceName(pendingParameterTypeLink.DeclaredTypeName),
+                        "type-resolution-fallback",
+                        unresolvedReferenceIdByText,
+                        triples);
                 }
             }
 
@@ -1986,16 +2006,19 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
 
     private EntityId GetOrCreateUnresolvedReferenceId(
         string referenceName,
+        string resolutionReason,
         Dictionary<string, EntityId> unresolvedReferenceIdByText,
         List<SemanticTriple> triples)
     {
-        if (unresolvedReferenceIdByText.TryGetValue(referenceName, out var existing))
+        var key = $"{resolutionReason}|{referenceName}";
+        if (unresolvedReferenceIdByText.TryGetValue(key, out var existing))
         {
             return existing;
         }
 
-        var unresolvedId = _stableIdGenerator.Create(new EntityKey("unresolved-type-reference", referenceName));
-        unresolvedReferenceIdByText[referenceName] = unresolvedId;
+        var unresolvedNaturalKey = $"{resolutionReason}:{referenceName}";
+        var unresolvedId = _stableIdGenerator.Create(new EntityKey("unresolved-type-reference", unresolvedNaturalKey));
+        unresolvedReferenceIdByText[key] = unresolvedId;
 
         AddEntityTriples(
             triples,
@@ -2003,6 +2026,10 @@ public sealed class ProjectStructureAnalyzer : IProjectStructureAnalyzer
             "unresolved-type-reference",
             referenceName,
             $"unresolved/{referenceName}");
+        triples.Add(new SemanticTriple(
+            new EntityNode(unresolvedId),
+            CorePredicates.ResolutionReason,
+            new LiteralNode(resolutionReason)));
 
         return unresolvedId;
     }

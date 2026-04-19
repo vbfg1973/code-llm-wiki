@@ -229,6 +229,93 @@ public sealed class PackageDependencyVerticalSliceTests
     }
 
     [Fact]
+    public async Task Query_ProjectsUnknownPackageAttribution_WhenProjectScopedMatchIsAmbiguous()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync(includeAmbiguousPackageInNoAssets: true);
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        Assert.True(model.DependencyAttribution.DeclarationUnknown.UsageCount > 0);
+        Assert.True(model.DependencyAttribution.MethodBodyUnknown.UsageCount > 0);
+
+        var declarationMethodSignatures = model.DependencyAttribution.DeclarationUnknown.Namespaces
+            .SelectMany(x => x.Types)
+            .SelectMany(x => x.Methods)
+            .Select(x => x.MethodSignature)
+            .ToArray();
+        Assert.Contains(declarationMethodSignatures, x => x.Contains("Normalize(", StringComparison.Ordinal));
+
+        var declarationReasons = model.DependencyAttribution.DeclarationUnknown.Namespaces
+            .SelectMany(x => x.Types)
+            .SelectMany(x => x.Methods)
+            .Select(x => x.AttributionReason)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("ambiguous_project_scoped_match", declarationReasons);
+    }
+
+    [Fact]
+    public async Task Query_ProjectsUnresolvedDependencyEntities_WithReasonCodes()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync(includeUnresolvedSignatureInNoAssets: true);
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var unresolvedEntityTypes = analysis.Triples
+            .Where(x => x.Predicate == CorePredicates.EntityType && x.Object is LiteralNode literal)
+            .Select(x => ((LiteralNode)x.Object).Value?.ToString() ?? string.Empty)
+            .ToArray();
+        Assert.Contains("unresolved-type-reference", unresolvedEntityTypes);
+
+        var unresolvedReasons = model.DependencyAttribution.DeclarationUnknown.Namespaces
+            .SelectMany(x => x.Types)
+            .SelectMany(x => x.Methods)
+            .Select(x => x.TargetResolutionReason)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToArray();
+        Assert.Contains("type-resolution-fallback", unresolvedReasons);
+    }
+
+    [Fact]
+    public async Task Render_IncludesUnknownPackageAttributionPage_WhenUnknownUsageExists()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync(includeAmbiguousPackageInNoAssets: true, includeUnresolvedSignatureInNoAssets: true);
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var pages = new ProjectStructureWikiRenderer().Render(model);
+        var unknownPage = pages.Single(page => page.RelativePath == "packages/unknown-package-attribution.md");
+
+        Assert.Contains("## Declaration Dependency Usage (Unknown Package Attribution)", unknownPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("## Method Body Dependency Usage (Unknown Package Attribution)", unknownPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("ambiguous_project_scoped_match", unknownPage.Markdown, StringComparison.Ordinal);
+        Assert.Contains("type-resolution-fallback", unknownPage.Markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Render_UnknownPackageAttributionPage_IsDeterministicAcrossRuns()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync(includeAmbiguousPackageInNoAssets: true, includeUnresolvedSignatureInNoAssets: true);
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+
+        var first = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var firstModel = new ProjectStructureQueryService(first.Triples).GetModel(first.RepositoryId);
+        var firstPage = new ProjectStructureWikiRenderer()
+            .Render(firstModel)
+            .Single(page => page.RelativePath == "packages/unknown-package-attribution.md");
+
+        var second = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var secondModel = new ProjectStructureQueryService(second.Triples).GetModel(second.RepositoryId);
+        var secondPage = new ProjectStructureWikiRenderer()
+            .Render(secondModel)
+            .Single(page => page.RelativePath == "packages/unknown-package-attribution.md");
+
+        Assert.Equal(firstPage.Markdown, secondPage.Markdown);
+    }
+
+    [Fact]
     public async Task Ontology_ContainsPackagePredicates_AndStillValidates()
     {
         var ontologyPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "ontology", "ontology.v1.yaml"));
@@ -257,7 +344,9 @@ public sealed class PackageDependencyVerticalSliceTests
 
         public string RepositoryPath { get; }
 
-        public static async Task<PackageDependencyFixture> CreateAsync()
+        public static async Task<PackageDependencyFixture> CreateAsync(
+            bool includeAmbiguousPackageInNoAssets = false,
+            bool includeUnresolvedSignatureInNoAssets = false)
         {
             var root = Path.Combine(Path.GetTempPath(), $"codellmwiki-packages-{Guid.NewGuid():N}", "package-repo");
             Directory.CreateDirectory(root);
@@ -336,9 +425,18 @@ public sealed class PackageDependencyVerticalSliceTests
                                    <ItemGroup>
                                      <PackageReference Include="Newtonsoft.Json" Version="12.0.1" />
                                      <PackageReference Include="Serilog" Version="3.1.0" />
+                                     __NO_ASSETS_OPTIONAL_PACKAGE__
                                    </ItemGroup>
                                  </Project>
                                  """;
+            if (includeAmbiguousPackageInNoAssets)
+            {
+                noAssetsCsproj = noAssetsCsproj.Replace("__NO_ASSETS_OPTIONAL_PACKAGE__", "<PackageReference Include=\"Newtonsoft\" Version=\"1.0.0\" />", StringComparison.Ordinal);
+            }
+            else
+            {
+                noAssetsCsproj = noAssetsCsproj.Replace("__NO_ASSETS_OPTIONAL_PACKAGE__", string.Empty, StringComparison.Ordinal);
+            }
             await File.WriteAllTextAsync(Path.Combine(noAssetsDir, "NoAssets.csproj"), noAssetsCsproj);
             await File.WriteAllTextAsync(Path.Combine(noAssetsDir, "NoAssetsUsage.cs"),
                 """
@@ -361,6 +459,18 @@ public sealed class PackageDependencyVerticalSliceTests
                     }
                 }
                 """);
+            if (includeUnresolvedSignatureInNoAssets)
+            {
+                await File.WriteAllTextAsync(Path.Combine(noAssetsDir, "NoAssetsUnresolvedUsage.cs"),
+                    """
+                    namespace App.NoAssets;
+
+                    public sealed class NoAssetsUnresolvedFacade
+                    {
+                        public Missing[] Resolve(Missing[] payload) => payload;
+                    }
+                    """);
+            }
 
             var prefixOnlyDir = Path.Combine(root, "src", "PrefixOnly");
             Directory.CreateDirectory(prefixOnlyDir);

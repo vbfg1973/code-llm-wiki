@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 005](./005-phase-5-dependency-usage-mapping-and-package-provenance.prd.md)
 
 - Issue: [#65](https://github.com/vbfg1973/code-llm-wiki/issues/65)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: completed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,10 +18,10 @@ Implement explicit unknown and unresolved dependency semantics across ingestion,
 
 ## Acceptance criteria
 
-- [ ] Unknown package attribution is emitted explicitly when deterministic mapping is unavailable.
-- [ ] Unresolved dependency entities with reason codes are emitted and queryable.
-- [ ] Package/wiki dependency views surface unknown/unresolved semantics explicitly.
-- [ ] Tests cover ambiguity and unresolved scenarios deterministically.
+- [x] Unknown package attribution is emitted explicitly when deterministic mapping is unavailable.
+- [x] Unresolved dependency entities with reason codes are emitted and queryable.
+- [x] Package/wiki dependency views surface unknown/unresolved semantics explicitly.
+- [x] Tests cover ambiguity and unresolved scenarios deterministically.
 
 ## Blocked by
 

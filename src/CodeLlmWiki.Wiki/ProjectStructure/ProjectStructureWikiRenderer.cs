@@ -192,6 +192,11 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
         pages.AddRange(orderedSolutions.Select(solution => RenderSolutionPage(model.Repository.Id.Value, solution, projectById, resolver)));
         pages.AddRange(orderedProjects.Select(project => RenderProjectPage(model.Repository.Id.Value, project, packageById, resolver)));
         pages.AddRange(orderedPackages.Select(package => RenderPackagePage(model.Repository.Id.Value, package, methodById, resolver)));
+        if (model.DependencyAttribution.DeclarationUnknown.UsageCount > 0
+            || model.DependencyAttribution.MethodBodyUnknown.UsageCount > 0)
+        {
+            pages.Add(RenderUnknownPackageAttributionPage(model.Repository.Id.Value, model.DependencyAttribution, methodById, resolver));
+        }
         pages.AddRange(orderedNamespaces.Select(namespaceDeclaration => RenderNamespacePage(model.Repository.Id.Value, namespaceDeclaration, namespaceById, typeById, resolver)));
         pages.AddRange(orderedTypes.Select(typeDeclaration =>
             RenderTypePage(
@@ -487,6 +492,86 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
                     KeyValue("package_key", package.CanonicalKey),
                 ],
                 sb.ToString().TrimEnd()));
+    }
+
+    private static WikiPage RenderUnknownPackageAttributionPage(
+        string repositoryId,
+        DependencyAttributionCatalog dependencyAttribution,
+        IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        WikiPathResolver resolver)
+    {
+        const string pagePath = "packages/unknown-package-attribution.md";
+
+        var sb = new StringBuilder();
+        sb.AppendLine("# Unknown Package Attribution");
+
+        AppendUnknownDependencyUsageSection(
+            sb,
+            "Declaration Dependency Usage (Unknown Package Attribution)",
+            dependencyAttribution.DeclarationUnknown,
+            methodById,
+            resolver);
+        AppendUnknownDependencyUsageSection(
+            sb,
+            "Method Body Dependency Usage (Unknown Package Attribution)",
+            dependencyAttribution.MethodBodyUnknown,
+            methodById,
+            resolver);
+
+        return new WikiPage(
+            RelativePath: pagePath,
+            Title: "Unknown Package Attribution",
+            Markdown: WithFrontMatter(
+                [
+                    KeyValue("entity_id", $"dependency-attribution:unknown:{repositoryId}"),
+                    KeyValue("entity_type", "dependency-attribution-unknown"),
+                    KeyValue("repository_id", repositoryId),
+                ],
+                sb.ToString().TrimEnd()));
+    }
+
+    private static void AppendUnknownDependencyUsageSection(
+        StringBuilder sb,
+        string heading,
+        UnknownDependencyUsageCatalog catalog,
+        IReadOnlyDictionary<EntityId, MethodDeclarationNode> methodById,
+        WikiPathResolver resolver)
+    {
+        sb.AppendLine();
+        sb.AppendLine($"## {heading}");
+
+        if (catalog.UsageCount == 0)
+        {
+            sb.AppendLine("- none");
+            return;
+        }
+
+        foreach (var namespaceUsage in catalog.Namespaces)
+        {
+            var namespaceDisplay = namespaceUsage.NamespaceId is { } namespaceId
+                ? resolver.ToWikiLink(namespaceId, namespaceUsage.NamespaceName)
+                : namespaceUsage.NamespaceName;
+            sb.AppendLine($"- {namespaceDisplay} ({namespaceUsage.UsageCount})");
+
+            foreach (var typeUsage in namespaceUsage.Types)
+            {
+                var typeDisplay = resolver.ToWikiLink(typeUsage.TypeId, typeUsage.TypeName);
+                sb.AppendLine($"  - {typeDisplay} ({typeUsage.UsageCount})");
+
+                foreach (var methodUsage in typeUsage.Methods)
+                {
+                    var methodAlias = methodById.TryGetValue(methodUsage.MethodId, out var method)
+                        ? FormatMethodLinkAlias(method)
+                        : methodUsage.MethodSignature;
+                    var methodDisplay = resolver.ToWikiLink(methodUsage.MethodId, methodAlias);
+                    var reasonSuffix = string.IsNullOrWhiteSpace(methodUsage.TargetResolutionReason)
+                        ? string.Empty
+                        : $", resolution: {methodUsage.TargetResolutionReason}";
+                    sb.AppendLine(
+                        $"    - {methodDisplay} -> `{methodUsage.TargetTypeName}` (attribution: {methodUsage.AttributionReason}{reasonSuffix}) ({methodUsage.UsageCount})");
+                }
+            }
+        }
     }
 
     private static IReadOnlyDictionary<EntityId, IReadOnlyList<NamespaceDeclarationNode>> BuildNamespaceBacklinksByFileId(
@@ -1535,6 +1620,15 @@ public sealed class ProjectStructureWikiRenderer : IProjectStructureWikiRenderer
             model.Packages
                 .OrderBy(x => x.Name, StringComparer.Ordinal)
                 .Select(x => new IndexRow(x.Name, x.Name, x.Id.Value, resolver.ToWikiLink(x.Id, x.Name)))
+                .Concat(
+                    model.DependencyAttribution.DeclarationUnknown.UsageCount > 0
+                    || model.DependencyAttribution.MethodBodyUnknown.UsageCount > 0
+                        ? [new IndexRow(
+                            "Unknown Package Attribution",
+                            "packages/unknown-package-attribution.md",
+                            $"dependency-attribution:unknown:{model.Repository.Id.Value}",
+                            ToWikiLink("packages/unknown-package-attribution", "Unknown Package Attribution"))]
+                        : [])
                 .ToArray());
 
         AppendTable(
