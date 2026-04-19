@@ -84,11 +84,16 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
                     .DistinctBy(v => v.Id)
                     .ToArray());
 
+        var maxDegreeOfParallelism = NormalizeMaxDegreeOfParallelism(request.MaxDegreeOfParallelism);
         var namespaceDescendants = BuildNamespaceDescendants(request.Declarations.Namespaces);
-        var files = request.Files
+        var orderedFiles = request.Files
             .OrderBy(x => x.Path, StringComparer.Ordinal)
             .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
-            .Select(file =>
+            .ToArray();
+        var files = BuildInParallel(
+            orderedFiles,
+            maxDegreeOfParallelism,
+            file =>
             {
                 var methods = methodsByFileId.TryGetValue(file.Id, out var fileMethods)
                     ? fileMethods
@@ -108,13 +113,16 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
                     file.Path,
                     fileCodeKinds[file.Id],
                     rollup);
-            })
-            .ToArray();
+            });
 
-        var projects = request.Projects
+        var orderedProjects = request.Projects
             .OrderBy(x => x.Path, StringComparer.Ordinal)
             .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
-            .Select(project =>
+            .ToArray();
+        var projects = BuildInParallel(
+            orderedProjects,
+            maxDegreeOfParallelism,
+            project =>
             {
                 var methods = methodsByProjectId.TryGetValue(project.Id, out var projectMethods)
                     ? projectMethods
@@ -134,13 +142,16 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
                     project.Path,
                     projectCodeKinds[project.Id],
                     rollup);
-            })
-            .ToArray();
+            });
 
-        var namespaces = request.Declarations.Namespaces
+        var orderedNamespaces = request.Declarations.Namespaces
             .OrderBy(x => x.Path, StringComparer.Ordinal)
             .ThenBy(x => x.Id.Value, StringComparer.Ordinal)
-            .Select(namespaceNode =>
+            .ToArray();
+        var namespaces = BuildInParallel(
+            orderedNamespaces,
+            maxDegreeOfParallelism,
+            namespaceNode =>
             {
                 var directMethods = methodsByNamespaceId.TryGetValue(namespaceNode.Id, out var directMethodSet)
                     ? directMethodSet
@@ -176,8 +187,7 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
                     namespaceNode.ParentNamespaceId,
                     direct,
                     recursive);
-            })
-            .ToArray();
+            });
 
         var repositoryMethods = ApplyScopeFilter(methodContexts, request.ScopeFilter);
         var repositoryTypes = ApplyScopeFilter(typeContexts, request.ScopeFilter);
@@ -188,6 +198,40 @@ public sealed class StructuralMetricRollupProjector : IStructuralMetricRollupPro
             repositoryRaw with { IncludedInRanking = repositoryIncluded });
 
         return new StructuralMetricRollupCatalog(repository, projects, namespaces, files, request.ScopeFilter);
+    }
+
+    private static TOut[] BuildInParallel<TIn, TOut>(
+        IReadOnlyList<TIn> source,
+        int maxDegreeOfParallelism,
+        Func<TIn, TOut> projector)
+    {
+        if (source.Count == 0)
+        {
+            return [];
+        }
+
+        if (maxDegreeOfParallelism <= 1 || source.Count == 1)
+        {
+            return source.Select(projector).ToArray();
+        }
+
+        var output = new TOut[source.Count];
+        Parallel.For(
+            0,
+            source.Count,
+            new ParallelOptions { MaxDegreeOfParallelism = maxDegreeOfParallelism },
+            index => output[index] = projector(source[index]));
+        return output;
+    }
+
+    private static int NormalizeMaxDegreeOfParallelism(int configured)
+    {
+        if (configured <= 0)
+        {
+            return Environment.ProcessorCount;
+        }
+
+        return configured;
     }
 
     private static IReadOnlyList<MethodMetricContext> ApplyScopeFilter(

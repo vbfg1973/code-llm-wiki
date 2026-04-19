@@ -8,4 +8,5 @@ public sealed record IngestionArtifactPublishRequest(
     DateTimeOffset StartedAtUtc,
     DateTimeOffset CompletedAtUtc,
     IngestionRunResult RunResult,
-    int? MaxMergeEntriesPerFile = null);
+    int? MaxMergeEntriesPerFile = null,
+    int? MetricComputationMaxDegreeOfParallelism = null);

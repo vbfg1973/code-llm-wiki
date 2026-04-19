@@ -9,4 +9,5 @@ public sealed record StructuralMetricRollupProjectionRequest(
     IReadOnlyList<ProjectNode> Projects,
     IReadOnlyList<FileNode> Files,
     DeclarationCatalog Declarations,
-    StructuralMetricScopeFilter ScopeFilter);
+    StructuralMetricScopeFilter ScopeFilter,
+    int MaxDegreeOfParallelism);

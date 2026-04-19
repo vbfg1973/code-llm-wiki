@@ -38,54 +38,26 @@ public sealed class HotspotRankingProjector : IHotspotRankingProjector
         var effectiveWeights = ResolveWeights(request.Options.CompositeWeightOverrides);
         var effectiveThresholds = ResolveThresholds(request.Options.ThresholdOverrides);
         var subjectsByKind = BuildSubjectsByKind(request.Triples, request.Declarations, request.StructuralMetrics);
-
-        var primaryRankings = new List<HotspotMetricRankingNode>();
-        var compositeRankings = new List<HotspotCompositeRankingNode>();
-
-        foreach (var targetGroup in subjectsByKind.OrderBy(x => x.Key))
-        {
-            var targetKind = targetGroup.Key;
-            var subjects = targetGroup.Value;
-            if (subjects.Count == 0)
-            {
-                continue;
-            }
-
-            var metricKinds = subjects
-                .SelectMany(subject => subject.Metrics.Keys)
-                .Distinct()
-                .OrderBy(x => x)
-                .ToArray();
-            if (metricKinds.Length == 0)
-            {
-                continue;
-            }
-
-            var normalizedByMetricByEntityId = new Dictionary<HotspotMetricKind, IReadOnlyDictionary<EntityId, double>>();
-            foreach (var metricKind in metricKinds)
-            {
-                var rows = BuildMetricRows(
-                    subjects,
-                    metricKind,
-                    effectiveThresholds[metricKind],
-                    effectiveTopN,
-                    request.Options.Unbounded,
-                    out var normalizedByEntityId);
-
-                normalizedByMetricByEntityId[metricKind] = normalizedByEntityId;
-                primaryRankings.Add(new HotspotMetricRankingNode(targetKind, metricKind, rows));
-            }
-
-            var compositeRows = BuildCompositeRows(
-                subjects,
-                metricKinds,
-                normalizedByMetricByEntityId,
-                effectiveWeights,
-                effectiveThresholds[HotspotMetricKind.Composite],
+        var maxDegreeOfParallelism = NormalizeMaxDegreeOfParallelism(request.MaxDegreeOfParallelism);
+        var targetGroups = subjectsByKind
+            .OrderBy(x => x.Key)
+            .ToArray();
+        var rankingResults = BuildInParallel(
+            targetGroups,
+            maxDegreeOfParallelism,
+            targetGroup => BuildTargetRankingResult(
+                targetGroup,
+                effectiveThresholds,
                 effectiveTopN,
-                request.Options.Unbounded);
-            compositeRankings.Add(new HotspotCompositeRankingNode(targetKind, compositeRows));
-        }
+                request.Options.Unbounded,
+                effectiveWeights));
+
+        var primaryRankings = rankingResults
+            .SelectMany(x => x.PrimaryRankings)
+            .ToArray();
+        var compositeRankings = rankingResults
+            .SelectMany(x => x.CompositeRankings)
+            .ToArray();
 
         return new HotspotRankingCatalog(
             new HotspotRankingEffectiveConfig(
@@ -100,6 +72,59 @@ public sealed class HotspotRankingProjector : IHotspotRankingProjector
             compositeRankings
                 .OrderBy(x => x.TargetKind)
                 .ToArray());
+    }
+
+    private static TargetRankingResult BuildTargetRankingResult(
+        KeyValuePair<HotspotTargetKind, IReadOnlyList<HotspotSubject>> targetGroup,
+        IReadOnlyDictionary<HotspotMetricKind, HotspotSeverityThresholds> effectiveThresholds,
+        int effectiveTopN,
+        bool unbounded,
+        IReadOnlyDictionary<HotspotMetricKind, double> effectiveWeights)
+    {
+        var targetKind = targetGroup.Key;
+        var subjects = targetGroup.Value;
+        if (subjects.Count == 0)
+        {
+            return TargetRankingResult.Empty;
+        }
+
+        var metricKinds = subjects
+            .SelectMany(subject => subject.Metrics.Keys)
+            .Distinct()
+            .OrderBy(x => x)
+            .ToArray();
+        if (metricKinds.Length == 0)
+        {
+            return TargetRankingResult.Empty;
+        }
+
+        var primaryRankings = new List<HotspotMetricRankingNode>(metricKinds.Length);
+        var normalizedByMetricByEntityId = new Dictionary<HotspotMetricKind, IReadOnlyDictionary<EntityId, double>>();
+        foreach (var metricKind in metricKinds)
+        {
+            var rows = BuildMetricRows(
+                subjects,
+                metricKind,
+                effectiveThresholds[metricKind],
+                effectiveTopN,
+                unbounded,
+                out var normalizedByEntityId);
+
+            normalizedByMetricByEntityId[metricKind] = normalizedByEntityId;
+            primaryRankings.Add(new HotspotMetricRankingNode(targetKind, metricKind, rows));
+        }
+
+        var compositeRows = BuildCompositeRows(
+            subjects,
+            metricKinds,
+            normalizedByMetricByEntityId,
+            effectiveWeights,
+            effectiveThresholds[HotspotMetricKind.Composite],
+            effectiveTopN,
+            unbounded);
+        var compositeRanking = new HotspotCompositeRankingNode(targetKind, compositeRows);
+
+        return new TargetRankingResult(primaryRankings, [compositeRanking]);
     }
 
     private static IReadOnlyList<HotspotRankingRow> BuildMetricRows(
@@ -286,6 +311,40 @@ public sealed class HotspotRankingProjector : IHotspotRankingProjector
         }
 
         return configuredTopN.Value;
+    }
+
+    private static TOut[] BuildInParallel<TIn, TOut>(
+        IReadOnlyList<TIn> source,
+        int maxDegreeOfParallelism,
+        Func<TIn, TOut> projector)
+    {
+        if (source.Count == 0)
+        {
+            return [];
+        }
+
+        if (maxDegreeOfParallelism <= 1 || source.Count == 1)
+        {
+            return source.Select(projector).ToArray();
+        }
+
+        var output = new TOut[source.Count];
+        Parallel.For(
+            0,
+            source.Count,
+            new ParallelOptions { MaxDegreeOfParallelism = maxDegreeOfParallelism },
+            index => output[index] = projector(source[index]));
+        return output;
+    }
+
+    private static int NormalizeMaxDegreeOfParallelism(int configured)
+    {
+        if (configured <= 0)
+        {
+            return Environment.ProcessorCount;
+        }
+
+        return configured;
     }
 
     private static IReadOnlyDictionary<HotspotMetricKind, double> ResolveWeights(
@@ -523,6 +582,13 @@ public sealed class HotspotRankingProjector : IHotspotRankingProjector
         string DisplayName,
         string Path,
         IReadOnlyDictionary<HotspotMetricKind, double> Metrics);
+
+    private sealed record TargetRankingResult(
+        IReadOnlyList<HotspotMetricRankingNode> PrimaryRankings,
+        IReadOnlyList<HotspotCompositeRankingNode> CompositeRankings)
+    {
+        public static TargetRankingResult Empty { get; } = new([], []);
+    }
 
     private enum MetricDirection
     {
