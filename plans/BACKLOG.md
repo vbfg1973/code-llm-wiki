@@ -136,7 +136,7 @@ Purpose: Track durable product capabilities from the original specification (not
     - [PRD 010](/home/vbfg/dev/dotnet-llm-wiki/plans/010/010-phase-10-semantic-resolution-quality-and-ingestion-observability.prd.md)
     - Plan: [PRD 010 plan](/home/vbfg/dev/dotnet-llm-wiki/plans/010/010-phase-10-semantic-resolution-quality-and-ingestion-observability.plan.md)
     - Parent GitHub issue (open): `#119`
-    - Implementation issues (in progress): `#120` (closed), `#121` (closed), `#122` (closed), `#123`, `#124`, `#125`
+    - Implementation issues (in progress): `#120` (closed), `#121` (closed), `#122` (closed), `#123` (closed), `#124`, `#125`
 
 ## Cross-Cutting Constraints (from original intent)
 

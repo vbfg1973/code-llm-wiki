@@ -7,7 +7,7 @@
 - [x] Phase 1: Diagnostics Taxonomy and Stage Telemetry Baseline — completion date: 2026-04-19
 - [x] Phase 2: Project-Scoped Semantic Call Resolution Slice — completion date: 2026-04-19
 - [x] Phase 3: Override Resolution and Type-Fallback Noise Reduction — completion date: 2026-04-19
-- [ ] Phase 4: Quality Gate Policy and Run Status Integration
+- [x] Phase 4: Quality Gate Policy and Run Status Integration — completion date: 2026-04-19
 - [ ] Phase 5: Bounded Parallelism and Deterministic Merge Hardening
 - [ ] Phase 6: Docs Runbook, Contracts, and Regression Hardening
 
@@ -91,10 +91,10 @@ Implement unresolved-call-ratio quality policy as a first-class run gate, integr
 
 ### Acceptance criteria
 
-- [ ] Quality policy computes unresolved-call ratio and evaluates against a global default threshold.
-- [ ] Gate pass/fail outcomes are reflected in run status and exit behavior.
-- [ ] Failure output includes measured ratio and threshold values.
-- [ ] Project discovery fallback remains warning-level and non-gating in this phase.
+- [x] Quality policy computes unresolved-call ratio and evaluates against a global default threshold.
+- [x] Gate pass/fail outcomes are reflected in run status and exit behavior.
+- [x] Failure output includes measured ratio and threshold values.
+- [x] Project discovery fallback remains warning-level and non-gating in this phase.
 
 ---
 
