@@ -20,7 +20,7 @@ public sealed class PackageDependencyVerticalSliceTests
         var query = new ProjectStructureQueryService(analysis.Triples);
         var model = query.GetModel(analysis.RepositoryId);
 
-        Assert.Equal(2, model.Packages.Count);
+        Assert.Equal(3, model.Packages.Count);
 
         var withAssetsProject = model.Projects.Single(x => x.Name == "WithAssets");
         var withAssetsPackages = withAssetsProject.PackageIds
@@ -89,7 +89,7 @@ public sealed class PackageDependencyVerticalSliceTests
         var pages = renderer.Render(model);
 
         Assert.True(pages.Count >= 7, $"Expected at least 7 pages but got {pages.Count}.");
-        Assert.Equal(2, pages.Count(x => x.RelativePath.StartsWith("packages/", StringComparison.Ordinal)));
+        Assert.Equal(3, pages.Count(x => x.RelativePath.StartsWith("packages/", StringComparison.Ordinal)));
         Assert.Contains(pages, page => page.RelativePath.StartsWith("projects/", StringComparison.Ordinal) && page.Markdown.Contains("[[packages/", StringComparison.Ordinal));
         Assert.Contains(pages, page => page.RelativePath == "index/repository-index.md");
 
@@ -188,6 +188,47 @@ public sealed class PackageDependencyVerticalSliceTests
     }
 
     [Fact]
+    public async Task Query_UsesProjectScopedAttribution_InMixedVersionRepository()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var newtonsoftJson = model.Packages.Single(x => x.Name == "Newtonsoft.Json");
+
+        var declarationNamespaces = newtonsoftJson.DeclarationDependencyUsage.Namespaces
+            .Select(x => x.NamespaceName)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(["App.NoAssets", "App.WithAssets"], declarationNamespaces);
+
+        var methodBodyNamespaces = newtonsoftJson.MethodBodyDependencyUsage.Namespaces
+            .Select(x => x.NamespaceName)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(["App.NoAssets", "App.WithAssets"], methodBodyNamespaces);
+
+        var noAssetsMembership = newtonsoftJson.ProjectMemberships.Single(x => x.ProjectName == "NoAssets");
+        var withAssetsMembership = newtonsoftJson.ProjectMemberships.Single(x => x.ProjectName == "WithAssets");
+        Assert.Equal("12.0.1", noAssetsMembership.DeclaredVersion);
+        Assert.Equal("13.0.3", withAssetsMembership.DeclaredVersion);
+    }
+
+    [Fact]
+    public async Task Query_DoesNotMisattribute_ToPrefixOverlappingPackageOutsideSourceProject()
+    {
+        var fixture = await PackageDependencyFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var prefixPackage = model.Packages.Single(x => x.Name == "Newtonsoft");
+        Assert.Equal(0, prefixPackage.DeclarationDependencyUsage.UsageCount);
+        Assert.Equal(0, prefixPackage.MethodBodyDependencyUsage.UsageCount);
+    }
+
+    [Fact]
     public async Task Ontology_ContainsPackagePredicates_AndStillValidates()
     {
         var ontologyPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "ontology", "ontology.v1.yaml"));
@@ -226,6 +267,7 @@ public sealed class PackageDependencyVerticalSliceTests
                        <Solution>
                          <Project Path="src/WithAssets/WithAssets.csproj" />
                          <Project Path="src/NoAssets/NoAssets.csproj" />
+                         <Project Path="src/PrefixOnly/PrefixOnly.csproj" />
                        </Solution>
                        """;
             await File.WriteAllTextAsync(solutionPath, slnx);
@@ -305,6 +347,41 @@ public sealed class PackageDependencyVerticalSliceTests
                 public sealed class NoAssetsFacade
                 {
                     public void Track(Serilog.ILogger logger) { }
+                }
+                """);
+            await File.WriteAllTextAsync(Path.Combine(noAssetsDir, "NoAssetsJsonUsage.cs"),
+                """
+                namespace App.NoAssets;
+
+                public sealed class NoAssetsJsonFacade
+                {
+                    public Newtonsoft.Json.Linq.JToken Normalize(Newtonsoft.Json.Linq.JObject payload)
+                    {
+                        return Newtonsoft.Json.Linq.JToken.FromObject(payload);
+                    }
+                }
+                """);
+
+            var prefixOnlyDir = Path.Combine(root, "src", "PrefixOnly");
+            Directory.CreateDirectory(prefixOnlyDir);
+            var prefixOnlyCsproj = """
+                                   <Project Sdk="Microsoft.NET.Sdk">
+                                     <PropertyGroup>
+                                       <TargetFramework>net10.0</TargetFramework>
+                                     </PropertyGroup>
+                                     <ItemGroup>
+                                       <PackageReference Include="Newtonsoft" Version="1.0.0" />
+                                     </ItemGroup>
+                                   </Project>
+                                   """;
+            await File.WriteAllTextAsync(Path.Combine(prefixOnlyDir, "PrefixOnly.csproj"), prefixOnlyCsproj);
+            await File.WriteAllTextAsync(Path.Combine(prefixOnlyDir, "PrefixOnlyUsage.cs"),
+                """
+                namespace App.PrefixOnly;
+
+                public sealed class PrefixOnlyFacade
+                {
+                    public string Name() => nameof(PrefixOnlyFacade);
                 }
                 """);
 

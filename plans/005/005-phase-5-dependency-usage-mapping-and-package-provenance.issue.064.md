@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 005](./005-phase-5-dependency-usage-mapping-and-package-provenance.prd.md)
 
 - Issue: [#64](https://github.com/vbfg1973/code-llm-wiki/issues/64)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: completed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,10 +18,10 @@ Implement deterministic, project-scoped package attribution for external depende
 
 ## Acceptance criteria
 
-- [ ] External dependency package attribution uses source method/type project context.
-- [ ] Deterministic mapping is applied only when attribution certainty is available.
-- [ ] Query/package projections and wiki output reflect project-correct package attribution in mixed-version scenarios.
-- [ ] Tests cover mixed-version multi-project attribution behavior deterministically.
+- [x] External dependency package attribution uses source method/type project context.
+- [x] Deterministic mapping is applied only when attribution certainty is available.
+- [x] Query/package projections and wiki output reflect project-correct package attribution in mixed-version scenarios.
+- [x] Tests cover mixed-version multi-project attribution behavior deterministically.
 
 ## Blocked by
 
