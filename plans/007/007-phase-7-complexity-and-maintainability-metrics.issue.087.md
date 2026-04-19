@@ -3,8 +3,8 @@
 > Parent PRD: [PRD 007](./007-phase-7-complexity-and-maintainability-metrics.prd.md)
 
 - Issue: [#87](https://github.com/vbfg1973/code-llm-wiki/issues/87)
-- [ ] Status: open
-- [ ] Completion date:
+- [x] Status: closed
+- [x] Completion date: 2026-04-19
 
 ## Notes
 
@@ -18,10 +18,10 @@ Implement ingestion-time metric fact extraction for BL-012 core signals. Persist
 
 ## Acceptance criteria
 
-- [ ] Method metric facts are persisted as triples with stable identity and deterministic value formatting.
-- [ ] Type CBO facts are persisted as triples with declaration/method-body/total breakdown.
-- [ ] Methods without bodies are excluded from rankings but included in coverage/completeness counters.
-- [ ] Unit and integration tests validate formula contracts and normalization semantics for generics/wrappers.
+- [x] Method metric facts are persisted as triples with stable identity and deterministic value formatting.
+- [x] Type CBO facts are persisted as triples with declaration/method-body/total breakdown.
+- [x] Methods without bodies are excluded from rankings but included in coverage/completeness counters.
+- [x] Unit and integration tests validate formula contracts and normalization semantics for generics/wrappers.
 
 ## Blocked by
 

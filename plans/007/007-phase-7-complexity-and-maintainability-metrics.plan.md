@@ -4,7 +4,7 @@
 
 ## Execution checklist
 
-- [ ] Phase 1: Metric Facts Baseline (Method + Type Core) — completion date:
+- [x] Phase 1: Metric Facts Baseline (Method + Type Core) — completion date: 2026-04-19
 - [ ] Phase 2: Rollups and Scope Semantics (File/Namespace/Project/Repository) — completion date:
 - [ ] Phase 3: Hotspot Ranking and Severity Contracts — completion date:
 - [ ] Phase 4: Publication Surfaces (Wiki + Manifest + Front Matter) — completion date:
@@ -57,10 +57,10 @@ Implement ingestion-time metric extraction for core method/type facts and persis
 
 ### Acceptance criteria
 
-- [ ] Method metric facts are persisted as triples (cyclomatic, cognitive, Halstead core set, LOC breakdown, MI).
-- [ ] Type CBO facts are persisted as triples with declaration/method-body/total breakdown.
-- [ ] Methods without analyzable bodies are excluded from rankings but represented in coverage/completeness counts.
-- [ ] CBO dependency normalization rules (generics + wrapper normalization) are applied deterministically and tested.
+- [x] Method metric facts are persisted as triples (cyclomatic, cognitive, Halstead core set, LOC breakdown, MI).
+- [x] Type CBO facts are persisted as triples with declaration/method-body/total breakdown.
+- [x] Methods without analyzable bodies are excluded from rankings but represented in coverage/completeness counts.
+- [x] CBO dependency normalization rules (generics + wrapper normalization) are applied deterministically and tested.
 
 ---
 
