@@ -1,0 +1,218 @@
+using System.Diagnostics;
+using System.Globalization;
+using CodeLlmWiki.Contracts.Graph;
+using CodeLlmWiki.Contracts.Identity;
+using CodeLlmWiki.Ingestion.ProjectStructure;
+using CodeLlmWiki.Query.ProjectStructure;
+
+namespace CodeLlmWiki.Ingestion.Tests;
+
+public sealed class MetricExtractionVerticalSliceTests
+{
+    [Fact]
+    public async Task AnalyzeAsync_EmitsMethodMetricFacts_AndCoverageForBodylessMethods()
+    {
+        var fixture = await MetricFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var analyzerMethod = model.Declarations.Methods.Declarations.Single(x => x.Name == "Analyze");
+        var interfaceMethod = model.Declarations.Methods.Declarations.Single(x => x.Name == "Execute");
+        var abstractMethod = model.Declarations.Methods.Declarations.Single(x => x.Name == "AbstractOp");
+
+        Assert.True(TryGetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.CyclomaticComplexity, out var cyclomatic));
+        Assert.True(int.TryParse(cyclomatic, NumberStyles.Integer, CultureInfo.InvariantCulture, out var cyclomaticValue));
+        Assert.True(cyclomaticValue >= 3);
+
+        Assert.True(TryGetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.CognitiveComplexity, out var cognitive));
+        Assert.True(int.TryParse(cognitive, NumberStyles.Integer, CultureInfo.InvariantCulture, out var cognitiveValue));
+        Assert.True(cognitiveValue > 0);
+
+        Assert.True(TryGetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.HalsteadVolume, out var halsteadVolume));
+        Assert.True(double.TryParse(halsteadVolume, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var halsteadValue));
+        Assert.True(halsteadValue > 0d);
+
+        Assert.True(TryGetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.LocTotalLines, out var locTotal));
+        Assert.True(int.TryParse(locTotal, NumberStyles.Integer, CultureInfo.InvariantCulture, out var locTotalValue));
+        Assert.True(locTotalValue > 0);
+
+        Assert.True(TryGetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.MaintainabilityIndex, out var mi));
+        Assert.True(double.TryParse(mi, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var miValue));
+        Assert.InRange(miValue, 0d, 100d);
+
+        Assert.Equal("analyzable", GetLiteral(analysis.Triples, analyzerMethod.Id, CorePredicates.MetricCoverageStatus));
+        Assert.Equal("no_analyzable_body", GetLiteral(analysis.Triples, interfaceMethod.Id, CorePredicates.MetricCoverageStatus));
+        Assert.Equal("no_analyzable_body", GetLiteral(analysis.Triples, abstractMethod.Id, CorePredicates.MetricCoverageStatus));
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_EmitsTypeCboFacts_WithGenericAndWrapperNormalization()
+    {
+        var fixture = await MetricFixture.CreateAsync();
+        var analyzer = new ProjectStructureAnalyzer(new StableIdGenerator());
+        var analysis = await analyzer.AnalyzeAsync(fixture.RepositoryPath, CancellationToken.None);
+        var model = new ProjectStructureQueryService(analysis.Triples).GetModel(analysis.RepositoryId);
+
+        var consumerType = model.Declarations.Types.Single(x => x.Name == "CouplingSubject");
+
+        var declarationCbo = int.Parse(GetLiteral(analysis.Triples, consumerType.Id, CorePredicates.CboDeclaration), CultureInfo.InvariantCulture);
+        var methodBodyCbo = int.Parse(GetLiteral(analysis.Triples, consumerType.Id, CorePredicates.CboMethodBody), CultureInfo.InvariantCulture);
+        var totalCbo = int.Parse(GetLiteral(analysis.Triples, consumerType.Id, CorePredicates.CboTotal), CultureInfo.InvariantCulture);
+
+        Assert.Equal(3, declarationCbo);
+        Assert.Equal(3, methodBodyCbo);
+        Assert.Equal(4, totalCbo);
+    }
+
+    private static bool TryGetLiteral(
+        IReadOnlyList<SemanticTriple> triples,
+        EntityId subjectId,
+        PredicateId predicate,
+        out string value)
+    {
+        value = triples
+            .Where(x => x.Predicate == predicate)
+            .Where(x => x.Subject is EntityNode subject && subject.Id == subjectId)
+            .Select(x => x.Object as LiteralNode)
+            .Where(x => x is not null)
+            .Select(x => x!.Value?.ToString())
+            .FirstOrDefault() ?? string.Empty;
+
+        return !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static string GetLiteral(
+        IReadOnlyList<SemanticTriple> triples,
+        EntityId subjectId,
+        PredicateId predicate)
+    {
+        if (!TryGetLiteral(triples, subjectId, predicate, out var value))
+        {
+            throw new Xunit.Sdk.XunitException($"Expected literal for '{predicate.Value}' on '{subjectId.Value}'.");
+        }
+
+        return value;
+    }
+
+    private sealed class MetricFixture
+    {
+        private MetricFixture(string repositoryPath)
+        {
+            RepositoryPath = repositoryPath;
+        }
+
+        public string RepositoryPath { get; }
+
+        public static async Task<MetricFixture> CreateAsync()
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"codellmwiki-metrics-{Guid.NewGuid():N}", "metric-repo");
+            Directory.CreateDirectory(root);
+
+            await File.WriteAllTextAsync(Path.Combine(root, "Sample.slnx"),
+                """
+                <Solution>
+                  <Project Path="src/App/App.csproj" />
+                </Solution>
+                """);
+
+            var appDir = Path.Combine(root, "src", "App");
+            Directory.CreateDirectory(appDir);
+            await File.WriteAllTextAsync(Path.Combine(appDir, "App.csproj"),
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <AssemblyName>Acme.Metrics.App</AssemblyName>
+                  </PropertyGroup>
+                </Project>
+                """);
+
+            await File.WriteAllTextAsync(Path.Combine(appDir, "Metrics.cs"),
+                """
+                namespace Acme.Metrics;
+
+                public interface IRunner
+                {
+                    void Execute();
+                }
+
+                public abstract class BaseRunner
+                {
+                    public abstract void AbstractOp();
+                }
+
+                public class DependencyA { }
+                public class DependencyB { }
+
+                public class Consumer
+                {
+                    public int Analyze(int x)
+                    {
+                        if (x > 10 && x < 20)
+                        {
+                            return x;
+                        }
+
+                        for (var i = 0; i < 2; i++)
+                        {
+                            x += i;
+                        }
+
+                        return x;
+                    }
+                }
+
+                public class CouplingSubject
+                {
+                    private System.Collections.Generic.List<DependencyA> _values = new();
+
+                    public CouplingSubject(DependencyB dependency)
+                    {
+                        _ = dependency;
+                    }
+
+                    public int Compute()
+                    {
+                        var map = new System.Collections.Generic.Dictionary<DependencyA, DependencyB>();
+                        return map.Count;
+                    }
+                }
+                """);
+
+            RunGit(root, "init", "-b", "main");
+            RunGit(root, "config", "user.email", "test@example.com");
+            RunGit(root, "config", "user.name", "Test User");
+            RunGit(root, "add", ".");
+            RunGit(root, "commit", "-m", "initial");
+
+            return new MetricFixture(root);
+        }
+    }
+
+    private static void RunGit(string workingDirectory, params string[] args)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+
+        foreach (var arg in args)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        using var process = Process.Start(startInfo)!;
+        process.WaitForExit();
+
+        if (process.ExitCode != 0)
+        {
+            var stdOut = process.StandardOutput.ReadToEnd();
+            var stdErr = process.StandardError.ReadToEnd();
+            throw new InvalidOperationException($"git {string.Join(' ', args)} failed: {stdOut}\n{stdErr}");
+        }
+    }
+}
